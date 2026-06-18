@@ -123,10 +123,10 @@ export default function DashboardPage() {
   ];
 
   const kpis = [
-    { label: "Today's Sales", value: formatCurrency(todayRevenue), change: "+12%", up: true, icon: DollarSign, color: "text-success" },
-    { label: "Total Invoices", value: totalInvoices.toString(), change: "+3", up: true, icon: FileText, color: "text-primary" },
-    { label: "Outstanding", value: formatCurrency(outstanding), change: "-8%", up: false, icon: TrendingUp, color: "text-warning" },
-    { label: "Low Stock Items", value: lowStock.toString(), change: `${lowStock} items`, up: false, icon: AlertTriangle, color: "text-destructive" },
+    { label: "Today's Sales", raw: todayRevenue, format: formatCurrency, change: "+12%", up: true, icon: DollarSign, color: "text-success" },
+    { label: "Total Invoices", raw: totalInvoices, format: (n: number) => n.toString(), change: "+3", up: true, icon: FileText, color: "text-primary" },
+    { label: "Outstanding", raw: outstanding, format: formatCurrency, change: "-8%", up: false, icon: TrendingUp, color: "text-warning" },
+    { label: "Low Stock Items", raw: lowStock, format: (n: number) => n.toString(), change: `${lowStock} items`, up: false, icon: AlertTriangle, color: "text-destructive" },
   ];
 
   return (
@@ -148,7 +148,7 @@ export default function DashboardPage() {
                 {kpi.change}
               </span>
             </div>
-            <p className="text-2xl font-bold tracking-tight"><AnimatedCounter value={kpi.value} /></p>
+            <p className="text-2xl font-bold tracking-tight"><AnimatedCounter value={kpi.raw} format={kpi.format} /></p>
             <p className="text-xs text-muted-foreground mt-1">{kpi.label}</p>
           </div>
         ))}
