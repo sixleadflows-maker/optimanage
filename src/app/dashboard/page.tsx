@@ -8,6 +8,7 @@ import {
   DollarSign, FileText, AlertTriangle, TrendingUp,
   Clock, ArrowUpRight, ArrowDownRight,
 } from "lucide-react";
+import { AnimatedCounter } from "@/components/ui/AnimatedCounter";
 
 function MiniAreaChart({ data, height = 200 }: { data: { label: string; value: number }[]; height?: number }) {
   if (data.length === 0) return null;
@@ -147,7 +148,7 @@ export default function DashboardPage() {
                 {kpi.change}
               </span>
             </div>
-            <p className="text-2xl font-bold tracking-tight">{kpi.value}</p>
+            <p className="text-2xl font-bold tracking-tight"><AnimatedCounter value={kpi.value} /></p>
             <p className="text-xs text-muted-foreground mt-1">{kpi.label}</p>
           </div>
         ))}

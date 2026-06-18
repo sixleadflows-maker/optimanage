@@ -12,6 +12,7 @@ export interface Product {
   stock: number;
   barcode: string;
   lowStockThreshold: number;
+  image?: string;
 }
 
 export interface Customer {

@@ -87,8 +87,12 @@ export default function InventoryPage() {
             {filtered.map((product) => (
               <Link href={`/dashboard/inventory/${product.id}`} key={product.id}
                 className={`glass-card p-3 block hover:border-primary/30 transition-all ${product.stock <= product.lowStockThreshold ? "ring-1 ring-destructive/20" : ""}`}>
-                <div className="w-full aspect-square rounded-xl bg-gradient-to-br from-surface to-muted flex items-center justify-center mb-2">
-                  <span className="text-2xl opacity-40">{product.category === "Contact Lenses" ? "👁️" : product.category === "Sunglasses" ? "🕶️" : product.category === "Lens Stock" ? "🔍" : "👓"}</span>
+                <div className="w-full aspect-square rounded-xl bg-gradient-to-br from-surface to-muted flex items-center justify-center mb-2 overflow-hidden">
+                  {product.image ? (
+                    <img src={product.image} alt={product.name} className="w-full h-full object-cover" loading="lazy" />
+                  ) : (
+                    <span className="text-2xl opacity-40">{product.category === "Contact Lenses" ? "👁" : product.category === "Sunglasses" ? "🕶" : product.category === "Lens Stock" ? "🔍" : "👓"}</span>
+                  )}
                 </div>
                 <p className="text-xs font-medium truncate">{product.name}</p>
                 <p className="text-[10px] text-muted-foreground">{product.brand} · {product.model}</p>

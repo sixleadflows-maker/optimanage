@@ -9,7 +9,13 @@ const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"]
 
 export const metadata: Metadata = {
   title: "OptiManage - Optical Store Management",
-  description: "Modern optical store management system prototype",
+  description: "Modern optical store management system for Noor Optics — inventory, POS, prescriptions, lab orders & WhatsApp CRM",
+  icons: { icon: "/favicon.svg" },
+  openGraph: {
+    title: "OptiManage — Optical Store Management",
+    description: "All-in-one optical store management: inventory, POS, prescriptions, lab orders, WhatsApp CRM & analytics.",
+    type: "website",
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

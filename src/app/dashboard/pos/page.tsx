@@ -236,8 +236,12 @@ export default function POSPage() {
                   onClick={() => addToCart(product.id)}
                   className="glass-card p-3 text-left hover:border-primary/30 transition-all cursor-pointer group"
                 >
-                  <div className="w-full aspect-square rounded-xl bg-gradient-to-br from-surface to-muted flex items-center justify-center mb-2 group-hover:scale-[1.02] transition-transform">
-                    <span className="text-2xl opacity-40">👓</span>
+                  <div className="w-full aspect-square rounded-xl bg-gradient-to-br from-surface to-muted flex items-center justify-center mb-2 group-hover:scale-[1.02] transition-transform overflow-hidden">
+                    {product.image ? (
+                      <img src={product.image} alt={product.name} className="w-full h-full object-cover" loading="lazy" />
+                    ) : (
+                      <span className="text-2xl opacity-40">👓</span>
+                    )}
                   </div>
                   <p className="text-xs font-medium truncate">{product.name}</p>
                   <p className="text-[10px] text-muted-foreground">{product.brand}</p>
