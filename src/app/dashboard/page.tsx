@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useEffect, useRef, useState } from "react";
 import { sales, products } from "@/lib/mock";
 import { formatCurrency, formatDate } from "@/lib/utils/format";
 import { useApp } from "@/lib/context";
@@ -11,6 +11,23 @@ import {
 import { AnimatedCounter } from "@/components/ui/AnimatedCounter";
 
 function MiniAreaChart({ data, height = 200 }: { data: { label: string; value: number }[]; height?: number }) {
+  const lineRef = useRef<SVGPolylineElement>(null);
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    const el = lineRef.current;
+    if (!el) return;
+    const len = el.getTotalLength();
+    el.style.strokeDasharray = `${len}`;
+    el.style.strokeDashoffset = `${len}`;
+    requestAnimationFrame(() => {
+      el.style.transition = "stroke-dashoffset 1.5s ease-out";
+      el.style.strokeDashoffset = "0";
+    });
+    const t = setTimeout(() => setReady(true), 200);
+    return () => clearTimeout(t);
+  }, [data]);
+
   if (data.length === 0) return null;
   const max = Math.max(...data.map((d) => d.value));
   const w = 600;
@@ -35,13 +52,16 @@ function MiniAreaChart({ data, height = 200 }: { data: { label: string; value: n
         <line key={t} x1={pad} x2={w - pad} y1={h - pad - t * (h - pad * 2)} y2={h - pad - t * (h - pad * 2)}
           stroke="rgba(0,0,0,0.06)" strokeDasharray="4 4" />
       ))}
-      <polygon points={area} fill="url(#areaFill)" />
-      <polyline points={line} fill="none" stroke="#1f5d8c" strokeWidth={2.5} strokeLinejoin="round" />
+      <polygon points={area} fill="url(#areaFill)"
+        style={{ opacity: ready ? 1 : 0, transition: "opacity 0.8s ease-out 0.6s" }} />
+      <polyline ref={lineRef} points={line} fill="none" stroke="#1f5d8c" strokeWidth={2.5} strokeLinejoin="round" />
       {points.map((p, i) => (
-        <circle key={i} cx={p.x} cy={p.y} r={3} fill="#1f5d8c" />
+        <circle key={i} cx={p.x} cy={p.y} r={3} fill="#1f5d8c"
+          style={{ opacity: ready ? 1 : 0, transform: ready ? "scale(1)" : "scale(0)", transformOrigin: `${p.x}px ${p.y}px`, transition: `all 0.3s ease-out ${0.8 + i * 0.04}s` }} />
       ))}
       {data.map((d, i) => (
-        <text key={i} x={points[i].x} y={h - 8} textAnchor="middle" fontSize={9} fill="rgba(0,0,0,0.4)">
+        <text key={i} x={points[i].x} y={h - 8} textAnchor="middle" fontSize={9} fill="rgba(0,0,0,0.4)"
+          style={{ opacity: ready ? 1 : 0, transition: `opacity 0.3s ease-out ${0.5 + i * 0.03}s` }}>
           {d.label}
         </text>
       ))}
@@ -51,14 +71,17 @@ function MiniAreaChart({ data, height = 200 }: { data: { label: string; value: n
 
 function HBarChart({ data }: { data: { label: string; value: number }[] }) {
   const max = Math.max(...data.map((d) => d.value));
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { const t = setTimeout(() => setMounted(true), 100); return () => clearTimeout(t); }, []);
   return (
     <div className="space-y-2.5">
-      {data.map((d) => (
-        <div key={d.label} className="flex items-center gap-3">
+      {data.map((d, i) => (
+        <div key={d.label} className="flex items-center gap-3"
+          style={{ opacity: mounted ? 1 : 0, transform: mounted ? "translateX(0)" : "translateX(-12px)", transition: `all 0.4s ease-out ${i * 0.1}s` }}>
           <span className="text-[11px] text-muted-foreground w-20 text-right truncate">{d.label}</span>
           <div className="flex-1 h-5 bg-surface rounded-full overflow-hidden">
-            <div className="h-full bg-primary rounded-full transition-all duration-500"
-              style={{ width: `${(d.value / max) * 100}%` }} />
+            <div className="h-full bg-primary rounded-full"
+              style={{ width: mounted ? `${(d.value / max) * 100}%` : "0%", transition: `width 0.8s ease-out ${0.3 + i * 0.1}s` }} />
           </div>
           <span className="text-[11px] font-medium w-16 text-right">{formatCurrency(d.value)}</span>
         </div>
