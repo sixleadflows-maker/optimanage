@@ -13,6 +13,8 @@ export interface Product {
   barcode: string;
   lowStockThreshold: number;
   image?: string;
+  brandTag: "Original" | "Copy" | "Unbranded";
+  priceThreshold?: number;
 }
 
 export interface Customer {

@@ -28,4 +28,6 @@ export const PRODUCT_CATEGORIES = [
   "Lens Stock",
 ] as const;
 
+export const BRAND_TAGS = ["Original", "Copy", "Unbranded"] as const;
+
 export const LAB_ORDER_STATUSES = ["Ordered", "In Progress", "Received", "Fitted"] as const;

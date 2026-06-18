@@ -103,8 +103,8 @@ export default function InventoryPage() {
                   </span>
                 </div>
                 <div className="flex gap-1 mt-2 flex-wrap">
+                  <span className={`text-[9px] px-1.5 py-0.5 rounded-md font-medium ${product.brandTag === "Original" ? "bg-success/10 text-success" : product.brandTag === "Copy" ? "bg-warning/10 text-warning" : "bg-surface text-muted-foreground"}`}>{product.brandTag}</span>
                   <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-surface text-muted-foreground">{product.type}</span>
-                  <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-surface text-muted-foreground">{product.colour}</span>
                 </div>
               </Link>
             ))}
