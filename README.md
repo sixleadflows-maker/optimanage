@@ -1,36 +1,62 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# OptiManage — Optical Store Management System (Prototype)
 
-## Getting Started
+A high-fidelity, clickable prototype of an optical store management system built with Next.js. This is a **demo with mock data** — no backend, no database, no real authentication. Designed to pitch the concept and show how the final product will look and feel.
 
-First, run the development server:
+## What's Included
+
+- **15 fully designed screens** — Dashboard, POS, Sales, Inventory, Product Detail, Suppliers, Customers, Customer Profile, Prescriptions, Lab Orders, WhatsApp Center, Analytics, Settings, Expenses, and Login
+- **40 realistic products** across Frames, Sunglasses, Contact Lenses, and Lens Stock with real brand names
+- **15 customers** with prescriptions, purchase history, and contact details
+- **30 sales** over 60 days with line items, discounts, and payment tracking
+- **Interactive features** — POS cart with live math, search/filter on all lists, dark mode, branch switching, toast notifications
+
+## Tech Stack
+
+- Next.js (App Router) + TypeScript
+- Tailwind CSS with glassmorphism design (iOS 26 / Apple-inspired)
+- Recharts for analytics charts
+- Lucide React for icons
+- Zero external API dependencies
+
+## Run Locally
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000) — click "Enter Demo" to skip login.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Deploy to Vercel
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### Option A: GitHub + Vercel (Recommended)
 
-## Learn More
+1. Push this repo to GitHub
+2. Go to [vercel.com](https://vercel.com) → Add New → Project → Import repo
+3. Framework auto-detects as Next.js. Leave all defaults. Click Deploy.
+4. Get your live `https://your-project.vercel.app` URL
 
-To learn more about Next.js, take a look at the following resources:
+### Option B: Vercel CLI
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+npm i -g vercel
+vercel          # follow prompts
+vercel --prod   # deploy to production
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+No environment variables needed. Zero config deployment.
 
-## Deploy on Vercel
+## Customization
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Key constants to change for your pitch (all in `src/lib/constants.ts`):
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+| Constant | Default | What it controls |
+|----------|---------|-----------------|
+| `APP_NAME` | OptiManage | Product name in sidebar |
+| `SHOP_NAME` | Vision Plus Opticals | Demo shop name |
+| `CURRENCY` | ₹ | Currency symbol everywhere |
+| `PRIMARY_COLOR` | #1f5d8c | Brand accent color |
+
+## Important
+
+This is a **prototype with fake data**. No real login, no saved data, no working WhatsApp/printing/payments — those are visual stand-ins. Changes reset on page refresh.
