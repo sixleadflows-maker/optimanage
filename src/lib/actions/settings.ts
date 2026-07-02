@@ -20,6 +20,8 @@ export interface ShopProfileInput {
   address: string;
   receiptFooter: string;
   taxRate: number;
+  barcodeWidth: number;
+  barcodeHeight: number;
 }
 
 export async function updateShopSettings(input: ShopProfileInput) {

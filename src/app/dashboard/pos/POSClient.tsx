@@ -135,6 +135,22 @@ export function POSClient({ products, customers }: { products: Product[]; custom
     if (id) addToCart(id);
   };
 
+  // Barcode scanners type the code then send Enter — add exact matches straight to the cart.
+  const handleSearchKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== "Enter") return;
+    const q = search.trim();
+    if (!q) return;
+    let match = products.find((p) => p.barcode && p.barcode === q);
+    if (!match && filteredProducts.length === 1) match = filteredProducts[0];
+    if (match) {
+      addToCart(match.id);
+      setSearch("");
+      showToast(`Added ${match.name}`, "success");
+    } else {
+      showToast("No product matches that barcode", "error");
+    }
+  };
+
   const resetSale = () => {
     setShowReceipt(false);
     setCart([]);
@@ -346,6 +362,8 @@ export function POSClient({ products, customers }: { products: Product[]; custom
                 placeholder="Search by name, brand, model or scan barcode..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
+                onKeyDown={handleSearchKey}
+                autoFocus
                 className="w-full pl-10 pr-4 py-2.5 glass-input text-sm"
               />
             </div>

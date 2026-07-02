@@ -432,6 +432,50 @@ export async function getAnalyticsData(): Promise<AnalyticsData> {
   };
 }
 
+// ─── Daily Cash Collection ──────────────────────────────────
+export interface CashCollectionData {
+  date: string;
+  cashSales: number;
+  cardSales: number;
+  bankTransfer: number;
+  jazzCash: number;
+  totalCollection: number;
+  expenses: number;
+  invoiceCount: number;
+  saved: { openingCash: number; closingCash: number; notes: string; closedBy: string } | null;
+}
+
+function dayRange(dateStr: string) {
+  const start = new Date(`${dateStr}T00:00:00.000Z`);
+  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+  return { start, end };
+}
+
+export async function getCashCollection(dateStr: string, branchId?: string): Promise<CashCollectionData> {
+  const { start, end } = dayRange(dateStr);
+  const saleWhere = { date: { gte: start, lt: end }, ...(branchId ? { branchId } : {}) };
+  const [sales, expenses, saved] = await Promise.all([
+    db.sale.findMany({ where: saleWhere }),
+    db.expense.findMany({ where: { date: { gte: start, lt: end } } }),
+    db.cashCollection.findFirst({ where: { date: { gte: start, lt: end }, ...(branchId ? { branchId } : {}) } }),
+  ]);
+
+  const byMethod = (m: string) => sales.filter((s) => s.paymentMethod === m).reduce((sum, s) => sum + s.paid, 0);
+  const totalCollection = sales.reduce((sum, s) => sum + s.paid, 0);
+
+  return {
+    date: dateStr,
+    cashSales: byMethod("Cash"),
+    cardSales: byMethod("Card"),
+    bankTransfer: byMethod("Bank Transfer"),
+    jazzCash: byMethod("JazzCash"),
+    totalCollection,
+    expenses: expenses.reduce((sum, e) => sum + e.amount, 0),
+    invoiceCount: sales.length,
+    saved: saved ? { openingCash: saved.openingCash, closingCash: saved.closingCash, notes: saved.notes, closedBy: saved.closedBy } : null,
+  };
+}
+
 // ─── Dashboard aggregates ───────────────────────────────────
 export interface DashboardData {
   todayRevenue: number;

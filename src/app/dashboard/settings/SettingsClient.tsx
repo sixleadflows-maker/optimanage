@@ -21,6 +21,7 @@ export function SettingsClient({ settings, users, canManage }: { settings: Setti
     name: settings.name, phone: settings.phone, email: settings.email,
     ntn: settings.ntn, address: settings.address, receiptFooter: settings.receiptFooter,
     taxRate: settings.taxRate,
+    barcodeWidth: settings.barcodeWidth, barcodeHeight: settings.barcodeHeight,
   });
   const [saving, setSaving] = useState(false);
   const [pin, setPin] = useState("");
@@ -109,6 +110,14 @@ export function SettingsClient({ settings, users, canManage }: { settings: Setti
             <div className="sm:col-span-2">
               <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Receipt Footer</label>
               <input type="text" value={shop.receiptFooter} onChange={(e) => setShop({ ...shop, receiptFooter: e.target.value })} className="w-full px-4 py-2.5 glass-input text-sm" />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Barcode bar width (px)</label>
+              <input type="number" min={1} max={6} value={shop.barcodeWidth || ""} onChange={(e) => setShop({ ...shop, barcodeWidth: Number(e.target.value) })} className="w-full px-4 py-2.5 glass-input text-sm" />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Barcode height (px)</label>
+              <input type="number" min={20} max={120} value={shop.barcodeHeight || ""} onChange={(e) => setShop({ ...shop, barcodeHeight: Number(e.target.value) })} className="w-full px-4 py-2.5 glass-input text-sm" />
             </div>
           </div>
           <button onClick={saveShop} disabled={saving || !canManage}

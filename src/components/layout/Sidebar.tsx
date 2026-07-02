@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils/cn";
 import {
   LayoutDashboard, ShoppingCart, Receipt, Package, Users, UserCircle,
   Eye, FlaskConical, MessageCircle, BarChart3, Settings, X, Wallet,
-  Truck, Store,
+  Truck, Store, Banknote,
 } from "lucide-react";
 
 const navGroups = [
@@ -22,6 +22,7 @@ const navGroups = [
     items: [
       { href: "/dashboard/pos", label: "New Sale (POS)", icon: ShoppingCart },
       { href: "/dashboard/sales", label: "Sales & Invoices", icon: Receipt },
+      { href: "/dashboard/cash", label: "Cash Collection", icon: Banknote },
     ],
   },
   {

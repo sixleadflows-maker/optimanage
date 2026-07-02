@@ -16,7 +16,7 @@ const brandTagConfig = {
   Unbranded: { icon: ShieldOff, color: "bg-muted text-muted-foreground border-border", label: "Unbranded" },
 } as const;
 
-export function ProductForm({ product, isNew }: { product: Product | null; isNew: boolean }) {
+export function ProductForm({ product, isNew, barcodeWidth = 2, barcodeHeight = 40 }: { product: Product | null; isNew: boolean; barcodeWidth?: number; barcodeHeight?: number }) {
   const router = useRouter();
   const { showToast } = useApp();
   const [saving, setSaving] = useState(false);
@@ -283,7 +283,7 @@ export function ProductForm({ product, isNew }: { product: Product | null; isNew
               <div className="flex justify-center gap-[1px]">
                 {barcodeDisplay.split("").map((digit, i) => (
                   <div key={i} className="flex flex-col items-center">
-                    <div className="w-[2px] bg-black" style={{ height: `${40 + (parseInt(digit) % 3) * 8}px` }} />
+                    <div className="bg-black" style={{ width: `${barcodeWidth}px`, height: `${barcodeHeight + (parseInt(digit) % 3) * 8}px` }} />
                     <span className="text-[8px] text-black mt-1 font-mono">{digit}</span>
                   </div>
                 ))}
