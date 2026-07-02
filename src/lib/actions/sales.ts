@@ -19,6 +19,10 @@ export interface CreateSaleInput {
   advanceAmount: number;
   invoiceDiscount: number;
   branchId?: string;
+  // Prescription-job costs (reduce profit, not charged separately to customer)
+  lensProductId?: string;
+  labCharges?: number;
+  fittingCharges?: number;
 }
 
 function paymentStatusFor(type: "Full" | "Advance" | "Balance") {
@@ -57,7 +61,16 @@ export async function createSale(input: CreateSaleInput) {
   });
 
   const total = Math.max(0, subtotal - input.invoiceDiscount);
-  const totalCost = itemCost; // lens/lab/fitting charges reserved for later
+  const labCharges = Math.max(0, input.labCharges ?? 0);
+  const fittingCharges = Math.max(0, input.fittingCharges ?? 0);
+  // Lens cost: if the chosen lens is also a cart line item its cost is already in
+  // itemCost; if it isn't in the cart, add its cost so profit stays accurate.
+  let lensCost = 0;
+  if (input.lensProductId && !productMap.has(input.lensProductId)) {
+    const lens = await db.product.findUnique({ where: { id: input.lensProductId } });
+    if (lens) lensCost = lens.costPrice;
+  }
+  const totalCost = itemCost + lensCost + labCharges + fittingCharges;
   const profit = total - totalCost;
 
   const paymentStatus = paymentStatusFor(input.paymentType);
@@ -86,6 +99,10 @@ export async function createSale(input: CreateSaleInput) {
       balance,
       paymentMethod: input.paymentMethod,
       paymentStatus,
+      lensProductId: input.lensProductId || null,
+      lensCost,
+      labCharges,
+      fittingCharges,
       totalCost,
       profit,
       createdById: session.user.id,

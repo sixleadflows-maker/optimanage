@@ -10,6 +10,7 @@ import { useRouter } from "next/navigation";
 import {
   Search, Plus, Minus, Trash2, X, User, CreditCard,
   Banknote, Building2, Smartphone, Printer, MessageCircle, Receipt, Loader2,
+  Glasses, ChevronDown, ChevronUp, TrendingUp,
 } from "lucide-react";
 
 interface CartItem {
@@ -47,6 +48,15 @@ export function POSClient({ products, customers }: { products: Product[]; custom
   const [customerSearch, setCustomerSearch] = useState("");
   const [saving, setSaving] = useState(false);
   const [saleResult, setSaleResult] = useState<SaleResult | null>(null);
+  const [showJob, setShowJob] = useState(false);
+  const [lensProductId, setLensProductId] = useState("");
+  const [labCharges, setLabCharges] = useState(0);
+  const [fittingCharges, setFittingCharges] = useState(0);
+
+  const lensProducts = useMemo(
+    () => products.filter((p) => p.category === "Lens Stock" || p.category === "Contact Lenses"),
+    [products]
+  );
 
   const filteredProducts = useMemo(() => {
     if (!search) return products.slice(0, 12);
@@ -102,6 +112,20 @@ export function POSClient({ products, customers }: { products: Product[]; custom
   const total = subtotal - invoiceDiscount;
   const customer = customers.find((c) => c.id === selectedCustomer);
 
+  // Profitability: real cost = product costs + lab + fitting charges
+  const itemCost = cart.reduce((sum, i) => {
+    const p = products.find((pr) => pr.id === i.productId);
+    return sum + (p ? p.costPrice * i.quantity : 0);
+  }, 0);
+  const totalCost = itemCost + labCharges + fittingCharges;
+  const profit = total - totalCost;
+  const margin = total > 0 ? (profit / total) * 100 : 0;
+
+  const selectLens = (id: string) => {
+    setLensProductId(id);
+    if (id) addToCart(id);
+  };
+
   const resetSale = () => {
     setShowReceipt(false);
     setCart([]);
@@ -111,6 +135,10 @@ export function POSClient({ products, customers }: { products: Product[]; custom
     setPaymentType("Full");
     setPaymentMethod("Cash");
     setSaleResult(null);
+    setShowJob(false);
+    setLensProductId("");
+    setLabCharges(0);
+    setFittingCharges(0);
     router.refresh();
   };
 
@@ -129,6 +157,9 @@ export function POSClient({ products, customers }: { products: Product[]; custom
         paymentType,
         advanceAmount,
         invoiceDiscount,
+        lensProductId: lensProductId || undefined,
+        labCharges,
+        fittingCharges,
       });
       setSaleResult({
         invoiceNo: res.invoiceNo,
@@ -354,6 +385,42 @@ export function POSClient({ products, customers }: { products: Product[]; custom
             )}
           </div>
 
+          <div className="mb-3">
+            <button
+              onClick={() => setShowJob((v) => !v)}
+              className="w-full flex items-center justify-between px-3 py-2 rounded-xl bg-surface hover:bg-surface-hover text-xs font-medium transition-colors"
+            >
+              <span className="flex items-center gap-2"><Glasses className="w-3.5 h-3.5 text-primary" /> Prescription lens / job</span>
+              {showJob ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+            </button>
+            {showJob && (
+              <div className="mt-2 space-y-2 p-3 rounded-xl border border-border">
+                <div>
+                  <label className="text-[10px] font-medium text-muted-foreground mb-1 block">Lens (adds to order)</label>
+                  <select value={lensProductId} onChange={(e) => selectLens(e.target.value)} className="w-full px-3 py-2 glass-input text-xs">
+                    <option value="">No lens</option>
+                    {lensProducts.map((p) => (
+                      <option key={p.id} value={p.id}>{p.brand} {p.name} — {formatCurrency(p.salePrice)}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[10px] font-medium text-muted-foreground mb-1 block">Lab charges (cost)</label>
+                    <input type="number" value={labCharges || ""} onChange={(e) => setLabCharges(Number(e.target.value))}
+                      className="w-full px-3 py-2 glass-input text-xs" placeholder="0" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-medium text-muted-foreground mb-1 block">Fitting charges (cost)</label>
+                    <input type="number" value={fittingCharges || ""} onChange={(e) => setFittingCharges(Number(e.target.value))}
+                      className="w-full px-3 py-2 glass-input text-xs" placeholder="0" />
+                  </div>
+                </div>
+                <p className="text-[10px] text-muted-foreground">Lab &amp; fitting are shop costs — they reduce profit but aren&apos;t added to the customer&apos;s bill.</p>
+              </div>
+            )}
+          </div>
+
           {cart.length === 0 ? (
             <div className="flex-1 flex items-center justify-center py-12 text-muted-foreground">
               <p className="text-xs">Click products to add to cart</p>
@@ -413,6 +480,10 @@ export function POSClient({ products, customers }: { products: Product[]; custom
                 <div className="flex justify-between text-sm font-bold pt-2 border-t border-border">
                   <span>Total</span>
                   <span className="text-primary">{formatCurrency(total)}</span>
+                </div>
+                <div className={`flex items-center justify-between text-[11px] mt-1 px-2 py-1.5 rounded-lg ${profit < 0 ? "bg-destructive/10 text-destructive" : "bg-success/10 text-success"}`}>
+                  <span className="flex items-center gap-1"><TrendingUp className="w-3 h-3" /> Profit (cost {formatCurrency(totalCost)})</span>
+                  <span className="font-semibold">{formatCurrency(profit)} · {margin.toFixed(0)}%</span>
                 </div>
               </div>
 
