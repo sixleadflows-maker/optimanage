@@ -1,0 +1,340 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Auth & Users ───────────────────────────────────────────
+
+model User {
+  id             String   @id @default(cuid())
+  name           String
+  email          String   @unique
+  hashedPassword String
+  role           Role     @default(CASHIER)
+  avatar         String   @default("")
+  active         Boolean  @default(true)
+  branchId       String?
+  branch         Branch?  @relation(fields: [branchId], references: [id])
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  salesCreated   Sale[]   @relation("SaleCreatedBy")
+  salesReceived  Sale[]   @relation("SaleReceivedBy")
+}
+
+enum Role {
+  OWNER
+  MANAGER
+  CASHIER
+}
+
+// ─── Branches ───────────────────────────────────────────────
+
+model Branch {
+  id        String   @id @default(cuid())
+  name      String
+  address   String   @default("")
+  phone     String   @default("")
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  users     User[]
+  sales     Sale[]
+  cashCollections CashCollection[]
+}
+
+// ─── Customers ──────────────────────────────────────────────
+
+model Customer {
+  id            String         @id @default(cuid())
+  name          String
+  phone         String         @unique
+  email         String         @default("")
+  address       String         @default("")
+  totalSpend    Float          @default(0)
+  visitCount    Int            @default(0)
+  lastVisit     DateTime?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  prescriptions Prescription[]
+  sales         Sale[]
+  labOrders     LabOrder[]
+}
+
+// ─── Prescriptions ──────────────────────────────────────────
+
+model Prescription {
+  id         String   @id @default(cuid())
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  saleId     String?
+  sale       Sale?    @relation(fields: [saleId], references: [id])
+  date       DateTime @default(now())
+
+  rightSph   Float    @default(0)
+  rightCyl   Float    @default(0)
+  rightAxis  Int      @default(0)
+  rightPd    Float    @default(0)
+  rightAdd   Float    @default(0)
+
+  leftSph    Float    @default(0)
+  leftCyl    Float    @default(0)
+  leftAxis   Int      @default(0)
+  leftPd     Float    @default(0)
+  leftAdd    Float    @default(0)
+
+  notes      String   @default("")
+  createdAt  DateTime @default(now())
+}
+
+// ─── Products ───────────────────────────────────────────────
+
+model Product {
+  id                String       @id @default(cuid())
+  name              String
+  brand             String
+  model             String       @default("")
+  category          String
+  type              String       @default("")
+  colour            String       @default("")
+  size              String       @default("")
+  costPrice         Float        @default(0)
+  salePrice         Float        @default(0)
+  stock             Int          @default(0)
+  barcode           String       @default("")
+  lowStockThreshold Int          @default(5)
+  brandTag          BrandTag     @default(UNBRANDED)
+  priceThreshold    Float        @default(0)
+  image             String       @default("")
+  active            Boolean      @default(true)
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  saleItems         SaleItem[]
+  purchaseItems     PurchaseOrderItem[]
+  salesAsLens       Sale[]       @relation("LensProduct")
+
+  @@index([barcode])
+  @@index([brand])
+  @@index([category])
+}
+
+enum BrandTag {
+  ORIGINAL
+  COPY
+  UNBRANDED
+}
+
+// ─── Sales & Orders (with Profitability Tracking) ───────────
+
+model Sale {
+  id              String        @id @default(cuid())
+  invoiceNo       String        @unique
+  date            DateTime      @default(now())
+  customerId      String?
+  customer        Customer?     @relation(fields: [customerId], references: [id])
+  branchId        String?
+  branch          Branch?       @relation(fields: [branchId], references: [id])
+
+  items           SaleItem[]
+  subtotal        Float         @default(0)
+  discount        Float         @default(0)
+  tax             Float         @default(0)
+  total           Float         @default(0)
+  paid            Float         @default(0)
+  balance         Float         @default(0)
+
+  paymentMethod   String        @default("Cash")
+  paymentStatus   PaymentStatus @default(PAID)
+
+  // Profitability tracking
+  lensProductId   String?
+  lensProduct     Product?      @relation("LensProduct", fields: [lensProductId], references: [id])
+  lensCost        Float         @default(0)
+  labCharges      Float         @default(0)
+  fittingCharges  Float         @default(0)
+  totalCost       Float         @default(0)
+  profit          Float         @default(0)
+
+  // Staff tracking
+  createdById     String?
+  createdBy       User?         @relation("SaleCreatedBy", fields: [createdById], references: [id])
+  receivedById    String?
+  receivedBy      User?         @relation("SaleReceivedBy", fields: [receivedById], references: [id])
+
+  prescriptions   Prescription[]
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([date])
+  @@index([customerId])
+  @@index([invoiceNo])
+}
+
+model SaleItem {
+  id          String  @id @default(cuid())
+  saleId      String
+  sale        Sale    @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  productId   String
+  product     Product @relation(fields: [productId], references: [id])
+  productName String
+  quantity    Int     @default(1)
+  unitPrice   Float   @default(0)
+  discount    Float   @default(0)
+  total       Float   @default(0)
+}
+
+enum PaymentStatus {
+  PAID
+  ADVANCE
+  BALANCE
+}
+
+// ─── Suppliers & Purchase Orders ────────────────────────────
+
+model Supplier {
+  id        String          @id @default(cuid())
+  name      String
+  contact   String          @default("")
+  phone     String          @default("")
+  email     String          @default("")
+  address   String          @default("")
+  ntn       String          @default("")
+  active    Boolean         @default(true)
+  createdAt DateTime        @default(now())
+
+  orders    PurchaseOrder[]
+}
+
+model PurchaseOrder {
+  id           String              @id @default(cuid())
+  poNumber     String              @unique
+  supplierId   String
+  supplier     Supplier            @relation(fields: [supplierId], references: [id])
+  date         DateTime            @default(now())
+  total        Float               @default(0)
+  status       POStatus            @default(DRAFT)
+  createdAt    DateTime            @default(now())
+
+  items        PurchaseOrderItem[]
+}
+
+model PurchaseOrderItem {
+  id          String        @id @default(cuid())
+  orderId     String
+  order       PurchaseOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId   String
+  product     Product       @relation(fields: [productId], references: [id])
+  productName String
+  quantity    Int           @default(0)
+  unitCost    Float         @default(0)
+  total       Float         @default(0)
+  received    Int           @default(0)
+}
+
+enum POStatus {
+  DRAFT
+  ORDERED
+  PARTIAL
+  RECEIVED
+}
+
+// ─── Lab Orders ─────────────────────────────────────────────
+
+model LabOrder {
+  id           String         @id @default(cuid())
+  orderNo      String         @unique
+  customerId   String
+  customer     Customer       @relation(fields: [customerId], references: [id])
+  lab          String
+  lensType     String         @default("")
+  prescription String         @default("")
+  price        Float          @default(0)
+  status       LabOrderStatus @default(ORDERED)
+  orderedDate  DateTime       @default(now())
+  expectedDate DateTime?
+  notes        String         @default("")
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+}
+
+enum LabOrderStatus {
+  ORDERED
+  IN_PROGRESS
+  RECEIVED
+  FITTED
+}
+
+// ─── Expenses ───────────────────────────────────────────────
+
+model Expense {
+  id          String   @id @default(cuid())
+  date        DateTime @default(now())
+  category    String
+  description String   @default("")
+  amount      Float    @default(0)
+  paidBy      String   @default("")
+  createdAt   DateTime @default(now())
+}
+
+// ─── Daily Cash Collection ──────────────────────────────────
+
+model CashCollection {
+  id            String   @id @default(cuid())
+  date          DateTime @default(now())
+  branchId      String?
+  branch        Branch?  @relation(fields: [branchId], references: [id])
+  openingCash   Float    @default(0)
+  cashSales     Float    @default(0)
+  cardSales     Float    @default(0)
+  bankTransfer  Float    @default(0)
+  jazzCash      Float    @default(0)
+  totalCollection Float  @default(0)
+  expenses      Float    @default(0)
+  closingCash   Float    @default(0)
+  notes         String   @default("")
+  closedBy      String   @default("")
+  createdAt     DateTime @default(now())
+
+  @@unique([date, branchId])
+}
+
+// ─── WhatsApp Messages ──────────────────────────────────────
+
+model WhatsAppMessage {
+  id           String        @id @default(cuid())
+  to           String
+  customerName String
+  template     String        @default("")
+  message      String
+  sentAt       DateTime      @default(now())
+  status       MessageStatus @default(SENT)
+}
+
+enum MessageStatus {
+  SENT
+  DELIVERED
+  READ
+  FAILED
+}
+
+// ─── Shop Settings ──────────────────────────────────────────
+
+model ShopSettings {
+  id            String  @id @default("default")
+  name          String  @default("Noor Optics")
+  address       String  @default("")
+  phone         String  @default("")
+  email         String  @default("")
+  ntn           String  @default("")
+  taxRate       Float   @default(0)
+  receiptFooter String  @default("")
+  analyticsPin  String  @default("")
+  barcodeWidth  Int     @default(2)
+  barcodeHeight Int     @default(40)
+}

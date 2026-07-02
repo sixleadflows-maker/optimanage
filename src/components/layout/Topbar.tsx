@@ -2,12 +2,25 @@
 
 import { useApp } from "@/lib/context";
 import { BRANCHES, SHOP_NAME } from "@/lib/constants";
-import { Menu, Search, Moon, Sun, Wifi, WifiOff, ChevronDown } from "lucide-react";
+import { logout } from "@/lib/actions/auth";
+import { Menu, Search, Moon, Sun, Wifi, WifiOff, ChevronDown, LogOut } from "lucide-react";
 import { useState } from "react";
 
-export function Topbar() {
+interface TopbarUser {
+  name: string;
+  email: string;
+  role: string;
+  image?: string;
+}
+
+function initials(name: string) {
+  return name.split(" ").map((n) => n[0]).slice(0, 2).join("").toUpperCase();
+}
+
+export function Topbar({ user }: { user: TopbarUser }) {
   const { activeBranch, setActiveBranch, darkMode, toggleDarkMode, isOnline, toggleOnline, setSidebarOpen } = useApp();
   const [branchOpen, setBranchOpen] = useState(false);
+  const [userOpen, setUserOpen] = useState(false);
   const currentBranch = BRANCHES.find((b) => b.id === activeBranch);
 
   return (
@@ -75,8 +88,8 @@ export function Topbar() {
           <span className="hidden sm:inline">{isOnline ? "Online" : "Offline"}</span>
         </button>
 
-        <span className="hidden sm:inline-flex px-2.5 py-1 rounded-full bg-primary/10 text-primary text-[10px] font-semibold tracking-wide">
-          DEMO
+        <span className="hidden sm:inline-flex px-2.5 py-1 rounded-full bg-primary/10 text-primary text-[10px] font-semibold tracking-wide capitalize">
+          {user.role.toLowerCase()}
         </span>
 
         <button
@@ -86,8 +99,31 @@ export function Topbar() {
           {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
         </button>
 
-        <div className="w-8 h-8 rounded-full bg-primary text-white flex items-center justify-center text-xs font-semibold cursor-pointer">
-          AK
+        <div className="relative">
+          <button
+            onClick={() => setUserOpen(!userOpen)}
+            className="w-8 h-8 rounded-full bg-primary text-white flex items-center justify-center text-xs font-semibold cursor-pointer"
+          >
+            {initials(user.name)}
+          </button>
+          {userOpen && (
+            <>
+              <div className="fixed inset-0 z-10" onClick={() => setUserOpen(false)} />
+              <div className="absolute top-full right-0 mt-2 w-56 glass rounded-xl p-1.5 z-20 animate-fade-in">
+                <div className="px-3 py-2 border-b border-border mb-1">
+                  <p className="text-sm font-semibold truncate">{user.name}</p>
+                  <p className="text-xs text-muted-foreground truncate">{user.email}</p>
+                </div>
+                <button
+                  onClick={() => logout()}
+                  className="w-full text-left px-3 py-2 rounded-lg text-sm transition-colors hover:bg-surface-hover flex items-center gap-2 text-red-500"
+                >
+                  <LogOut className="w-4 h-4" />
+                  Sign out
+                </button>
+              </div>
+            </>
+          )}
         </div>
       </div>
     </header>

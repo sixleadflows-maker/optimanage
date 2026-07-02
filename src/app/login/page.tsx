@@ -2,15 +2,29 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Store, Eye, EyeOff } from "lucide-react";
+import { signIn } from "next-auth/react";
+import { Store, Eye, EyeOff, Loader2 } from "lucide-react";
 
 export default function LoginPage() {
   const router = useRouter();
   const [showPassword, setShowPassword] = useState(false);
+  const [email, setEmail] = useState("asif@nooroptics.pk");
+  const [password, setPassword] = useState("owner123");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError("");
+    setLoading(true);
+    const res = await signIn("credentials", { email, password, redirect: false });
+    setLoading(false);
+    if (res?.error) {
+      setError("Invalid email or password.");
+      return;
+    }
     router.push("/dashboard");
+    router.refresh();
   };
 
   return (
@@ -58,7 +72,9 @@ export default function LoginPage() {
               <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Email</label>
               <input
                 type="email"
-                defaultValue="asif@nooroptics.pk"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
                 className="w-full px-4 py-2.5 glass-input text-sm"
               />
             </div>
@@ -67,7 +83,9 @@ export default function LoginPage() {
               <div className="relative">
                 <input
                   type={showPassword ? "text" : "password"}
-                  defaultValue="demo1234"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
                   className="w-full px-4 py-2.5 glass-input text-sm pr-10"
                 />
                 <button
@@ -79,28 +97,21 @@ export default function LoginPage() {
                 </button>
               </div>
             </div>
+            {error && (
+              <p className="text-xs text-red-500 bg-red-500/10 rounded-lg px-3 py-2">{error}</p>
+            )}
             <button
               type="submit"
-              className="w-full py-2.5 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-primary-hover transition-colors"
+              disabled={loading}
+              className="w-full py-2.5 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-primary-hover transition-colors disabled:opacity-60 flex items-center justify-center gap-2"
             >
-              Sign In
+              {loading && <Loader2 className="w-4 h-4 animate-spin" />}
+              {loading ? "Signing in…" : "Sign In"}
             </button>
           </form>
 
-          <div className="relative my-6">
-            <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-border" /></div>
-            <div className="relative flex justify-center"><span className="bg-background px-3 text-xs text-muted-foreground">or</span></div>
-          </div>
-
-          <button
-            onClick={() => router.push("/dashboard")}
-            className="w-full py-2.5 glass-card text-sm font-medium hover:shadow-md transition-all cursor-pointer text-center"
-          >
-            Enter Demo →
-          </button>
-
           <p className="text-center text-[11px] text-muted-foreground mt-6">
-            This is a prototype with mock data. No real authentication.
+            Owner: asif@nooroptics.pk · Manager: rabia@nooroptics.pk · Cashier: waqar@nooroptics.pk
           </p>
         </div>
       </div>
