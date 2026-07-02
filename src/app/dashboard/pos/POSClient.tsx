@@ -34,6 +34,12 @@ interface SaleResult {
   date: string;
 }
 
+const EMPTY_RX = {
+  rightSph: "", rightCyl: "", rightAxis: "", rightPd: "", rightAdd: "",
+  leftSph: "", leftCyl: "", leftAxis: "", leftPd: "", leftAdd: "",
+  notes: "",
+};
+
 export function POSClient({ products, customers }: { products: Product[]; customers: POSCustomer[] }) {
   const { showToast } = useApp();
   const router = useRouter();
@@ -52,6 +58,9 @@ export function POSClient({ products, customers }: { products: Product[]; custom
   const [lensProductId, setLensProductId] = useState("");
   const [labCharges, setLabCharges] = useState(0);
   const [fittingCharges, setFittingCharges] = useState(0);
+
+  const [recordRx, setRecordRx] = useState(false);
+  const [rx, setRx] = useState({ ...EMPTY_RX });
 
   const lensProducts = useMemo(
     () => products.filter((p) => p.category === "Lens Stock" || p.category === "Contact Lenses"),
@@ -139,13 +148,21 @@ export function POSClient({ products, customers }: { products: Product[]; custom
     setLensProductId("");
     setLabCharges(0);
     setFittingCharges(0);
+    setRecordRx(false);
+    setRx({ ...EMPTY_RX });
     router.refresh();
   };
+
+  const num = (v: string) => (v === "" ? 0 : Number(v));
 
   const completeSale = async () => {
     if (cart.length === 0) return;
     if (paymentType === "Advance" && advanceAmount <= 0) {
       showToast("Enter the advance amount received", "error");
+      return;
+    }
+    if (recordRx && !selectedCustomer) {
+      showToast("Select a customer to save the prescription", "error");
       return;
     }
     setSaving(true);
@@ -160,6 +177,11 @@ export function POSClient({ products, customers }: { products: Product[]; custom
         lensProductId: lensProductId || undefined,
         labCharges,
         fittingCharges,
+        prescription: recordRx ? {
+          rightSph: num(rx.rightSph), rightCyl: num(rx.rightCyl), rightAxis: num(rx.rightAxis), rightPd: num(rx.rightPd), rightAdd: num(rx.rightAdd),
+          leftSph: num(rx.leftSph), leftCyl: num(rx.leftCyl), leftAxis: num(rx.leftAxis), leftPd: num(rx.leftPd), leftAdd: num(rx.leftAdd),
+          notes: rx.notes,
+        } : undefined,
       });
       setSaleResult({
         invoiceNo: res.invoiceNo,
@@ -200,6 +222,13 @@ export function POSClient({ products, customers }: { products: Product[]; custom
               <p className="text-[10px]">Date: {saleResult.date}</p>
               <p className="text-[10px]">Served by: {saleResult.servedBy}</p>
               {customer && <p className="text-[10px]">Customer: {customer.name}</p>}
+              {recordRx && (
+                <div className="text-[10px] mt-1 pt-1 border-t border-dashed border-gray-400">
+                  <p className="font-medium">Prescription</p>
+                  <p>OD: SPH {rx.rightSph || 0} CYL {rx.rightCyl || 0} AXIS {rx.rightAxis || 0} PD {rx.rightPd || 0} ADD {rx.rightAdd || 0}</p>
+                  <p>OS: SPH {rx.leftSph || 0} CYL {rx.leftCyl || 0} AXIS {rx.leftAxis || 0} PD {rx.leftPd || 0} ADD {rx.leftAdd || 0}</p>
+                </div>
+              )}
               <div className="border-t border-dashed border-gray-400 mt-2 pt-2">
                 {cart.map((item) => (
                   <div key={item.productId} className="mb-1">
@@ -417,6 +446,37 @@ export function POSClient({ products, customers }: { products: Product[]; custom
                   </div>
                 </div>
                 <p className="text-[10px] text-muted-foreground">Lab &amp; fitting are shop costs — they reduce profit but aren&apos;t added to the customer&apos;s bill.</p>
+
+                <label className="flex items-center gap-2 text-xs font-medium pt-2 border-t border-border cursor-pointer">
+                  <input type="checkbox" checked={recordRx} onChange={(e) => setRecordRx(e.target.checked)} className="rounded" />
+                  Record prescription (Rx)
+                </label>
+                {recordRx && (
+                  <div className="space-y-2">
+                    {(["Right Eye (OD)", "Left Eye (OS)"] as const).map((eye) => {
+                      const prefix = eye.includes("Right") ? "right" : "left";
+                      return (
+                        <div key={eye}>
+                          <p className="text-[10px] font-medium text-muted-foreground mb-1">{eye}</p>
+                          <div className="grid grid-cols-5 gap-1">
+                            {(["Sph", "Cyl", "Axis", "Pd", "Add"] as const).map((f) => (
+                              <div key={f}>
+                                <label className="text-[9px] text-muted-foreground block text-center mb-0.5">{f.toUpperCase()}</label>
+                                <input type="number" step="0.25" placeholder="0"
+                                  value={rx[`${prefix}${f}` as keyof typeof rx]}
+                                  onChange={(e) => setRx((p) => ({ ...p, [`${prefix}${f}`]: e.target.value }))}
+                                  className="w-full px-1 py-1 glass-input text-[10px] text-center" />
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                    <input type="text" value={rx.notes} onChange={(e) => setRx((p) => ({ ...p, notes: e.target.value }))}
+                      className="w-full px-3 py-1.5 glass-input text-[10px]" placeholder="Rx notes (optional)..." />
+                    {!selectedCustomer && <p className="text-[10px] text-warning">Select a customer above to save the prescription.</p>}
+                  </div>
+                )}
               </div>
             )}
           </div>

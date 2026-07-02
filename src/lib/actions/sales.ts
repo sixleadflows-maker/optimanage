@@ -11,6 +11,12 @@ export interface CartItemInput {
   discount: number;
 }
 
+export interface SalePrescriptionInput {
+  rightSph: number; rightCyl: number; rightAxis: number; rightPd: number; rightAdd: number;
+  leftSph: number; leftCyl: number; leftAxis: number; leftPd: number; leftAdd: number;
+  notes: string;
+}
+
 export interface CreateSaleInput {
   items: CartItemInput[];
   customerId?: string;
@@ -23,6 +29,8 @@ export interface CreateSaleInput {
   lensProductId?: string;
   labCharges?: number;
   fittingCharges?: number;
+  // Optional prescription captured during the sale (needs customerId)
+  prescription?: SalePrescriptionInput;
 }
 
 function paymentStatusFor(type: "Full" | "Advance" | "Balance") {
@@ -132,10 +140,25 @@ export async function createSale(input: CreateSaleInput) {
     });
   }
 
+  // Optional prescription captured during the sale (linked to customer + sale)
+  if (input.prescription && input.customerId) {
+    const p = input.prescription;
+    await db.prescription.create({
+      data: {
+        customerId: input.customerId,
+        saleId: sale.id,
+        rightSph: p.rightSph, rightCyl: p.rightCyl, rightAxis: p.rightAxis, rightPd: p.rightPd, rightAdd: p.rightAdd,
+        leftSph: p.leftSph, leftCyl: p.leftCyl, leftAxis: p.leftAxis, leftPd: p.leftPd, leftAdd: p.leftAdd,
+        notes: p.notes,
+      },
+    });
+  }
+
   revalidatePath("/dashboard");
   revalidatePath("/dashboard/sales");
   revalidatePath("/dashboard/inventory");
   revalidatePath("/dashboard/customers");
+  revalidatePath("/dashboard/prescriptions");
 
   return {
     ok: true,
