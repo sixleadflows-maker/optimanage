@@ -231,6 +231,35 @@ h1, h2, h3 {
   to { opacity: 1; transform: translateY(0); }
 }
 
+/* ── Skeleton shimmer ────────────────────────────────────── */
+@keyframes shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+
+.skeleton {
+  border-radius: 8px;
+  background: linear-gradient(
+    100deg,
+    rgba(23, 20, 60, 0.05) 40%,
+    rgba(23, 20, 60, 0.1) 50%,
+    rgba(23, 20, 60, 0.05) 60%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.6s linear infinite;
+}
+
+.dark .skeleton {
+  background: linear-gradient(
+    100deg,
+    rgba(255, 255, 255, 0.05) 40%,
+    rgba(255, 255, 255, 0.1) 50%,
+    rgba(255, 255, 255, 0.05) 60%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.6s linear infinite;
+}
+
 .receipt-paper {
   background: #fff;
   color: #000;

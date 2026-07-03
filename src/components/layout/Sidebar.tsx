@@ -61,7 +61,16 @@ const navGroups = [
   },
 ];
 
-export function Sidebar() {
+interface SidebarUser {
+  name: string;
+  role: string;
+}
+
+function initials(name: string) {
+  return name.split(" ").map((n) => n[0]).slice(0, 2).join("").toUpperCase();
+}
+
+export function Sidebar({ user }: { user: SidebarUser }) {
   const pathname = usePathname();
   const { sidebarOpen, setSidebarOpen } = useApp();
 
@@ -80,10 +89,10 @@ export function Sidebar() {
         )}
       >
         <div className="flex items-center gap-3 px-5 py-5 border-b border-border">
-          <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#6d5ef0] to-[#14b8a6] flex items-center justify-center shadow-lg shadow-[#6d5ef0]/25">
             <Store className="w-4 h-4 text-white" />
           </div>
-          <span className="font-semibold text-[15px] tracking-tight">OptiManage</span>
+          <span className="font-semibold text-[15px] tracking-tight font-display">OptiManage</span>
           <button
             onClick={() => setSidebarOpen(false)}
             className="ml-auto lg:hidden p-1 rounded-lg hover:bg-surface-hover"
@@ -111,7 +120,7 @@ export function Sidebar() {
                     className={cn(
                       "flex items-center gap-3 px-3 py-2 rounded-xl text-[13px] font-medium transition-all duration-150",
                       isActive
-                        ? "bg-primary text-white shadow-sm"
+                        ? "bg-gradient-to-r from-[#6d5ef0] to-[#7c6bfa] text-white shadow-md shadow-[#6d5ef0]/25"
                         : "text-muted-foreground hover:text-foreground hover:bg-surface-hover"
                     )}
                   >
@@ -125,13 +134,13 @@ export function Sidebar() {
         </nav>
 
         <div className="p-4 border-t border-border">
-          <div className="flex items-center gap-2.5 px-2">
-            <div className="w-7 h-7 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-semibold">
-              AM
+          <div className="flex items-center gap-2.5 px-2 py-1.5 rounded-xl bg-surface/60">
+            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#6d5ef0] to-[#14b8a6] text-white flex items-center justify-center text-xs font-semibold shadow-sm">
+              {initials(user.name)}
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-xs font-medium truncate">Dr. Asif Mahmood</p>
-              <p className="text-[10px] text-muted-foreground">Owner</p>
+              <p className="text-xs font-medium truncate">{user.name}</p>
+              <p className="text-[10px] text-muted-foreground capitalize">{user.role.toLowerCase()}</p>
             </div>
           </div>
         </div>

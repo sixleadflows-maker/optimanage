@@ -6,6 +6,7 @@ import { formatCurrency } from "@/lib/utils/format";
 import { PRODUCT_CATEGORIES } from "@/lib/constants";
 import { Search, Grid3X3, List, Plus, AlertTriangle } from "lucide-react";
 import Link from "next/link";
+import { EmptyState } from "@/components/ui/EmptyState";
 
 export function InventoryClient({ products }: { products: Product[] }) {
   const [search, setSearch] = useState("");
@@ -83,7 +84,7 @@ export function InventoryClient({ products }: { products: Product[] }) {
         </div>
 
         {filtered.length === 0 ? (
-          <div className="text-center py-16 text-muted-foreground text-sm">No products match your search.</div>
+          <EmptyState title="No frames match" hint="Try another name, brand, or barcode — or add it as a new product." />
         ) : viewMode === "grid" ? (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
             {filtered.map((product) => (

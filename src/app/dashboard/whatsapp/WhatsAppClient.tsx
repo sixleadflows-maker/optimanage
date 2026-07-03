@@ -5,6 +5,7 @@ import type { WhatsAppMessageView } from "@/lib/data";
 import { formatDateTime } from "@/lib/utils/format";
 import { useApp } from "@/lib/context";
 import { MessageCircle, Send, CheckCheck, Check, AlertCircle } from "lucide-react";
+import { EmptyState } from "@/components/ui/EmptyState";
 
 const TEMPLATES = [
   { id: "t1", name: "Order Ready", message: "Hello {name}, your order at Noor Optics is ready for pickup. See you soon!" },
@@ -64,7 +65,7 @@ export function WhatsAppClient({ messages }: { messages: WhatsAppMessageView[] }
       {activeTab === "log" && (
         <div className="glass-card p-4">
           {messages.length === 0 ? (
-            <p className="text-sm text-muted-foreground text-center py-12">No messages sent yet. Use the customer profile or POS to message customers on WhatsApp.</p>
+            <EmptyState icon={MessageCircle} title="No messages sent yet" hint="Message customers from their profile or the POS receipt — the log will build up here." />
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">

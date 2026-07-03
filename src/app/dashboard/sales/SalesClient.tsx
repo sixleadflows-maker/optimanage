@@ -3,8 +3,9 @@
 import { useState, useMemo } from "react";
 import type { SaleView } from "@/lib/data";
 import { formatCurrency, formatDate } from "@/lib/utils/format";
-import { Search, Download } from "lucide-react";
+import { Search, Download, Receipt } from "lucide-react";
 import { useApp } from "@/lib/context";
+import { EmptyState } from "@/components/ui/EmptyState";
 
 export function SalesClient({ sales }: { sales: SaleView[] }) {
   const [search, setSearch] = useState("");
@@ -114,7 +115,9 @@ export function SalesClient({ sales }: { sales: SaleView[] }) {
             </thead>
             <tbody>
               {filtered.length === 0 && (
-                <tr><td colSpan={9} className="text-center py-12 text-muted-foreground text-sm">No sales recorded yet — create one from the POS.</td></tr>
+                <tr><td colSpan={9}>
+                  <EmptyState icon={Receipt} title="No invoices yet" hint="Sales you ring up in the POS will appear here with payment status and profit." />
+                </td></tr>
               )}
               {filtered.map((sale) => (
                 <tr key={sale.id} className="border-b border-border hover:bg-surface-hover/50 transition-colors">

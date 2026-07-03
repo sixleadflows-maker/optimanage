@@ -8,6 +8,7 @@ import { useApp } from "@/lib/context";
 import { createCustomer } from "@/lib/actions/customers";
 import { Search, Users, Plus, X, Loader2 } from "lucide-react";
 import Link from "next/link";
+import { EmptyState } from "@/components/ui/EmptyState";
 
 export function CustomersClient({ customers }: { customers: CustomerView[] }) {
   const router = useRouter();
@@ -83,8 +84,8 @@ export function CustomersClient({ customers }: { customers: CustomerView[] }) {
             </thead>
             <tbody>
               {filtered.length === 0 && (
-                <tr><td colSpan={7} className="text-center py-12 text-muted-foreground text-sm">
-                  <Users className="w-6 h-6 mx-auto mb-2 opacity-40" /> No customers found
+                <tr><td colSpan={7}>
+                  <EmptyState icon={Users} title="No customers found" hint="Try a different name or phone number, or add the customer to start their history." />
                 </td></tr>
               )}
               {filtered.map((c) => (

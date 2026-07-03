@@ -8,6 +8,7 @@ import { useApp } from "@/lib/context";
 import { LAB_ORDER_STATUSES } from "@/lib/constants";
 import { createLabOrder, advanceLabStatus } from "@/lib/actions/lab-orders";
 import { FlaskConical, ArrowRight, Plus, X, Loader2 } from "lucide-react";
+import { EmptyState } from "@/components/ui/EmptyState";
 
 const statusColors: Record<string, string> = {
   "Ordered": "bg-blue-500/10 text-blue-600 border-blue-200",
@@ -146,7 +147,9 @@ export function LabOrdersClient({ labOrders, customers }: { labOrders: LabOrder[
             </thead>
             <tbody>
               {labOrders.length === 0 && (
-                <tr><td colSpan={7} className="text-center py-12 text-muted-foreground text-sm">No lab orders yet</td></tr>
+                <tr><td colSpan={7}>
+                  <EmptyState icon={FlaskConical} title="No lab orders yet" hint="Outsourced lens jobs appear here — track them from Ordered through Fitted." />
+                </td></tr>
               )}
               {labOrders.map((order) => (
                 <tr key={order.id} className="border-b border-border hover:bg-surface-hover/50">

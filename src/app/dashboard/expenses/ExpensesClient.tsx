@@ -6,7 +6,8 @@ import type { Expense } from "@/lib/mock/types";
 import { formatCurrency, formatDate } from "@/lib/utils/format";
 import { useApp } from "@/lib/context";
 import { createExpense } from "@/lib/actions/expenses";
-import { Plus, Search, X, Loader2 } from "lucide-react";
+import { Plus, Search, X, Loader2, Wallet } from "lucide-react";
+import { EmptyState } from "@/components/ui/EmptyState";
 
 const EXPENSE_CATEGORIES = ["Rent", "Utilities", "Salaries", "Supplies", "Marketing", "Maintenance", "Transport", "Other"];
 
@@ -120,7 +121,9 @@ export function ExpensesClient({ expenses }: { expenses: Expense[] }) {
             </thead>
             <tbody>
               {filtered.length === 0 && (
-                <tr><td colSpan={5} className="text-center py-12 text-muted-foreground text-sm">No expenses recorded</td></tr>
+                <tr><td colSpan={5}>
+                  <EmptyState icon={Wallet} title="No expenses recorded" hint="Track rent, utilities, and daily shop costs here — they feed the cash day-close and analytics." />
+                </td></tr>
               )}
               {filtered.map((e) => (
                 <tr key={e.id} className="border-b border-border hover:bg-surface-hover/50 transition-colors">

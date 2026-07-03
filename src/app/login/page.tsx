@@ -8,8 +8,8 @@ import { Store, Eye, EyeOff, Loader2 } from "lucide-react";
 export default function LoginPage() {
   const router = useRouter();
   const [showPassword, setShowPassword] = useState(false);
-  const [email, setEmail] = useState("asif@nooroptics.pk");
-  const [password, setPassword] = useState("owner123");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -75,6 +75,7 @@ export default function LoginPage() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
+                placeholder="name@nooroptics.pk"
                 className="w-full px-4 py-2.5 glass-input text-sm"
               />
             </div>
@@ -86,6 +87,7 @@ export default function LoginPage() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   required
+                  placeholder="••••••••"
                   className="w-full px-4 py-2.5 glass-input text-sm pr-10"
                 />
                 <button
@@ -111,7 +113,7 @@ export default function LoginPage() {
           </form>
 
           <p className="text-center text-[11px] text-muted-foreground mt-6">
-            Owner: asif@nooroptics.pk · Manager: rabia@nooroptics.pk · Cashier: waqar@nooroptics.pk
+            Staff access only · Contact your manager for an account
           </p>
         </div>
       </div>
