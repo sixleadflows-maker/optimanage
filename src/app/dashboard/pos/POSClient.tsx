@@ -9,10 +9,11 @@ import { createSale } from "@/lib/actions/sales";
 import { useRouter } from "next/navigation";
 import {
   Search, Plus, Minus, Trash2, X, User, CreditCard,
-  Banknote, Building2, Smartphone, Printer, MessageCircle, Receipt, Loader2,
+  Banknote, Building2, Smartphone, Printer, MessageCircle, Receipt,
   Glasses, ChevronDown, ChevronUp, TrendingUp,
 } from "lucide-react";
 import { firstImage } from "@/lib/utils/images";
+import { LensLoader } from "@/components/ui/LensLoader";
 
 interface CartItem {
   productId: string;
@@ -655,7 +656,7 @@ export function POSClient({ products, customers }: { products: Product[]; custom
                   disabled={saving}
                   className="w-full py-3 bg-primary text-white rounded-2xl text-sm font-semibold hover:bg-primary-hover transition-colors disabled:opacity-60 flex items-center justify-center gap-2"
                 >
-                  {saving && <Loader2 className="w-4 h-4 animate-spin" />}
+                  {saving && <LensLoader light />}
                   {saving ? "Processing…" : `Complete Sale — ${formatCurrency(total)}`}
                 </button>
               </div>

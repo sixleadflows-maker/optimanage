@@ -331,6 +331,82 @@ h1, h2, h3 {
   width: 18px;
 }
 
+/* ── Page slide transitions ──────────────────────────────── */
+.page-exit {
+  animation: pageExit 0.22s cubic-bezier(0.4, 0, 1, 1) forwards;
+  will-change: transform, opacity, filter;
+}
+.page-enter {
+  animation: pageEnter 0.32s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+  will-change: transform, opacity, filter;
+}
+
+@keyframes pageExit {
+  from { opacity: 1; transform: translateX(0) scale(1); filter: blur(0px); }
+  to { opacity: 0; transform: translateX(-22px) scale(0.985); filter: blur(2px); }
+}
+
+@keyframes pageEnter {
+  from { opacity: 0; transform: translateX(22px) scale(0.99); filter: blur(2px); }
+  to { opacity: 1; transform: translateX(0) scale(1); filter: blur(0px); }
+}
+
+/* ── Lens loader (on-brand: camera/eye aperture) ─────────── */
+.lens-loader {
+  position: relative;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+}
+.lens-loader::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  background: conic-gradient(from 0deg, transparent 0deg, #6d5ef0 90deg, #14b8a6 200deg, transparent 340deg);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px));
+  animation: lensSpin 0.85s linear infinite;
+}
+.lens-loader::after {
+  content: "";
+  position: absolute;
+  inset: 34%;
+  border-radius: 9999px;
+  background: linear-gradient(135deg, #6d5ef0, #14b8a6);
+  animation: lensPulse 1.15s ease-in-out infinite;
+}
+@keyframes lensSpin { to { transform: rotate(360deg); } }
+@keyframes lensPulse {
+  0%, 100% { transform: scale(0.72); opacity: 0.65; }
+  50% { transform: scale(1.05); opacity: 1; }
+}
+.lens-loader.light::before {
+  background: conic-gradient(from 0deg, transparent 0deg, rgba(255, 255, 255, 0.95) 90deg, rgba(255, 255, 255, 0.5) 200deg, transparent 340deg);
+}
+.lens-loader.light::after {
+  background: #ffffff;
+}
+
+/* ── Icon motion ─────────────────────────────────────────── */
+@keyframes brandGlow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(109, 94, 240, 0.35), 0 10px 20px -6px rgba(109, 94, 240, 0.25); }
+  50% { box-shadow: 0 0 0 6px rgba(109, 94, 240, 0), 0 10px 24px -4px rgba(109, 94, 240, 0.4); }
+}
+.brand-mark { animation: brandGlow 3.2s ease-in-out infinite; }
+
+.theme-icon { transition: transform 0.45s cubic-bezier(0.34, 1.56, 0.64, 1); }
+.theme-icon.spin { transform: rotate(180deg); }
+
+@keyframes liveDot {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.5); }
+  50% { box-shadow: 0 0 0 4px rgba(16, 185, 129, 0); }
+}
+.live-dot { animation: liveDot 1.8s ease-in-out infinite; }
+
+.nav-icon { transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1); }
+a:hover .nav-icon { transform: translateY(-1px) scale(1.08); }
+
 /* ── Skeleton shimmer ────────────────────────────────────── */
 @keyframes shimmer {
   from { background-position: 200% 0; }

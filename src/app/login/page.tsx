@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { signIn } from "next-auth/react";
-import { Store, Eye, EyeOff, Loader2 } from "lucide-react";
+import { Store, Eye, EyeOff } from "lucide-react";
+import { LensLoader } from "@/components/ui/LensLoader";
 
 const SLIDES = [
   {
@@ -159,7 +160,7 @@ export default function LoginPage() {
               disabled={loading}
               className="w-full py-2.5 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-primary-hover transition-colors disabled:opacity-60 flex items-center justify-center gap-2"
             >
-              {loading && <Loader2 className="w-4 h-4 animate-spin" />}
+              {loading && <LensLoader light />}
               {loading ? "Signing in…" : "Sign In"}
             </button>
           </form>

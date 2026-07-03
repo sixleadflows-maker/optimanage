@@ -84,6 +84,7 @@ export function Topbar({ user }: { user: TopbarUser }) {
               : "bg-muted text-muted-foreground"
           }`}
         >
+          {isOnline && <span className="live-dot w-1.5 h-1.5 rounded-full bg-success" />}
           {isOnline ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}
           <span className="hidden sm:inline">{isOnline ? "Online" : "Offline"}</span>
         </button>
@@ -96,7 +97,9 @@ export function Topbar({ user }: { user: TopbarUser }) {
           onClick={toggleDarkMode}
           className="p-2 rounded-xl hover:bg-surface-hover transition-colors"
         >
-          {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+          <span className={`theme-icon inline-flex ${darkMode ? "spin" : ""}`}>
+            {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+          </span>
         </button>
 
         <div className="relative">

@@ -89,7 +89,7 @@ export function Sidebar({ user }: { user: SidebarUser }) {
         )}
       >
         <div className="flex items-center gap-3 px-5 py-5 border-b border-border">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#6d5ef0] to-[#14b8a6] flex items-center justify-center shadow-lg shadow-[#6d5ef0]/25">
+          <div className="brand-mark w-9 h-9 rounded-xl bg-gradient-to-br from-[#6d5ef0] to-[#14b8a6] flex items-center justify-center">
             <Store className="w-4 h-4 text-white" />
           </div>
           <span className="font-semibold text-[15px] tracking-tight font-display">OptiManage</span>
@@ -124,7 +124,7 @@ export function Sidebar({ user }: { user: SidebarUser }) {
                         : "text-muted-foreground hover:text-foreground hover:bg-surface-hover"
                     )}
                   >
-                    <item.icon className="w-4 h-4 flex-shrink-0" />
+                    <item.icon className="nav-icon w-4 h-4 flex-shrink-0" />
                     {item.label}
                   </Link>
                 );
