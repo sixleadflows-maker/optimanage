@@ -58,7 +58,7 @@ export function CashClient({ data, date }: { data: CashCollectionData; date: str
       </div>
 
       {/* Collection breakdown (auto from sales) */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 stagger-rise">
         {methods.map((m) => (
           <div key={m.label} className="glass-card p-4">
             <p className="text-xs text-muted-foreground flex items-center gap-1.5"><m.icon className="w-3.5 h-3.5" /> {m.label}</p>

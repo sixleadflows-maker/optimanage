@@ -7,8 +7,10 @@ import { formatCurrency } from "@/lib/utils/format";
 import { useApp } from "@/lib/context";
 import { PRODUCT_CATEGORIES, PRODUCT_TYPES, BRAND_TAGS } from "@/lib/constants";
 import { createProduct, updateProduct, deleteProduct } from "@/lib/actions/products";
-import { ArrowLeft, Save, Barcode, Shield, ShieldAlert, ShieldOff, ImagePlus, Trash2, Loader2 } from "lucide-react";
+import { ArrowLeft, Save, Barcode, Shield, ShieldAlert, ShieldOff, Trash2, Loader2 } from "lucide-react";
 import Link from "next/link";
+import { ImageCarousel } from "@/components/ui/ImageCarousel";
+import { parseImages } from "@/lib/utils/images";
 
 const brandTagConfig = {
   Original: { icon: Shield, color: "bg-success/10 text-success border-success/20", label: "Original" },
@@ -224,20 +226,11 @@ export function ProductForm({ product, isNew, barcodeWidth = 2, barcodeHeight = 
 
         <div className="space-y-4">
           <div className="glass-card p-5">
-            <h3 className="text-sm font-semibold mb-4">Product Image</h3>
-            <div className="aspect-square rounded-xl bg-gradient-to-br from-surface to-muted flex items-center justify-center overflow-hidden">
-              {form.image ? (
-                <img src={form.image} alt={form.name} className="w-full h-full object-cover" />
-              ) : (
-                <div className="flex flex-col items-center gap-2 text-muted-foreground">
-                  <ImagePlus className="w-10 h-10 opacity-30" />
-                  <span className="text-xs opacity-50">No image</span>
-                </div>
-              )}
-            </div>
+            <h3 className="text-sm font-semibold mb-4">Product Photos</h3>
+            <ImageCarousel images={parseImages(form.image)} alt={form.name || "Product"} />
             <div className="mt-3">
               <input type="text" value={form.image} onChange={(e) => update("image", e.target.value)}
-                className="w-full px-3 py-2 glass-input text-xs" placeholder="Image URL..." />
+                className="w-full px-3 py-2 glass-input text-xs" placeholder="Image URL, or several separated by commas..." />
             </div>
           </div>
 

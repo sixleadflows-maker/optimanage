@@ -231,6 +231,106 @@ h1, h2, h3 {
   to { opacity: 1; transform: translateY(0); }
 }
 
+/* ── Navigation progress bar ─────────────────────────────── */
+.nav-progress {
+  position: fixed;
+  top: 0;
+  left: 0;
+  height: 2.5px;
+  z-index: 9999;
+  width: 0;
+  background: linear-gradient(90deg, #6d5ef0, #14b8a6);
+  border-radius: 0 2px 2px 0;
+  box-shadow: 0 0 8px rgba(109, 94, 240, 0.5);
+  animation: navprog 1.4s cubic-bezier(0.2, 0.8, 0.3, 1) forwards;
+}
+
+@keyframes navprog {
+  0% { width: 0; }
+  60% { width: 62%; }
+  100% { width: 84%; }
+}
+
+.nav-progress.done {
+  animation: navdone 0.4s ease-out forwards;
+}
+
+@keyframes navdone {
+  from { width: 84%; opacity: 1; }
+  to { width: 100%; opacity: 0; }
+}
+
+/* ── Staggered entry ─────────────────────────────────────── */
+.stagger-rise > * {
+  opacity: 0;
+  animation: riseIn 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+.stagger-rise > *:nth-child(1) { animation-delay: 0ms; }
+.stagger-rise > *:nth-child(2) { animation-delay: 45ms; }
+.stagger-rise > *:nth-child(3) { animation-delay: 90ms; }
+.stagger-rise > *:nth-child(4) { animation-delay: 135ms; }
+.stagger-rise > *:nth-child(5) { animation-delay: 180ms; }
+.stagger-rise > *:nth-child(6) { animation-delay: 225ms; }
+.stagger-rise > *:nth-child(7) { animation-delay: 270ms; }
+.stagger-rise > *:nth-child(8) { animation-delay: 315ms; }
+.stagger-rise > *:nth-child(9) { animation-delay: 345ms; }
+.stagger-rise > *:nth-child(10) { animation-delay: 375ms; }
+.stagger-rise > *:nth-child(11) { animation-delay: 405ms; }
+.stagger-rise > *:nth-child(12) { animation-delay: 435ms; }
+.stagger-rise > *:nth-child(13) { animation-delay: 465ms; }
+.stagger-rise > *:nth-child(14) { animation-delay: 495ms; }
+.stagger-rise > *:nth-child(15) { animation-delay: 525ms; }
+.stagger-rise > *:nth-child(16) { animation-delay: 555ms; }
+.stagger-rise > *:nth-child(17) { animation-delay: 580ms; }
+.stagger-rise > *:nth-child(18) { animation-delay: 605ms; }
+.stagger-rise > *:nth-child(19) { animation-delay: 630ms; }
+.stagger-rise > *:nth-child(20) { animation-delay: 655ms; }
+.stagger-rise > *:nth-child(n+21) { animation-delay: 670ms; }
+
+/* ── POS moments ─────────────────────────────────────────── */
+@keyframes cartPop {
+  0% { transform: scale(0.94); background: rgba(109, 94, 240, 0.14); }
+  60% { transform: scale(1.015); }
+  100% { transform: scale(1); background: transparent; }
+}
+.animate-cart-pop { animation: cartPop 0.4s ease-out; border-radius: 10px; }
+
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(28px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+.animate-slide-right { animation: slideInRight 0.4s cubic-bezier(0.2, 0.8, 0.2, 1); }
+
+.success-pop { animation: successPop 0.45s cubic-bezier(0.2, 0.9, 0.3, 1.4) both; }
+@keyframes successPop {
+  from { transform: scale(0.6); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+.check-draw {
+  stroke-dasharray: 60;
+  stroke-dashoffset: 60;
+  animation: checkDraw 0.5s 0.2s ease-out forwards;
+}
+@keyframes checkDraw { to { stroke-dashoffset: 0; } }
+
+/* ── Carousel ────────────────────────────────────────────── */
+.carousel-track {
+  display: flex;
+  transition: transform 0.55s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+.carousel-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background: currentColor;
+  opacity: 0.35;
+  transition: all 0.3s ease;
+}
+.carousel-dot.on {
+  opacity: 1;
+  width: 18px;
+}
+
 /* ── Skeleton shimmer ────────────────────────────────────── */
 @keyframes shimmer {
   from { background-position: 200% 0; }

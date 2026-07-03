@@ -1,9 +1,76 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { signIn } from "next-auth/react";
 import { Store, Eye, EyeOff, Loader2 } from "lucide-react";
+
+const SLIDES = [
+  {
+    heading: "Run the whole shop from one screen",
+    body: "Inventory, POS, prescriptions, and lab orders — all in one place.",
+    stats: [
+      { label: "Products Tracked", value: "2,400+" },
+      { label: "Daily Invoices", value: "35–50" },
+    ],
+  },
+  {
+    heading: "Real profit on every prescription",
+    body: "Lens, lab, and fitting costs are tracked per order — not guessed at month end.",
+    stats: [
+      { label: "Branches Managed", value: "Multi" },
+      { label: "Job Costing", value: "Live" },
+    ],
+  },
+  {
+    heading: "Your customers, remembered",
+    body: "Phone search, visit history, and prescriptions on file for every visit.",
+    stats: [
+      { label: "Customer Records", value: "8,000+" },
+      { label: "Return Visits", value: "Tracked" },
+    ],
+  },
+];
+
+function LoginCarousel() {
+  const [index, setIndex] = useState(0);
+
+  useEffect(() => {
+    const t = setInterval(() => setIndex((i) => (i + 1) % SLIDES.length), 4800);
+    return () => clearInterval(t);
+  }, []);
+
+  return (
+    <div className="w-full max-w-md overflow-hidden">
+      <div className="carousel-track" style={{ transform: `translateX(-${index * 100}%)` }}>
+        {SLIDES.map((slide) => (
+          <div key={slide.heading} className="w-full flex-shrink-0 pr-1">
+            <h1 className="text-4xl font-bold mb-4 tracking-tight font-display">{slide.heading}</h1>
+            <p className="text-xl text-white/80 leading-relaxed">{slide.body}</p>
+            <div className="mt-12 grid grid-cols-2 gap-6">
+              {slide.stats.map((stat) => (
+                <div key={stat.label} className="bg-white/10 backdrop-blur-sm rounded-xl p-4">
+                  <p className="text-2xl font-bold font-display">{stat.value}</p>
+                  <p className="text-sm text-white/70 mt-1">{stat.label}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="flex items-center gap-1.5 mt-10 text-white">
+        {SLIDES.map((slide, i) => (
+          <button
+            key={slide.heading}
+            onClick={() => setIndex(i)}
+            aria-label={`Show slide ${i + 1}`}
+            className={`carousel-dot ${i === index ? "on" : ""}`}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export default function LoginPage() {
   const router = useRouter();
@@ -35,23 +102,8 @@ export default function LoginPage() {
           <div className="w-16 h-16 rounded-2xl bg-white/15 backdrop-blur-sm flex items-center justify-center mb-8">
             <Store className="w-8 h-8" />
           </div>
-          <h1 className="text-4xl font-bold mb-4 tracking-tight">OptiManage</h1>
-          <p className="text-xl text-white/80 leading-relaxed max-w-md">
-            The complete optical store management system. Inventory, sales, prescriptions, and more — all in one place.
-          </p>
-          <div className="mt-12 grid grid-cols-2 gap-6">
-            {[
-              { label: "Products Tracked", value: "2,400+" },
-              { label: "Daily Invoices", value: "35-50" },
-              { label: "Customer Records", value: "8,000+" },
-              { label: "Branches Managed", value: "Multi" },
-            ].map((stat) => (
-              <div key={stat.label} className="bg-white/10 backdrop-blur-sm rounded-xl p-4">
-                <p className="text-2xl font-bold">{stat.value}</p>
-                <p className="text-sm text-white/70 mt-1">{stat.label}</p>
-              </div>
-            ))}
-          </div>
+          <p className="text-xs font-semibold tracking-[0.2em] text-white/70 uppercase mb-3">OptiManage</p>
+          <LoginCarousel />
         </div>
       </div>
 

@@ -32,7 +32,7 @@ export function SuppliersClient({ suppliers, purchaseOrders }: { suppliers: Supp
         suppliers.length === 0 ? (
           <div className="glass-card p-12 text-center text-muted-foreground text-sm">No suppliers yet</div>
         ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 stagger-rise">
           {suppliers.map((s) => (
             <div key={s.id} className="glass-card p-5">
               <div className="flex items-start justify-between mb-3">

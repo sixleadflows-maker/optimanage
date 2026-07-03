@@ -109,7 +109,7 @@ export function DashboardClient({ data }: { data: DashboardData }) {
         <p className="text-sm text-muted-foreground mt-0.5">Overview of your optical store performance</p>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 stagger-rise">
         {kpis.map((kpi) => (
           <div key={kpi.label} className="glass-card p-5">
             <div className="flex items-start justify-between mb-3">

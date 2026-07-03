@@ -7,6 +7,7 @@ import { PRODUCT_CATEGORIES } from "@/lib/constants";
 import { Search, Grid3X3, List, Plus, AlertTriangle } from "lucide-react";
 import Link from "next/link";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { firstImage } from "@/lib/utils/images";
 
 export function InventoryClient({ products }: { products: Product[] }) {
   const [search, setSearch] = useState("");
@@ -86,13 +87,13 @@ export function InventoryClient({ products }: { products: Product[] }) {
         {filtered.length === 0 ? (
           <EmptyState title="No frames match" hint="Try another name, brand, or barcode — or add it as a new product." />
         ) : viewMode === "grid" ? (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 stagger-rise">
             {filtered.map((product) => (
               <Link href={`/dashboard/inventory/${product.id}`} key={product.id}
                 className={`glass-card p-3 block hover:border-primary/30 transition-all ${product.stock <= product.lowStockThreshold ? "ring-1 ring-destructive/20" : ""}`}>
                 <div className="w-full aspect-square rounded-xl bg-gradient-to-br from-surface to-muted flex items-center justify-center mb-2 overflow-hidden">
-                  {product.image ? (
-                    <img src={product.image} alt={product.name} className="w-full h-full object-cover" loading="lazy" />
+                  {firstImage(product.image) ? (
+                    <img src={firstImage(product.image)} alt={product.name} className="w-full h-full object-cover" loading="lazy" />
                   ) : (
                     <span className="text-2xl opacity-40">{product.category === "Contact Lenses" ? "👁" : product.category === "Sunglasses" ? "🕶" : product.category === "Lens Stock" ? "🔍" : "👓"}</span>
                   )}

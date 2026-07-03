@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef } from "react";
 import type { Product } from "@/lib/mock/types";
 import { formatCurrency } from "@/lib/utils/format";
 import { useApp } from "@/lib/context";
@@ -12,6 +12,7 @@ import {
   Banknote, Building2, Smartphone, Printer, MessageCircle, Receipt, Loader2,
   Glasses, ChevronDown, ChevronUp, TrendingUp,
 } from "lucide-react";
+import { firstImage } from "@/lib/utils/images";
 
 interface CartItem {
   productId: string;
@@ -54,6 +55,7 @@ export function POSClient({ products, customers }: { products: Product[]; custom
   const [customerSearch, setCustomerSearch] = useState("");
   const [saving, setSaving] = useState(false);
   const [saleResult, setSaleResult] = useState<SaleResult | null>(null);
+  const [showSuccess, setShowSuccess] = useState(false);
   const [showJob, setShowJob] = useState(false);
   const [lensProductId, setLensProductId] = useState("");
   const [labCharges, setLabCharges] = useState(0);
@@ -61,6 +63,14 @@ export function POSClient({ products, customers }: { products: Product[]; custom
 
   const [recordRx, setRecordRx] = useState(false);
   const [rx, setRx] = useState({ ...EMPTY_RX });
+  const [poppedId, setPoppedId] = useState<string | null>(null);
+  const popTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const pop = (productId: string) => {
+    setPoppedId(productId);
+    if (popTimer.current) clearTimeout(popTimer.current);
+    popTimer.current = setTimeout(() => setPoppedId((cur) => (cur === productId ? null : cur)), 420);
+  };
 
   const lensProducts = useMemo(
     () => products.filter((p) => p.category === "Lens Stock" || p.category === "Contact Lenses"),
@@ -90,6 +100,7 @@ export function POSClient({ products, customers }: { products: Product[]; custom
   const addToCart = (productId: string) => {
     const product = products.find((p) => p.id === productId);
     if (!product) return;
+    pop(productId);
     setCart((prev) => {
       const existing = prev.find((i) => i.productId === productId);
       if (existing) {
@@ -153,6 +164,7 @@ export function POSClient({ products, customers }: { products: Product[]; custom
 
   const resetSale = () => {
     setShowReceipt(false);
+    setShowSuccess(false);
     setCart([]);
     setInvoiceDiscount(0);
     setSelectedCustomer("");
@@ -204,8 +216,12 @@ export function POSClient({ products, customers }: { products: Product[]; custom
         servedBy: res.servedBy,
         date: new Date().toLocaleString("en-PK", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }),
       });
-      setShowReceipt(true);
+      setShowSuccess(true);
       showToast(`Sale completed — ${res.invoiceNo}`, "success");
+      setTimeout(() => {
+        setShowSuccess(false);
+        setShowReceipt(true);
+      }, 750);
     } catch {
       showToast("Could not complete the sale. Please try again.", "error");
     } finally {
@@ -213,9 +229,24 @@ export function POSClient({ products, customers }: { products: Product[]; custom
     }
   };
 
+  if (showSuccess) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/25 backdrop-blur-sm">
+        <div className="glass-card px-10 py-9 flex flex-col items-center gap-3 success-pop">
+          <div className="w-16 h-16 rounded-full bg-gradient-to-br from-[#6d5ef0] to-[#14b8a6] flex items-center justify-center">
+            <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path className="check-draw" d="M4 12.5l5 5L20 6" />
+            </svg>
+          </div>
+          <p className="text-sm font-semibold font-display">Sale completed</p>
+        </div>
+      </div>
+    );
+  }
+
   if (showReceipt && saleResult) {
     return (
-      <div className="animate-fade-in">
+      <div className="animate-slide-right">
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-2xl font-bold">Invoice Preview</h1>
           <button onClick={resetSale} className="px-4 py-2 glass-card text-sm font-medium cursor-pointer">
@@ -375,8 +406,8 @@ export function POSClient({ products, customers }: { products: Product[]; custom
                   className="glass-card p-3 text-left hover:border-primary/30 transition-all cursor-pointer group"
                 >
                   <div className="w-full aspect-square rounded-xl bg-gradient-to-br from-surface to-muted flex items-center justify-center mb-2 group-hover:scale-[1.02] transition-transform overflow-hidden">
-                    {product.image ? (
-                      <img src={product.image} alt={product.name} className="w-full h-full object-cover" loading="lazy" />
+                    {firstImage(product.image) ? (
+                      <img src={firstImage(product.image)} alt={product.name} className="w-full h-full object-cover" loading="lazy" />
                     ) : (
                       <span className="text-2xl opacity-40">👓</span>
                     )}
@@ -506,7 +537,7 @@ export function POSClient({ products, customers }: { products: Product[]; custom
           ) : (
             <div className="space-y-2 mb-4 max-h-60 overflow-y-auto">
               {cart.map((item) => (
-                <div key={item.productId} className="flex items-center gap-2 py-2 border-b border-border">
+                <div key={item.productId} className={`flex items-center gap-2 py-2 px-1.5 -mx-1.5 border-b border-border ${poppedId === item.productId ? "animate-cart-pop" : ""}`}>
                   <div className="flex-1 min-w-0">
                     <p className="text-xs font-medium truncate">{item.name}</p>
                     <p className="text-[10px] text-muted-foreground">{item.brand} · {formatCurrency(item.price)}</p>
