@@ -20,6 +20,8 @@ interface AppContextValue {
   toasts: Toast[];
   showToast: (message: string, type?: "success" | "error" | "info") => void;
   removeToast: (id: string) => void;
+  showWelcome: boolean;
+  setShowWelcome: (show: boolean) => void;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -30,6 +32,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [isOnline, setIsOnline] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [showWelcome, setShowWelcome] = useState(false);
 
   const toggleDarkMode = useCallback(() => setDarkMode((d) => !d), []);
   const toggleOnline = useCallback(() => setIsOnline((o) => !o), []);
@@ -52,6 +55,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         isOnline, toggleOnline,
         sidebarOpen, setSidebarOpen,
         toasts, showToast, removeToast,
+        showWelcome, setShowWelcome,
       }}
     >
       {children}

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { signIn } from "next-auth/react";
 import { Store, Eye, EyeOff } from "lucide-react";
 import { LensLoader } from "@/components/ui/LensLoader";
-import { LoginIntro } from "@/components/ui/LoginIntro";
+import { useApp } from "@/lib/context";
 
 const SLIDES = [
   {
@@ -76,12 +76,12 @@ function LoginCarousel() {
 
 export default function LoginPage() {
   const router = useRouter();
+  const { setShowWelcome } = useApp();
   const [showPassword, setShowPassword] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [showIntro, setShowIntro] = useState(false);
 
   useEffect(() => {
     router.prefetch("/dashboard");
@@ -97,7 +97,12 @@ export default function LoginPage() {
       setError("Invalid email or password.");
       return;
     }
-    setShowIntro(true);
+    // Show the welcome overlay (rendered at the app root, so it survives the
+    // route change) and navigate immediately — the overlay covers the
+    // transition instead of racing it, so the login form never flashes back.
+    setShowWelcome(true);
+    router.push("/dashboard");
+    router.refresh();
   };
 
   return (
@@ -175,15 +180,6 @@ export default function LoginPage() {
           </p>
         </div>
       </div>
-
-      {showIntro && (
-        <LoginIntro
-          onDone={() => {
-            router.push("/dashboard");
-            router.refresh();
-          }}
-        />
-      )}
     </div>
   );
 }
