@@ -29,7 +29,7 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen flex">
-      <div className="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-primary to-primary-hover relative overflow-hidden">
+      <div className="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-[#4c3de0] via-[#6d5ef0] to-[#149f8c] relative overflow-hidden">
         <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGNpcmNsZSBjeD0iMzAiIGN5PSIzMCIgcj0iMiIgZmlsbD0icmdiYSgyNTUsMjU1LDI1NSwwLjA4KSIvPjwvc3ZnPg==')] opacity-60" />
         <div className="relative z-10 flex flex-col justify-center px-16 text-white">
           <div className="w-16 h-16 rounded-2xl bg-white/15 backdrop-blur-sm flex items-center justify-center mb-8">
@@ -55,8 +55,8 @@ export default function LoginPage() {
         </div>
       </div>
 
-      <div className="flex-1 flex items-center justify-center p-8 bg-background">
-        <div className="w-full max-w-sm">
+      <div className="flex-1 flex items-center justify-center p-8">
+        <div className="w-full max-w-sm glass-card p-8 animate-rise">
           <div className="lg:hidden flex items-center gap-3 mb-10">
             <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center">
               <Store className="w-5 h-5 text-white" />
@@ -64,7 +64,7 @@ export default function LoginPage() {
             <span className="text-xl font-bold">OptiManage</span>
           </div>
 
-          <h2 className="text-2xl font-bold mb-1">Welcome back</h2>
+          <h2 className="text-3xl font-bold mb-1 text-gradient">Welcome back</h2>
           <p className="text-muted-foreground text-sm mb-8">Sign in to your account to continue</p>
 
           <form onSubmit={handleLogin} className="space-y-4">

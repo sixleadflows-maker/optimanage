@@ -285,7 +285,7 @@ export function POSClient({ products, customers }: { products: Product[]; custom
             <div className="bg-white text-black rounded-lg p-6 shadow-lg text-sm">
               <div className="flex justify-between items-start mb-6">
                 <div>
-                  <h2 className="text-lg font-bold text-[#1f5d8c]">{SHOP_NAME}</h2>
+                  <h2 className="text-lg font-bold text-[#6d5ef0]">{SHOP_NAME}</h2>
                   <p className="text-xs text-gray-500">45 Tariq Road, Karachi · NTN: 1234567-8</p>
                 </div>
                 <div className="text-right">
@@ -324,7 +324,7 @@ export function POSClient({ products, customers }: { products: Product[]; custom
               <div className="border-t-2 border-gray-200 pt-3 space-y-1 text-right">
                 <p>Subtotal: {formatCurrency(subtotal)}</p>
                 {invoiceDiscount > 0 && <p>Discount: -{formatCurrency(invoiceDiscount)}</p>}
-                <p className="text-lg font-bold text-[#1f5d8c]">Total: {formatCurrency(total)}</p>
+                <p className="text-lg font-bold text-[#6d5ef0]">Total: {formatCurrency(total)}</p>
                 <p className="text-xs text-gray-500">Served by {saleResult.servedBy}</p>
               </div>
             </div>

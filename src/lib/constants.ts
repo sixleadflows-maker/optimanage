@@ -1,8 +1,8 @@
 export const APP_NAME = "OptiManage";
 export const SHOP_NAME = "Noor Optics";
 export const CURRENCY = "Rs.";
-export const PRIMARY_COLOR = "#1f5d8c";
-export const PRIMARY_LIGHT = "#e8f4fd";
+export const PRIMARY_COLOR = "#6d5ef0";
+export const PRIMARY_LIGHT = "#edeafd";
 
 export const BRANCHES = [
   { id: "branch-1", name: "Main Branch - Tariq Road" },

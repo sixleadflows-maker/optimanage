@@ -7,7 +7,7 @@ export function ThemeWrapper({ children }: { children: React.ReactNode }) {
   const { darkMode } = useApp();
   return (
     <div className={darkMode ? "dark" : ""}>
-      <div className="min-h-screen bg-background text-foreground">
+      <div className="min-h-screen app-canvas text-foreground">
         {children}
         <ToastContainer />
       </div>

@@ -6,7 +6,7 @@ import { formatCurrency } from "@/lib/utils/format";
 import { verifyAnalyticsPin } from "@/lib/actions/analytics";
 import { Lock, Loader2 } from "lucide-react";
 
-const COLORS = ["#1f5d8c", "#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#06b6d4"];
+const COLORS = ["#6d5ef0", "#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#06b6d4"];
 
 function AreaChart({ data, height = 220 }: { data: { label: string; value: number }[]; height?: number }) {
   if (data.length === 0) return <div className="flex items-center justify-center text-sm text-muted-foreground" style={{ height }}>No sales yet</div>;
@@ -22,16 +22,16 @@ function AreaChart({ data, height = 220 }: { data: { label: string; value: numbe
     <svg viewBox={`0 0 ${w} ${h}`} className="w-full" style={{ height }}>
       <defs>
         <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#1f5d8c" stopOpacity={0.2} />
-          <stop offset="100%" stopColor="#1f5d8c" stopOpacity={0.02} />
+          <stop offset="0%" stopColor="#6d5ef0" stopOpacity={0.2} />
+          <stop offset="100%" stopColor="#6d5ef0" stopOpacity={0.02} />
         </linearGradient>
       </defs>
       {[0, 0.25, 0.5, 0.75, 1].map((t) => (
         <line key={t} x1={pad} x2={w - pad} y1={h - pad - t * (h - pad * 2)} y2={h - pad - t * (h - pad * 2)} stroke="rgba(0,0,0,0.06)" strokeDasharray="4 4" />
       ))}
       <polygon points={area} fill="url(#areaGrad)" />
-      <polyline points={line} fill="none" stroke="#1f5d8c" strokeWidth={2.5} strokeLinejoin="round" />
-      {points.map((p, i) => <circle key={i} cx={p.x} cy={p.y} r={3} fill="#1f5d8c" />)}
+      <polyline points={line} fill="none" stroke="#6d5ef0" strokeWidth={2.5} strokeLinejoin="round" />
+      {points.map((p, i) => <circle key={i} cx={p.x} cy={p.y} r={3} fill="#6d5ef0" />)}
     </svg>
   );
 }

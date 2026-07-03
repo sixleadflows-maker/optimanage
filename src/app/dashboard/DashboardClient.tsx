@@ -45,8 +45,8 @@ function MiniAreaChart({ data, height = 200 }: { data: { label: string; value: n
     <svg viewBox={`0 0 ${w} ${h}`} className="w-full" style={{ height }}>
       <defs>
         <linearGradient id="areaFill" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#1f5d8c" stopOpacity={0.2} />
-          <stop offset="100%" stopColor="#1f5d8c" stopOpacity={0.02} />
+          <stop offset="0%" stopColor="#6d5ef0" stopOpacity={0.2} />
+          <stop offset="100%" stopColor="#6d5ef0" stopOpacity={0.02} />
         </linearGradient>
       </defs>
       {[0, 0.25, 0.5, 0.75, 1].map((t) => (
@@ -55,9 +55,9 @@ function MiniAreaChart({ data, height = 200 }: { data: { label: string; value: n
       ))}
       <polygon points={area} fill="url(#areaFill)"
         style={{ opacity: ready ? 1 : 0, transition: "opacity 0.8s ease-out 0.6s" }} />
-      <polyline ref={lineRef} points={line} fill="none" stroke="#1f5d8c" strokeWidth={2.5} strokeLinejoin="round" />
+      <polyline ref={lineRef} points={line} fill="none" stroke="#6d5ef0" strokeWidth={2.5} strokeLinejoin="round" />
       {points.map((p, i) => (
-        <circle key={i} cx={p.x} cy={p.y} r={3} fill="#1f5d8c"
+        <circle key={i} cx={p.x} cy={p.y} r={3} fill="#6d5ef0"
           style={{ opacity: ready ? 1 : 0, transform: ready ? "scale(1)" : "scale(0)", transformOrigin: `${p.x}px ${p.y}px`, transition: `all 0.3s ease-out ${0.8 + i * 0.04}s` }} />
       ))}
       {data.map((d, i) => (
@@ -105,7 +105,7 @@ export function DashboardClient({ data }: { data: DashboardData }) {
   return (
     <div className="space-y-6 animate-fade-in">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Dashboard</h1>
+        <h1 className="text-2xl font-bold tracking-tight text-gradient">Dashboard</h1>
         <p className="text-sm text-muted-foreground mt-0.5">Overview of your optical store performance</p>
       </div>
 
@@ -121,7 +121,7 @@ export function DashboardClient({ data }: { data: DashboardData }) {
                 {kpi.change}
               </span>
             </div>
-            <p className="text-2xl font-bold tracking-tight"><AnimatedCounter value={kpi.raw} format={kpi.format} /></p>
+            <p className="text-2xl font-bold tracking-tight font-display"><AnimatedCounter value={kpi.raw} format={kpi.format} /></p>
             <p className="text-xs text-muted-foreground mt-1">{kpi.label}</p>
           </div>
         ))}
