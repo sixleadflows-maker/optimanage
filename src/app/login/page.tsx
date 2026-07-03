@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { signIn } from "next-auth/react";
 import { Store, Eye, EyeOff } from "lucide-react";
 import { LensLoader } from "@/components/ui/LensLoader";
+import { LoginIntro } from "@/components/ui/LoginIntro";
 
 const SLIDES = [
   {
@@ -80,6 +81,11 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [showIntro, setShowIntro] = useState(false);
+
+  useEffect(() => {
+    router.prefetch("/dashboard");
+  }, [router]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -91,8 +97,7 @@ export default function LoginPage() {
       setError("Invalid email or password.");
       return;
     }
-    router.push("/dashboard");
-    router.refresh();
+    setShowIntro(true);
   };
 
   return (
@@ -170,6 +175,15 @@ export default function LoginPage() {
           </p>
         </div>
       </div>
+
+      {showIntro && (
+        <LoginIntro
+          onDone={() => {
+            router.push("/dashboard");
+            router.refresh();
+          }}
+        />
+      )}
     </div>
   );
 }
