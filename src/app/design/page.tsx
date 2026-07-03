@@ -12,6 +12,7 @@ interface Theme {
   headingSerif: boolean;
   kpiColorful: boolean;
   pageBg: string;
+  glass?: boolean;
 }
 
 const THEMES: Record<ThemeKey, Theme> = {
@@ -58,17 +59,18 @@ const THEMES: Record<ThemeKey, Theme> = {
     },
   },
   minimal: {
-    name: "Apple-like minimal",
-    tagline: "Whitespace, soft glass, calm & premium",
+    name: "Liquid glass",
+    tagline: "Aurora mesh + real specular-highlight glass, grain texture",
     sidebarDark: false,
     headingSerif: false,
     kpiColorful: false,
-    pageBg: "linear-gradient(180deg, #fbfbfd 0%, #f2f4f8 100%)",
+    glass: true,
+    pageBg: "#eef0f4",
     vars: {
-      "--bg": "transparent", "--panel": "rgba(255,255,255,.72)", "--panelText": "#43454a", "--card": "rgba(255,255,255,.7)",
-      "--text": "#1d1d1f", "--muted": "#86868b", "--accent": "#0071e3", "--accent2": "#5ea9ff",
-      "--border": "rgba(0,0,0,.07)", "--radius": "18px", "--font": "'Inter', -apple-system, system-ui, sans-serif",
-      "--heading": "'Inter', -apple-system, system-ui, sans-serif", "--shadow": "0 12px 44px rgba(0,0,0,.07)",
+      "--bg": "transparent", "--panel": "rgba(255,255,255,.55)", "--panelText": "#3c3d47", "--card": "rgba(255,255,255,.5)",
+      "--text": "#1a1b23", "--muted": "#75767f", "--accent": "#6d5ef0", "--accent2": "#17b897",
+      "--border": "rgba(255,255,255,.6)", "--radius": "20px", "--font": "'Inter', system-ui, sans-serif",
+      "--heading": "'Manrope', 'Inter', system-ui, sans-serif", "--shadow": "0 24px 70px rgba(30,20,70,.16)",
     },
   },
 };
@@ -107,7 +109,7 @@ export default function DesignShowcase() {
   return (
     <div className="dz" style={{ ...t.vars, background: t.pageBg } as React.CSSProperties}>
       <style>{CSS}</style>
-      <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@500;600;700&family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet" />
+      <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@500;600;700&family=Poppins:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet" />
 
       <div className="dz-switch">
         <span className="dz-switch-label">Preview theme:</span>
@@ -119,7 +121,16 @@ export default function DesignShowcase() {
       </div>
       <p className="dz-tagline">{t.tagline}</p>
 
-      <div className="dz-app" key={themeKey}>
+      <div className={`dz-app-wrap ${t.glass ? "has-aurora" : ""}`}>
+        {t.glass && (
+          <div className="dz-aurora" aria-hidden="true">
+            <span className="dz-blob b1" />
+            <span className="dz-blob b2" />
+            <span className="dz-blob b3" />
+            <span className="dz-grain" />
+          </div>
+        )}
+      <div className="dz-app" data-glass={t.glass ? "true" : "false"} key={themeKey}>
         <aside className="dz-side" data-dark={t.sidebarDark}>
           <div className="dz-brand">
             <div className="dz-logo">◎</div>
@@ -219,6 +230,7 @@ export default function DesignShowcase() {
           </div>
         </div>
       </div>
+      </div>
     </div>
   );
 }
@@ -232,7 +244,36 @@ const CSS = `
 .dz-pill:hover{transform:translateY(-1px);}
 .dz-pill.on{background:var(--accent);color:#fff;border-color:var(--accent);}
 .dz-tagline{font-size:13px;color:var(--muted);margin:0 0 18px;}
-.dz-app{display:flex;border-radius:calc(var(--radius) + 6px);overflow:hidden;box-shadow:var(--shadow);border:1px solid var(--border);min-height:640px;background:var(--bg);}
+.dz-app-wrap{position:relative;}
+.dz-aurora{position:absolute;inset:0;border-radius:calc(var(--radius) + 6px);overflow:hidden;pointer-events:none;z-index:0;}
+.dz-blob{position:absolute;border-radius:50%;filter:blur(70px);will-change:transform;}
+.dz-blob.b1{width:420px;height:420px;top:-140px;left:-100px;opacity:.55;background:radial-gradient(circle at 30% 30%,#a78bfa,#6d5ef0 60%,transparent 75%);animation:drift1 22s ease-in-out infinite alternate;}
+.dz-blob.b2{width:380px;height:380px;bottom:-160px;right:-80px;opacity:.5;background:radial-gradient(circle at 60% 40%,#5eead4,#17b897 55%,transparent 75%);animation:drift2 26s ease-in-out infinite alternate;}
+.dz-blob.b3{width:300px;height:300px;bottom:40px;left:32%;opacity:.32;background:radial-gradient(circle at 50% 50%,#fda4af,#fb7185 55%,transparent 75%);animation:drift3 30s ease-in-out infinite alternate;}
+.dz-grain{position:absolute;inset:0;opacity:.05;mix-blend-mode:overlay;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");}
+@keyframes drift1{from{transform:translate(0,0) scale(1);}to{transform:translate(40px,30px) scale(1.08);}}
+@keyframes drift2{from{transform:translate(0,0) scale(1);}to{transform:translate(-30px,-40px) scale(1.1);}}
+@keyframes drift3{from{transform:translate(0,0);}to{transform:translate(20px,-25px);}}
+.dz-app{position:relative;z-index:1;display:flex;border-radius:calc(var(--radius) + 6px);overflow:hidden;box-shadow:var(--shadow);border:1px solid var(--border);min-height:640px;background:var(--bg);}
+.dz-app[data-glass="true"] .dz-side,
+.dz-app[data-glass="true"] .dz-card,
+.dz-app[data-glass="true"] .dz-kpi,
+.dz-app[data-glass="true"] .dz-top,
+.dz-app[data-glass="true"] .dz-search{
+  backdrop-filter:blur(26px) saturate(180%);
+  -webkit-backdrop-filter:blur(26px) saturate(180%);
+}
+.dz-app[data-glass="true"] .dz-card,
+.dz-app[data-glass="true"] .dz-kpi{
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.75), inset 0 0 0 1px rgba(255,255,255,.18), 0 10px 30px rgba(30,20,70,.08);
+}
+.dz-app[data-glass="true"] .dz-side{
+  box-shadow:inset -1px 0 0 rgba(255,255,255,.4);
+}
+.dz-app[data-glass="true"] .dz-titlerow h1{
+  background:linear-gradient(135deg,var(--text) 40%,var(--accent));
+  -webkit-background-clip:text;background-clip:text;color:transparent;
+}
 .dz-side{width:230px;flex-shrink:0;background:var(--panel);padding:20px 14px;display:flex;flex-direction:column;gap:6px;}
 .dz-side[data-dark="true"]{color:var(--panelText);}
 .dz-side[data-dark="false"]{color:var(--panelText);border-right:1px solid var(--border);}
