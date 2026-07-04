@@ -102,12 +102,54 @@ h1, h2, h3 {
 }
 
 /* ── Glass material ──────────────────────────────────────── */
+/* Elevation tiers: .glass-card is the resting surface (dozens can be on
+   screen at once on list pages, so its cost stays fixed). .glass is for
+   transient floating chrome (toasts, dropdown menus — at most a couple
+   on screen). .glass-modal is for dialogs — always exactly one, so it
+   gets the deepest, most expensive treatment. */
 .glass {
   background: var(--glass-bg);
-  backdrop-filter: blur(22px) saturate(180%);
-  -webkit-backdrop-filter: blur(22px) saturate(180%);
+  backdrop-filter: blur(30px) saturate(195%);
+  -webkit-backdrop-filter: blur(30px) saturate(195%);
   border: 1px solid var(--glass-border);
-  box-shadow: var(--glass-inset), var(--glass-shadow);
+  box-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.85),
+    inset 0 -1px 0 rgba(30, 20, 70, 0.05),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.2),
+    0 20px 48px rgba(30, 20, 70, 0.16),
+    0 6px 16px rgba(30, 20, 70, 0.08);
+}
+
+.dark .glass {
+  box-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.08),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.3),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.06),
+    0 20px 48px rgba(0, 0, 0, 0.5),
+    0 6px 16px rgba(0, 0, 0, 0.3);
+}
+
+.glass-modal {
+  background: var(--glass-bg);
+  backdrop-filter: blur(40px) saturate(210%);
+  -webkit-backdrop-filter: blur(40px) saturate(210%);
+  border: 1px solid var(--glass-border);
+  border-radius: 24px;
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.9),
+    inset 0 -1.5px 0 rgba(30, 20, 70, 0.06),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.26),
+    0 36px 80px rgba(30, 20, 70, 0.24),
+    0 10px 24px rgba(30, 20, 70, 0.12);
+}
+
+.dark .glass-modal {
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.1),
+    inset 0 -1.5px 0 rgba(0, 0, 0, 0.35),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.07),
+    0 36px 80px rgba(0, 0, 0, 0.6),
+    0 10px 24px rgba(0, 0, 0, 0.35);
 }
 
 .glass-card {

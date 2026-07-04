@@ -171,7 +171,7 @@ export function LabOrdersClient({ labOrders, customers }: { labOrders: LabOrder[
 
       {showAdd && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowAdd(false)}>
-          <div className="glass-card p-6 w-full max-w-lg animate-fade-in" onClick={(e) => e.stopPropagation()}>
+          <div className="glass-modal p-6 w-full max-w-lg animate-rise" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold">New Lab Order</h3>
               <button onClick={() => setShowAdd(false)}><X className="w-5 h-5" /></button>
