@@ -156,6 +156,8 @@ model Sale {
   lensProductId   String?
   lensProduct     Product?      @relation("LensProduct", fields: [lensProductId], references: [id])
   lensCost        Float         @default(0)
+  customLensName  String        @default("")
+  customLensPrice Float         @default(0)
   labCharges      Float         @default(0)
   fittingCharges  Float         @default(0)
   totalCost       Float         @default(0)

@@ -10,7 +10,7 @@ import { useRouter } from "next/navigation";
 import {
   Search, Plus, Minus, Trash2, X, User, CreditCard,
   Banknote, Building2, Smartphone, Printer, MessageCircle, Receipt,
-  Glasses, ChevronDown, ChevronUp, TrendingUp,
+  Glasses, ChevronDown, ChevronUp, TrendingUp, Lock, Edit3,
 } from "lucide-react";
 import { firstImage } from "@/lib/utils/images";
 import { LensLoader } from "@/components/ui/LensLoader";
@@ -30,9 +30,15 @@ interface POSCustomer {
   phone: string;
 }
 
+interface StaffMember {
+  id: string;
+  name: string;
+}
+
 interface SaleResult {
   invoiceNo: string;
-  servedBy: string;
+  orderTakenByName: string;
+  billGeneratedByName: string;
   date: string;
 }
 
@@ -42,12 +48,22 @@ const EMPTY_RX = {
   notes: "",
 };
 
-export function POSClient({ products, customers }: { products: Product[]; customers: POSCustomer[] }) {
+export function POSClient({
+  products, customers, staff, currentUserId, canSeeCosts,
+}: {
+  products: Product[];
+  customers: POSCustomer[];
+  staff: StaffMember[];
+  currentUserId: string;
+  canSeeCosts: boolean;
+}) {
   const { showToast } = useApp();
   const router = useRouter();
   const [search, setSearch] = useState("");
   const [cart, setCart] = useState<CartItem[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState<string>("");
+  const [orderTakenBy, setOrderTakenBy] = useState(currentUserId);
+  const [billGeneratedBy, setBillGeneratedBy] = useState(currentUserId);
   const [paymentMethod, setPaymentMethod] = useState("Cash");
   const [paymentType, setPaymentType] = useState<"Full" | "Advance" | "Balance">("Full");
   const [advanceAmount, setAdvanceAmount] = useState(0);
@@ -60,6 +76,9 @@ export function POSClient({ products, customers }: { products: Product[]; custom
   const [showJob, setShowJob] = useState(false);
   const [lensProductId, setLensProductId] = useState("");
   const [lensSearch, setLensSearch] = useState("");
+  const [useCustomLens, setUseCustomLens] = useState(false);
+  const [customLensName, setCustomLensName] = useState("");
+  const [customLensPrice, setCustomLensPrice] = useState(0);
   const [labCharges, setLabCharges] = useState(0);
   const [fittingCharges, setFittingCharges] = useState(0);
 
@@ -143,18 +162,23 @@ export function POSClient({ products, customers }: { products: Product[]; custom
     );
   };
 
-  const subtotal = cart.reduce((sum, i) => sum + i.price * i.quantity - i.discount, 0);
+  const cartSubtotal = cart.reduce((sum, i) => sum + i.price * i.quantity - i.discount, 0);
+  const customLensAmount = useCustomLens ? customLensPrice : 0;
+  const subtotal = cartSubtotal + customLensAmount;
   const total = subtotal - invoiceDiscount;
   const customer = customers.find((c) => c.id === selectedCustomer);
 
-  // Profitability: real cost = product costs + lab + fitting charges
+  // Profitability: real cost = product costs + lab + fitting charges. A
+  // manually-entered lens has no known cost, so it's assumed zero-margin
+  // (its price counts as its own cost) rather than overstating profit.
   const itemCost = cart.reduce((sum, i) => {
     const p = products.find((pr) => pr.id === i.productId);
     return sum + (p ? p.costPrice * i.quantity : 0);
   }, 0);
-  const totalCost = itemCost + labCharges + fittingCharges;
+  const totalCost = itemCost + customLensAmount + labCharges + fittingCharges;
   const profit = total - totalCost;
   const margin = total > 0 ? (profit / total) * 100 : 0;
+  const hasSaleableItems = cart.length > 0 || (useCustomLens && customLensPrice > 0);
 
   const selectLens = (id: string) => {
     if (lensProductId && lensProductId !== id) {
@@ -201,23 +225,32 @@ export function POSClient({ products, customers }: { products: Product[]; custom
     setShowJob(false);
     setLensProductId("");
     setLensSearch("");
+    setUseCustomLens(false);
+    setCustomLensName("");
+    setCustomLensPrice(0);
     setLabCharges(0);
     setFittingCharges(0);
     setRecordRx(false);
     setRx({ ...EMPTY_RX });
+    setOrderTakenBy(currentUserId);
+    setBillGeneratedBy(currentUserId);
     router.refresh();
   };
 
   const num = (v: string) => (v === "" ? 0 : Number(v));
 
   const completeSale = async () => {
-    if (cart.length === 0) return;
+    if (!hasSaleableItems) return;
     if (paymentType === "Advance" && advanceAmount <= 0) {
       showToast("Enter the advance amount received", "error");
       return;
     }
     if (recordRx && !selectedCustomer) {
       showToast("Select a customer to save the prescription", "error");
+      return;
+    }
+    if (useCustomLens && (!customLensName.trim() || customLensPrice <= 0)) {
+      showToast("Enter a name and price for the custom lens", "error");
       return;
     }
     setSaving(true);
@@ -230,8 +263,12 @@ export function POSClient({ products, customers }: { products: Product[]; custom
         advanceAmount,
         invoiceDiscount,
         lensProductId: lensProductId || undefined,
+        customLensName: useCustomLens ? customLensName.trim() : undefined,
+        customLensPrice: useCustomLens ? customLensPrice : undefined,
         labCharges,
         fittingCharges,
+        createdById: orderTakenBy || currentUserId,
+        receivedById: billGeneratedBy || currentUserId,
         prescription: recordRx ? {
           rightSph: num(rx.rightSph), rightCyl: num(rx.rightCyl), rightAxis: num(rx.rightAxis), rightPd: num(rx.rightPd), rightAdd: num(rx.rightAdd),
           leftSph: num(rx.leftSph), leftCyl: num(rx.leftCyl), leftAxis: num(rx.leftAxis), leftPd: num(rx.leftPd), leftAdd: num(rx.leftAdd),
@@ -240,7 +277,8 @@ export function POSClient({ products, customers }: { products: Product[]; custom
       });
       setSaleResult({
         invoiceNo: res.invoiceNo,
-        servedBy: res.servedBy,
+        orderTakenByName: res.orderTakenByName,
+        billGeneratedByName: res.billGeneratedByName,
         date: new Date().toLocaleString("en-PK", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }),
       });
       setShowSuccess(true);
@@ -294,7 +332,8 @@ export function POSClient({ products, customers }: { products: Product[]; custom
               </div>
               <p className="text-[10px]">INV: {saleResult.invoiceNo}</p>
               <p className="text-[10px]">Date: {saleResult.date}</p>
-              <p className="text-[10px]">Served by: {saleResult.servedBy}</p>
+              <p className="text-[10px]">Order taken by: {saleResult.orderTakenByName}</p>
+              <p className="text-[10px]">Bill generated by: {saleResult.billGeneratedByName}</p>
               {customer && <p className="text-[10px]">Customer: {customer.name}</p>}
               {recordRx && (
                 <div className="text-[10px] mt-1 pt-1 border-t border-dashed border-gray-400">
@@ -316,6 +355,15 @@ export function POSClient({ products, customers }: { products: Product[]; custom
                     )}
                   </div>
                 ))}
+                {useCustomLens && customLensAmount > 0 && (
+                  <div className="mb-1">
+                    <p className="text-[10px] font-medium">{customLensName}</p>
+                    <div className="flex justify-between text-[10px]">
+                      <span>1 x {formatCurrency(customLensAmount)}</span>
+                      <span>{formatCurrency(customLensAmount)}</span>
+                    </div>
+                  </div>
+                )}
               </div>
               <div className="border-t border-dashed border-gray-400 mt-2 pt-2 space-y-0.5">
                 <div className="flex justify-between text-[10px]"><span>Subtotal</span><span>{formatCurrency(subtotal)}</span></div>
@@ -377,13 +425,21 @@ export function POSClient({ products, customers }: { products: Product[]; custom
                       <td className="text-right py-2">{formatCurrency(item.price * item.quantity - item.discount)}</td>
                     </tr>
                   ))}
+                  {useCustomLens && customLensAmount > 0 && (
+                    <tr className="border-b border-gray-100">
+                      <td className="py-2">{customLensName}</td>
+                      <td className="text-center py-2">1</td>
+                      <td className="text-right py-2">{formatCurrency(customLensAmount)}</td>
+                      <td className="text-right py-2">{formatCurrency(customLensAmount)}</td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
               <div className="border-t-2 border-gray-200 pt-3 space-y-1 text-right">
                 <p>Subtotal: {formatCurrency(subtotal)}</p>
                 {invoiceDiscount > 0 && <p>Discount: -{formatCurrency(invoiceDiscount)}</p>}
                 <p className="text-lg font-bold text-[#6d5ef0]">Total: {formatCurrency(total)}</p>
-                <p className="text-xs text-gray-500">Served by {saleResult.servedBy}</p>
+                <p className="text-xs text-gray-500">Order taken by {saleResult.orderTakenByName} · Bill by {saleResult.billGeneratedByName}</p>
               </div>
             </div>
             <div className="flex gap-3 mt-4">
@@ -490,6 +546,21 @@ export function POSClient({ products, customers }: { products: Product[]; custom
             )}
           </div>
 
+          <div className="grid grid-cols-2 gap-2 mb-3">
+            <div>
+              <label className="text-[10px] font-medium text-muted-foreground mb-1 block">Order taken by</label>
+              <select value={orderTakenBy} onChange={(e) => setOrderTakenBy(e.target.value)} className="w-full px-2 py-2 glass-input text-xs">
+                {staff.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-[10px] font-medium text-muted-foreground mb-1 block">Bill generated by</label>
+              <select value={billGeneratedBy} onChange={(e) => setBillGeneratedBy(e.target.value)} className="w-full px-2 py-2 glass-input text-xs">
+                {staff.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </div>
+          </div>
+
           <div className="mb-3">
             <button
               onClick={() => setShowJob((v) => !v)}
@@ -501,8 +572,27 @@ export function POSClient({ products, customers }: { products: Product[]; custom
             {showJob && (
               <div className="mt-2 space-y-2 p-3 rounded-xl border border-border">
                 <div>
-                  <label className="text-[10px] font-medium text-muted-foreground mb-1 block">Lens (adds to order)</label>
-                  {lensProduct ? (
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-[10px] font-medium text-muted-foreground block">Lens (adds to order)</label>
+                    {!lensProduct && !useCustomLens && (
+                      <button onClick={() => setUseCustomLens(true)} className="text-[10px] text-primary font-medium flex items-center gap-1">
+                        <Edit3 className="w-3 h-3" /> Enter manually
+                      </button>
+                    )}
+                    {useCustomLens && (
+                      <button onClick={() => { setUseCustomLens(false); setCustomLensName(""); setCustomLensPrice(0); }} className="text-[10px] text-primary font-medium flex items-center gap-1">
+                        <Search className="w-3 h-3" /> Search catalog
+                      </button>
+                    )}
+                  </div>
+                  {useCustomLens ? (
+                    <div className="grid grid-cols-2 gap-2">
+                      <input type="text" value={customLensName} onChange={(e) => setCustomLensName(e.target.value)}
+                        placeholder="Lens name" className="w-full px-3 py-2 glass-input text-xs" />
+                      <input type="number" value={customLensPrice || ""} onChange={(e) => setCustomLensPrice(Number(e.target.value))}
+                        placeholder="Price" className="w-full px-3 py-2 glass-input text-xs" />
+                    </div>
+                  ) : lensProduct ? (
                     <div className="flex items-center justify-between gap-2 px-3 py-2 bg-primary/5 rounded-lg">
                       <span className="text-xs font-medium truncate">{lensProduct.brand} {lensProduct.name} — {formatCurrency(lensProduct.salePrice)}</span>
                       <button onClick={clearLens} className="flex-shrink-0"><X className="w-3.5 h-3.5" /></button>
@@ -537,19 +627,24 @@ export function POSClient({ products, customers }: { products: Product[]; custom
                     </div>
                   )}
                 </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="text-[10px] font-medium text-muted-foreground mb-1 block">Lab charges (cost)</label>
-                    <input type="number" value={labCharges || ""} onChange={(e) => setLabCharges(Number(e.target.value))}
-                      className="w-full px-3 py-2 glass-input text-xs" placeholder="0" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-medium text-muted-foreground mb-1 block">Fitting charges (cost)</label>
-                    <input type="number" value={fittingCharges || ""} onChange={(e) => setFittingCharges(Number(e.target.value))}
-                      className="w-full px-3 py-2 glass-input text-xs" placeholder="0" />
+
+                <div className="p-2.5 rounded-lg bg-muted/50 border border-border">
+                  <p className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1 mb-2">
+                    <Lock className="w-2.5 h-2.5" /> Internal costs — not shown to customer
+                  </p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[10px] font-medium text-muted-foreground mb-1 block">Lab charges</label>
+                      <input type="number" value={labCharges || ""} onChange={(e) => setLabCharges(Number(e.target.value))}
+                        className="w-full px-3 py-2 glass-input text-xs" placeholder="0" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-medium text-muted-foreground mb-1 block">Fitting charges</label>
+                      <input type="number" value={fittingCharges || ""} onChange={(e) => setFittingCharges(Number(e.target.value))}
+                        className="w-full px-3 py-2 glass-input text-xs" placeholder="0" />
+                    </div>
                   </div>
                 </div>
-                <p className="text-[10px] text-muted-foreground">Lab &amp; fitting are shop costs — they reduce profit but aren&apos;t added to the customer&apos;s bill.</p>
 
                 <label className="flex items-center gap-2 text-xs font-medium pt-2 border-t border-border cursor-pointer">
                   <input type="checkbox" checked={recordRx} onChange={(e) => setRecordRx(e.target.checked)} className="rounded" />
@@ -585,7 +680,7 @@ export function POSClient({ products, customers }: { products: Product[]; custom
             )}
           </div>
 
-          {cart.length === 0 ? (
+          {!hasSaleableItems ? (
             <div className="flex-1 flex items-center justify-center py-12 text-muted-foreground">
               <p className="text-xs">Click products to add to cart</p>
             </div>
@@ -624,7 +719,7 @@ export function POSClient({ products, customers }: { products: Product[]; custom
             </div>
           )}
 
-          {cart.length > 0 && (
+          {hasSaleableItems && (
             <>
               <div className="space-y-2 border-t border-border pt-3">
                 <div className="flex justify-between text-xs">
@@ -645,10 +740,12 @@ export function POSClient({ products, customers }: { products: Product[]; custom
                   <span>Total</span>
                   <span className="text-primary">{formatCurrency(total)}</span>
                 </div>
-                <div className={`flex items-center justify-between text-[11px] mt-1 px-2 py-1.5 rounded-lg ${profit < 0 ? "bg-destructive/10 text-destructive" : "bg-success/10 text-success"}`}>
-                  <span className="flex items-center gap-1"><TrendingUp className="w-3 h-3" /> Profit (cost {formatCurrency(totalCost)})</span>
-                  <span className="font-semibold">{formatCurrency(profit)} · {margin.toFixed(0)}%</span>
-                </div>
+                {canSeeCosts && (
+                  <div className={`flex items-center justify-between text-[11px] mt-1 px-2 py-1.5 rounded-lg ${profit < 0 ? "bg-destructive/10 text-destructive" : "bg-success/10 text-success"}`}>
+                    <span className="flex items-center gap-1"><TrendingUp className="w-3 h-3" /> Profit (cost {formatCurrency(totalCost)})</span>
+                    <span className="font-semibold">{formatCurrency(profit)} · {margin.toFixed(0)}%</span>
+                  </div>
+                )}
               </div>
 
               <div className="mt-4 space-y-3">

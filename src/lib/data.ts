@@ -309,6 +309,100 @@ export async function getWhatsAppMessages(): Promise<WhatsAppMessageView[]> {
   }));
 }
 
+// ─── Reminders (eye test / lens change follow-ups) ──────────
+const EYE_TEST_REMINDER_TEMPLATE = "Eye Test Reminder";
+const LENS_CHANGE_REMINDER_TEMPLATE = "Lens Change Reminder";
+const EYE_TEST_DUE_DAYS = 365;
+const LENS_CHANGE_DUE_DAYS = 180;
+
+export interface ReminderItem {
+  customerId: string;
+  customerName: string;
+  phone: string;
+  type: "EYE_TEST" | "LENS_CHANGE";
+  template: string;
+  lastDate: string;
+  daysSince: number;
+  message: string;
+}
+
+export async function getReminders(): Promise<ReminderItem[]> {
+  const customers = await db.customer.findMany({
+    select: {
+      id: true,
+      name: true,
+      phone: true,
+      prescriptions: { select: { date: true }, orderBy: { date: "desc" }, take: 1 },
+      sales: {
+        where: { OR: [{ lensProductId: { not: null } }, { customLensPrice: { gt: 0 } }] },
+        select: { date: true },
+        orderBy: { date: "desc" },
+        take: 1,
+      },
+    },
+  });
+
+  // A customer drops off the due list once a reminder of that type has been
+  // logged for them more recently than the event (test/change) that made them due.
+  const sentMessages = await db.whatsAppMessage.findMany({
+    where: { template: { in: [EYE_TEST_REMINDER_TEMPLATE, LENS_CHANGE_REMINDER_TEMPLATE] } },
+    select: { to: true, template: true, sentAt: true },
+  });
+  const lastSentMap = new Map<string, Date>();
+  for (const m of sentMessages) {
+    const key = `${m.to}::${m.template}`;
+    const prev = lastSentMap.get(key);
+    if (!prev || m.sentAt > prev) lastSentMap.set(key, m.sentAt);
+  }
+
+  const now = Date.now();
+  const dayMs = 24 * 60 * 60 * 1000;
+  const items: ReminderItem[] = [];
+
+  for (const c of customers) {
+    if (!c.phone) continue;
+
+    const lastEyeTest = c.prescriptions[0]?.date;
+    if (lastEyeTest) {
+      const daysSince = Math.floor((now - lastEyeTest.getTime()) / dayMs);
+      const lastSent = lastSentMap.get(`${c.phone}::${EYE_TEST_REMINDER_TEMPLATE}`);
+      if (daysSince >= EYE_TEST_DUE_DAYS && (!lastSent || lastSent < lastEyeTest)) {
+        items.push({
+          customerId: c.id,
+          customerName: c.name,
+          phone: c.phone,
+          type: "EYE_TEST",
+          template: EYE_TEST_REMINDER_TEMPLATE,
+          lastDate: iso(lastEyeTest),
+          daysSince,
+          message: `Hello ${c.name}, it's been a year since your last eye test at Noor Optics. Book an appointment to get your eyes checked!`,
+        });
+      }
+    }
+
+    const lastLensChange = c.sales[0]?.date;
+    if (lastLensChange) {
+      const daysSince = Math.floor((now - lastLensChange.getTime()) / dayMs);
+      const lastSent = lastSentMap.get(`${c.phone}::${LENS_CHANGE_REMINDER_TEMPLATE}`);
+      if (daysSince >= LENS_CHANGE_DUE_DAYS && (!lastSent || lastSent < lastLensChange)) {
+        items.push({
+          customerId: c.id,
+          customerName: c.name,
+          phone: c.phone,
+          type: "LENS_CHANGE",
+          template: LENS_CHANGE_REMINDER_TEMPLATE,
+          lastDate: iso(lastLensChange),
+          daysSince,
+          message: `Hello ${c.name}, it's been 6 months since your last lens change at Noor Optics. Visit us for a check-up and fresh lenses!`,
+        });
+      }
+    }
+  }
+
+  items.sort((a, b) => b.daysSince - a.daysSince);
+  return items;
+}
+
 // ─── Shop Settings ──────────────────────────────────────────
 export interface SettingsView {
   name: string; address: string; phone: string; email: string; ntn: string;

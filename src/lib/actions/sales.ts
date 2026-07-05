@@ -29,6 +29,12 @@ export interface CreateSaleInput {
   lensProductId?: string;
   labCharges?: number;
   fittingCharges?: number;
+  // Manually-entered lens (no catalog product) — name/price only, no stock impact
+  customLensName?: string;
+  customLensPrice?: number;
+  // Staff tracking: who took the order vs. who generated the bill
+  createdById?: string;
+  receivedById?: string;
   // Optional prescription captured during the sale (needs customerId)
   prescription?: SalePrescriptionInput;
 }
@@ -43,7 +49,10 @@ export async function createSale(input: CreateSaleInput) {
   const session = await auth();
   if (!session?.user) throw new Error("Unauthorized");
 
-  if (!input.items.length) throw new Error("Cart is empty");
+  const customLensPrice = Math.max(0, input.customLensPrice ?? 0);
+  const customLensName = customLensPrice > 0 ? (input.customLensName ?? "").trim() : "";
+  if (!input.items.length && customLensPrice <= 0) throw new Error("Cart is empty");
+  if (customLensPrice > 0 && !customLensName) throw new Error("Custom lens name is required");
 
   // Fetch real products for cost + stock validation
   const productIds = input.items.map((i) => i.productId);
@@ -67,6 +76,7 @@ export async function createSale(input: CreateSaleInput) {
       total: lineTotal,
     };
   });
+  subtotal += customLensPrice;
 
   const total = Math.max(0, subtotal - input.invoiceDiscount);
   const labCharges = Math.max(0, input.labCharges ?? 0);
@@ -78,7 +88,9 @@ export async function createSale(input: CreateSaleInput) {
     const lens = await db.product.findUnique({ where: { id: input.lensProductId } });
     if (lens) lensCost = lens.costPrice;
   }
-  const totalCost = itemCost + lensCost + labCharges + fittingCharges;
+  // Custom (manually-entered) lens has no known cost basis — treated as a
+  // zero-margin pass-through so it doesn't fabricate false profit.
+  const totalCost = itemCost + lensCost + customLensPrice + labCharges + fittingCharges;
   const profit = total - totalCost;
 
   const paymentStatus = paymentStatusFor(input.paymentType);
@@ -93,6 +105,18 @@ export async function createSale(input: CreateSaleInput) {
   const invoiceNo = `INV-${year}-${String(countThisYear + 1).padStart(3, "0")}`;
 
   const branchId = input.branchId || session.user.branchId || undefined;
+
+  // Staff tracking: resolve who took the order vs. who generated the bill,
+  // defaulting to the signed-in user, and validate any explicit IDs are real.
+  const createdById = input.createdById || session.user.id;
+  const receivedById = input.receivedById || session.user.id;
+  const staffUsers = await db.user.findMany({ where: { id: { in: [...new Set([createdById, receivedById])] } } });
+  const staffMap = new Map(staffUsers.map((u) => [u.id, u]));
+  if (!staffMap.has(createdById) || !staffMap.has(receivedById)) {
+    throw new Error("Selected staff member not found");
+  }
+  const orderTakenByName = staffMap.get(createdById)!.name;
+  const billGeneratedByName = staffMap.get(receivedById)!.name;
 
   const sale = await db.sale.create({
     data: {
@@ -109,11 +133,14 @@ export async function createSale(input: CreateSaleInput) {
       paymentStatus,
       lensProductId: input.lensProductId || null,
       lensCost,
+      customLensName,
+      customLensPrice,
       labCharges,
       fittingCharges,
       totalCost,
       profit,
-      createdById: session.user.id,
+      createdById,
+      receivedById,
       items: { create: saleItems },
     },
   });
@@ -164,7 +191,8 @@ export async function createSale(input: CreateSaleInput) {
     ok: true,
     saleId: sale.id,
     invoiceNo,
-    servedBy: session.user.name,
+    orderTakenByName,
+    billGeneratedByName,
     total,
     paid,
     balance,

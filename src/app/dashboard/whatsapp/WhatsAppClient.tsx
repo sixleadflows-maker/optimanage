@@ -1,10 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import type { WhatsAppMessageView } from "@/lib/data";
-import { formatDateTime } from "@/lib/utils/format";
+import type { WhatsAppMessageView, ReminderItem } from "@/lib/data";
+import { logReminderSent } from "@/lib/actions/whatsapp";
+import { formatDate, formatDateTime } from "@/lib/utils/format";
 import { useApp } from "@/lib/context";
-import { MessageCircle, Send, CheckCheck, Check, AlertCircle } from "lucide-react";
+import { MessageCircle, Send, CheckCheck, Check, AlertCircle, Bell, Eye, RefreshCw } from "lucide-react";
 import { EmptyState } from "@/components/ui/EmptyState";
 
 const TEMPLATES = [
@@ -23,11 +24,30 @@ const statusIcons: Record<string, React.ReactNode> = {
   Failed: <AlertCircle className="w-3 h-3 text-destructive" />,
 };
 
-export function WhatsAppClient({ messages }: { messages: WhatsAppMessageView[] }) {
+export function WhatsAppClient({ messages, reminders: initialReminders }: { messages: WhatsAppMessageView[]; reminders: ReminderItem[] }) {
   const { showToast } = useApp();
-  const [activeTab, setActiveTab] = useState<"templates" | "log" | "campaign">("templates");
+  const [activeTab, setActiveTab] = useState<"reminders" | "templates" | "log" | "campaign">("reminders");
   const [campaignMessage, setCampaignMessage] = useState("");
   const [campaignCategory, setCampaignCategory] = useState("All Customers");
+  const [reminders, setReminders] = useState(initialReminders);
+  const [sendingKey, setSendingKey] = useState<string | null>(null);
+
+  const sendReminder = async (r: ReminderItem) => {
+    const phone = r.phone.replace(/[^0-9]/g, "");
+    if (!phone) { showToast("No phone number on file", "error"); return; }
+    const key = `${r.customerId}-${r.type}`;
+    setSendingKey(key);
+    try {
+      window.open(`https://wa.me/${phone}?text=${encodeURIComponent(r.message)}`, "_blank");
+      await logReminderSent({ customerId: r.customerId, template: r.template, message: r.message });
+      setReminders((prev) => prev.filter((x) => !(x.customerId === r.customerId && x.type === r.type)));
+      showToast(`Reminder logged for ${r.customerName}`, "success");
+    } catch {
+      showToast("Failed to log reminder", "error");
+    } finally {
+      setSendingKey(null);
+    }
+  };
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -39,13 +59,51 @@ export function WhatsAppClient({ messages }: { messages: WhatsAppMessageView[] }
       </div>
 
       <div className="flex gap-1.5">
-        {(["templates", "log", "campaign"] as const).map((tab) => (
+        {(["reminders", "templates", "log", "campaign"] as const).map((tab) => (
           <button key={tab} onClick={() => setActiveTab(tab)}
-            className={`px-4 py-2 rounded-xl text-sm font-medium capitalize transition-all ${activeTab === tab ? "bg-[#25D366] text-white" : "bg-surface hover:bg-surface-hover"}`}>
-            {tab === "log" ? "Sent Log" : tab}
+            className={`px-4 py-2 rounded-xl text-sm font-medium capitalize transition-all flex items-center gap-1.5 ${activeTab === tab ? "bg-[#25D366] text-white" : "bg-surface hover:bg-surface-hover"}`}>
+            {tab === "log" ? "Sent Log" : tab === "reminders" ? "Reminders Due" : tab}
+            {tab === "reminders" && reminders.length > 0 && (
+              <span className={`text-[10px] font-bold rounded-full min-w-[16px] h-4 px-1 flex items-center justify-center ${activeTab === tab ? "bg-white/25" : "bg-destructive text-white"}`}>
+                {reminders.length}
+              </span>
+            )}
           </button>
         ))}
       </div>
+
+      {activeTab === "reminders" && (
+        <div className="glass-card p-4">
+          {reminders.length === 0 ? (
+            <EmptyState icon={Bell} title="No reminders due" hint="Customers due for a 1-year eye test or 6-month lens change follow-up will show up here automatically." />
+          ) : (
+            <div className="space-y-2">
+              {reminders.map((r) => {
+                const key = `${r.customerId}-${r.type}`;
+                return (
+                  <div key={key} className="flex items-center gap-3 p-3 rounded-xl bg-surface">
+                    <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${r.type === "EYE_TEST" ? "bg-blue-500/10 text-blue-500" : "bg-amber-500/10 text-amber-500"}`}>
+                      {r.type === "EYE_TEST" ? <Eye className="w-4 h-4" /> : <RefreshCw className="w-4 h-4" />}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{r.customerName}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {r.type === "EYE_TEST" ? "Eye test" : "Lens change"} due · {r.daysSince} days since {formatDate(r.lastDate)}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => sendReminder(r)}
+                      disabled={sendingKey === key}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-[#25D366] text-white rounded-lg text-xs font-medium hover:bg-[#20bd5a] transition-colors disabled:opacity-60 flex-shrink-0">
+                      <Send className="w-3 h-3" /> Send
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       {activeTab === "templates" && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
