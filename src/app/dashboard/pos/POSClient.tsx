@@ -59,6 +59,7 @@ export function POSClient({ products, customers }: { products: Product[]; custom
   const [showSuccess, setShowSuccess] = useState(false);
   const [showJob, setShowJob] = useState(false);
   const [lensProductId, setLensProductId] = useState("");
+  const [lensSearch, setLensSearch] = useState("");
   const [labCharges, setLabCharges] = useState(0);
   const [fittingCharges, setFittingCharges] = useState(0);
 
@@ -97,6 +98,19 @@ export function POSClient({ products, customers }: { products: Product[]; custom
       (c) => c.name.toLowerCase().includes(q) || c.phone.includes(q)
     );
   }, [customers, customerSearch]);
+
+  const filteredLensProducts = useMemo(() => {
+    if (!lensSearch) return lensProducts.slice(0, 6);
+    const q = lensSearch.toLowerCase();
+    return lensProducts.filter(
+      (p) =>
+        p.name.toLowerCase().includes(q) ||
+        p.brand.toLowerCase().includes(q) ||
+        p.model.toLowerCase().includes(q)
+    ).slice(0, 6);
+  }, [lensProducts, lensSearch]);
+
+  const lensProduct = products.find((p) => p.id === lensProductId);
 
   const addToCart = (productId: string) => {
     const product = products.find((p) => p.id === productId);
@@ -143,8 +157,19 @@ export function POSClient({ products, customers }: { products: Product[]; custom
   const margin = total > 0 ? (profit / total) * 100 : 0;
 
   const selectLens = (id: string) => {
+    if (lensProductId && lensProductId !== id) {
+      setCart((prev) => prev.filter((i) => i.productId !== lensProductId));
+    }
     setLensProductId(id);
+    setLensSearch("");
     if (id) addToCart(id);
+  };
+
+  const clearLens = () => {
+    if (lensProductId) {
+      setCart((prev) => prev.filter((i) => i.productId !== lensProductId));
+    }
+    setLensProductId("");
   };
 
   // Barcode scanners type the code then send Enter — add exact matches straight to the cart.
@@ -175,6 +200,7 @@ export function POSClient({ products, customers }: { products: Product[]; custom
     setSaleResult(null);
     setShowJob(false);
     setLensProductId("");
+    setLensSearch("");
     setLabCharges(0);
     setFittingCharges(0);
     setRecordRx(false);
@@ -476,12 +502,40 @@ export function POSClient({ products, customers }: { products: Product[]; custom
               <div className="mt-2 space-y-2 p-3 rounded-xl border border-border">
                 <div>
                   <label className="text-[10px] font-medium text-muted-foreground mb-1 block">Lens (adds to order)</label>
-                  <select value={lensProductId} onChange={(e) => selectLens(e.target.value)} className="w-full px-3 py-2 glass-input text-xs">
-                    <option value="">No lens</option>
-                    {lensProducts.map((p) => (
-                      <option key={p.id} value={p.id}>{p.brand} {p.name} — {formatCurrency(p.salePrice)}</option>
-                    ))}
-                  </select>
+                  {lensProduct ? (
+                    <div className="flex items-center justify-between gap-2 px-3 py-2 bg-primary/5 rounded-lg">
+                      <span className="text-xs font-medium truncate">{lensProduct.brand} {lensProduct.name} — {formatCurrency(lensProduct.salePrice)}</span>
+                      <button onClick={clearLens} className="flex-shrink-0"><X className="w-3.5 h-3.5" /></button>
+                    </div>
+                  ) : (
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+                      <input
+                        type="text"
+                        placeholder="Type to search lenses..."
+                        value={lensSearch}
+                        onChange={(e) => setLensSearch(e.target.value)}
+                        className="w-full pl-9 pr-4 py-2 glass-input text-xs"
+                      />
+                      {lensSearch && (
+                        <div className="mt-1 glass rounded-lg p-1 max-h-32 overflow-y-auto">
+                          {filteredLensProducts.length === 0 && (
+                            <p className="px-3 py-1.5 text-xs text-muted-foreground">No matching lens</p>
+                          )}
+                          {filteredLensProducts.map((p) => (
+                            <button
+                              key={p.id}
+                              onClick={() => selectLens(p.id)}
+                              className="w-full text-left px-3 py-1.5 rounded-lg hover:bg-surface-hover text-xs flex items-center justify-between gap-2"
+                            >
+                              <span className="truncate">{p.brand} {p.name}</span>
+                              <span className="text-muted-foreground flex-shrink-0">{formatCurrency(p.salePrice)}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <div>
