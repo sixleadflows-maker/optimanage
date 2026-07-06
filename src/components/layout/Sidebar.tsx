@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils/cn";
 import {
   LayoutDashboard, ShoppingCart, Receipt, Package, Users, UserCircle,
   Eye, FlaskConical, MessageCircle, BarChart3, Settings, X, Wallet,
-  Truck, Store, Banknote,
+  Truck, Store, Banknote, Activity,
 } from "lucide-react";
 
 const navGroups = [
@@ -15,6 +15,7 @@ const navGroups = [
     label: "Overview",
     items: [
       { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+      { href: "/dashboard/monitor", label: "Monitor", icon: Activity },
     ],
   },
   {
