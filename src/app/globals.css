@@ -695,6 +695,46 @@ a:hover .nav-icon { transform: translateY(-1px) scale(1.08); }
   line-height: 1.4;
 }
 
+/* Printing the thermal receipt or A4 invoice must isolate just that one
+   element -- otherwise the sidebar, topbar, and the other receipt format
+   print alongside it. Only one of these two "printing-*" classes is ever
+   applied at a time, toggled directly on document.body right before
+   window.print() is called (see printOnly() in POSClient.tsx). The class
+   lives on body (not a nested element) so plain descendant selectors work
+   without relying on :has(). */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+
+  body.printing-thermal *,
+  body.printing-a4 * {
+    visibility: hidden;
+  }
+
+  body.printing-thermal .receipt-paper,
+  body.printing-thermal .receipt-paper *,
+  body.printing-a4 .a4-invoice,
+  body.printing-a4 .a4-invoice * {
+    visibility: visible;
+  }
+
+  body.printing-thermal .receipt-paper {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 80mm;
+    box-shadow: none;
+  }
+  body.printing-a4 .a4-invoice {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    box-shadow: none;
+  }
+}
+
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: rgba(23, 20, 60, 0.16); border-radius: 3px; }

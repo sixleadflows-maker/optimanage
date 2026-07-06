@@ -103,6 +103,16 @@ export function POSClient({
     popTimer.current = setTimeout(() => setPoppedId((cur) => (cur === productId ? null : cur)), 420);
   };
 
+  // Printing only the thermal receipt or only the A4 invoice (not the whole
+  // dashboard page around it) is done with a class toggled directly on
+  // document.body right before print, rather than React state, so there's
+  // no risk of the print firing before a state update has actually committed.
+  const printOnly = (mode: "thermal" | "a4") => {
+    document.body.classList.add(`printing-${mode}`);
+    window.print();
+    document.body.classList.remove(`printing-${mode}`);
+  };
+
   // Offline sale drafts are stored in localStorage, not component state, so
   // they survive a page reload — load whatever's already queued on mount.
   useEffect(() => {
@@ -367,7 +377,7 @@ export function POSClient({
   if (showReceipt && saleResult) {
     return (
       <div className="animate-slide-right">
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center justify-between mb-6 no-print">
           <h1 className="text-2xl font-bold">Invoice Preview</h1>
           <button onClick={resetSale} className="px-4 py-2 glass-card text-sm font-medium cursor-pointer">
             ← New Sale
@@ -440,10 +450,14 @@ export function POSClient({
                 Thank you for choosing {SHOP_NAME}!
               </p>
             </div>
+            <button onClick={() => printOnly("thermal")}
+              className="no-print w-full mt-4 flex items-center justify-center gap-2 py-2.5 glass-card text-sm font-medium cursor-pointer">
+              <Printer className="w-4 h-4" /> Print Receipt
+            </button>
           </div>
           <div className="glass-card p-6">
             <h3 className="text-sm font-semibold mb-4">A4 Invoice</h3>
-            <div className="bg-white text-black rounded-lg p-6 shadow-lg text-sm">
+            <div className="a4-invoice bg-white text-black rounded-lg p-6 shadow-lg text-sm">
               <div className="flex justify-between items-start mb-6">
                 <div>
                   <h2 className="text-lg font-bold text-[#6d5ef0]">{SHOP_NAME}</h2>
@@ -497,8 +511,8 @@ export function POSClient({
                 <p className="text-xs text-gray-500">Order taken by {saleResult.orderTakenByName} · Bill by {saleResult.billGeneratedByName}</p>
               </div>
             </div>
-            <div className="flex gap-3 mt-4">
-              <button onClick={() => window.print()}
+            <div className="no-print flex gap-3 mt-4">
+              <button onClick={() => printOnly("a4")}
                 className="flex-1 flex items-center justify-center gap-2 py-2.5 glass-card text-sm font-medium cursor-pointer">
                 <Printer className="w-4 h-4" /> Print
               </button>
