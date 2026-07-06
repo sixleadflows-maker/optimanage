@@ -1,19 +1,27 @@
 "use client";
 
-import { useState, useMemo, useRef } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import type { Product } from "@/lib/mock/types";
 import { formatCurrency } from "@/lib/utils/format";
 import { useApp } from "@/lib/context";
 import { SHOP_NAME } from "@/lib/constants";
-import { createSale } from "@/lib/actions/sales";
+import { createSale, type CreateSaleInput } from "@/lib/actions/sales";
+import { getDrafts, addDraft, removeDraft, type OfflineDraft } from "@/lib/offlineDrafts";
 import { useRouter } from "next/navigation";
 import {
   Search, Plus, Minus, Trash2, X, User, CreditCard,
   Banknote, Building2, Smartphone, Printer, MessageCircle, Receipt,
   Glasses, ChevronDown, ChevronUp, TrendingUp, Lock, Edit3,
+  WifiOff, UploadCloud,
 } from "lucide-react";
 import { firstImage } from "@/lib/utils/images";
 import { LensLoader } from "@/components/ui/LensLoader";
+
+const KNOWN_SALE_ERRORS = ["Unauthorized", "Cart is empty", "Custom lens name is required", "Selected staff member not found"];
+function isKnownValidationError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  return KNOWN_SALE_ERRORS.includes(err.message) || err.message.startsWith("Product not found:");
+}
 
 interface CartItem {
   productId: string;
@@ -71,6 +79,8 @@ export function POSClient({
   const [showReceipt, setShowReceipt] = useState(false);
   const [customerSearch, setCustomerSearch] = useState("");
   const [saving, setSaving] = useState(false);
+  const [drafts, setDrafts] = useState<OfflineDraft[]>([]);
+  const [syncing, setSyncing] = useState(false);
   const [saleResult, setSaleResult] = useState<SaleResult | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
   const [showJob, setShowJob] = useState(false);
@@ -91,6 +101,36 @@ export function POSClient({
     setPoppedId(productId);
     if (popTimer.current) clearTimeout(popTimer.current);
     popTimer.current = setTimeout(() => setPoppedId((cur) => (cur === productId ? null : cur)), 420);
+  };
+
+  // Offline sale drafts are stored in localStorage, not component state, so
+  // they survive a page reload — load whatever's already queued on mount.
+  useEffect(() => {
+    setDrafts(getDrafts());
+  }, []);
+
+  const syncDrafts = async () => {
+    if (drafts.length === 0 || syncing) return;
+    setSyncing(true);
+    let succeeded = 0;
+    let failed = 0;
+    for (const draft of drafts) {
+      try {
+        await createSale(draft.input);
+        removeDraft(draft.id);
+        succeeded++;
+      } catch {
+        failed++;
+      }
+    }
+    setDrafts(getDrafts());
+    setSyncing(false);
+    if (failed === 0) {
+      showToast(`Synced ${succeeded} offline sale${succeeded === 1 ? "" : "s"}`, "success");
+    } else {
+      showToast(`Synced ${succeeded}, ${failed} still pending — will retry next time`, "error");
+    }
+    router.refresh();
   };
 
   const lensProducts = useMemo(
@@ -253,28 +293,29 @@ export function POSClient({
       showToast("Enter a name and price for the custom lens", "error");
       return;
     }
+    const saleInput: CreateSaleInput = {
+      items: cart.map((i) => ({ productId: i.productId, quantity: i.quantity, unitPrice: i.price, discount: i.discount })),
+      customerId: selectedCustomer || undefined,
+      paymentMethod,
+      paymentType,
+      advanceAmount,
+      invoiceDiscount,
+      lensProductId: lensProductId || undefined,
+      customLensName: useCustomLens ? customLensName.trim() : undefined,
+      customLensPrice: useCustomLens ? customLensPrice : undefined,
+      labCharges,
+      fittingCharges,
+      createdById: orderTakenBy || currentUserId,
+      receivedById: billGeneratedBy || currentUserId,
+      prescription: recordRx ? {
+        rightSph: num(rx.rightSph), rightCyl: num(rx.rightCyl), rightAxis: num(rx.rightAxis), rightPd: num(rx.rightPd), rightAdd: num(rx.rightAdd),
+        leftSph: num(rx.leftSph), leftCyl: num(rx.leftCyl), leftAxis: num(rx.leftAxis), leftPd: num(rx.leftPd), leftAdd: num(rx.leftAdd),
+        notes: rx.notes,
+      } : undefined,
+    };
     setSaving(true);
     try {
-      const res = await createSale({
-        items: cart.map((i) => ({ productId: i.productId, quantity: i.quantity, unitPrice: i.price, discount: i.discount })),
-        customerId: selectedCustomer || undefined,
-        paymentMethod,
-        paymentType,
-        advanceAmount,
-        invoiceDiscount,
-        lensProductId: lensProductId || undefined,
-        customLensName: useCustomLens ? customLensName.trim() : undefined,
-        customLensPrice: useCustomLens ? customLensPrice : undefined,
-        labCharges,
-        fittingCharges,
-        createdById: orderTakenBy || currentUserId,
-        receivedById: billGeneratedBy || currentUserId,
-        prescription: recordRx ? {
-          rightSph: num(rx.rightSph), rightCyl: num(rx.rightCyl), rightAxis: num(rx.rightAxis), rightPd: num(rx.rightPd), rightAdd: num(rx.rightAdd),
-          leftSph: num(rx.leftSph), leftCyl: num(rx.leftCyl), leftAxis: num(rx.leftAxis), leftPd: num(rx.leftPd), leftAdd: num(rx.leftAdd),
-          notes: rx.notes,
-        } : undefined,
-      });
+      const res = await createSale(saleInput);
       setSaleResult({
         invoiceNo: res.invoiceNo,
         orderTakenByName: res.orderTakenByName,
@@ -287,8 +328,22 @@ export function POSClient({
         setShowSuccess(false);
         setShowReceipt(true);
       }, 750);
-    } catch {
-      showToast("Could not complete the sale. Please try again.", "error");
+    } catch (err) {
+      if (isKnownValidationError(err)) {
+        showToast(err instanceof Error ? err.message : "Could not complete the sale.", "error");
+      } else {
+        // Not a validation error the server would raise — most likely the
+        // request never reached the server at all. Keep the sale as a local
+        // draft instead of losing it; it can be pushed through once back online.
+        const draft = addDraft(saleInput, {
+          customerName: customer?.name ?? "Walk-in",
+          itemCount: cart.length,
+          total,
+        });
+        setDrafts((prev) => [...prev, draft]);
+        showToast("No connection — sale saved as an offline draft. Sync it once you're back online.", "info");
+        resetSale();
+      }
     } finally {
       setSaving(false);
     }
@@ -466,6 +521,24 @@ export function POSClient({
   return (
     <div className="animate-fade-in">
       <h1 className="text-2xl font-bold mb-6">Point of Sale</h1>
+      {drafts.length > 0 && (
+        <div className="glass-card p-3 mb-4 flex items-center justify-between gap-3 border border-warning/30">
+          <div className="flex items-center gap-2 min-w-0">
+            <WifiOff className="w-4 h-4 text-warning flex-shrink-0" />
+            <p className="text-xs font-medium truncate">
+              {drafts.length} offline sale{drafts.length === 1 ? "" : "s"} saved locally — not yet recorded on the server.
+            </p>
+          </div>
+          <button
+            onClick={syncDrafts}
+            disabled={syncing}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-warning text-white rounded-lg text-xs font-medium hover:opacity-90 transition-opacity disabled:opacity-60 flex-shrink-0"
+          >
+            {syncing ? <LensLoader light /> : <UploadCloud className="w-3.5 h-3.5" />}
+            {syncing ? "Syncing…" : "Sync now"}
+          </button>
+        </div>
+      )}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2 space-y-4">
           <div className="glass-card p-4">
