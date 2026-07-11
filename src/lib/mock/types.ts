@@ -83,6 +83,7 @@ export interface Supplier {
 }
 
 export interface PurchaseOrderItem {
+  id: string;
   productId: string;
   productName: string;
   quantity: number;

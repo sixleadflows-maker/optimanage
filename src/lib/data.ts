@@ -228,6 +228,7 @@ export async function getPurchaseOrders(): Promise<PurchaseOrder[]> {
     supplierName: po.supplier?.name ?? "",
     date: iso(po.date),
     items: po.items.map((it) => ({
+      id: it.id,
       productId: it.productId,
       productName: it.productName,
       quantity: it.quantity,
