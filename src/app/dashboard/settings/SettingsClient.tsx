@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import type { SettingsView, UserView } from "@/lib/data";
 import { useApp } from "@/lib/context";
 import { updateShopSettings, setAnalyticsPin } from "@/lib/actions/settings";
-import { Store, Shield, Users, Save, Lock, Loader2, CheckCircle } from "lucide-react";
+import { createUser, setUserActive, resetUserPassword } from "@/lib/actions/users";
+import { Store, Shield, Users, Save, Lock, Loader2, CheckCircle, Plus, X, KeyRound, UserX, UserCheck } from "lucide-react";
 
 const roleColors: Record<string, string> = {
   Owner: "bg-primary/10 text-primary",
@@ -13,10 +14,68 @@ const roleColors: Record<string, string> = {
   Cashier: "bg-success/10 text-success",
 };
 
-export function SettingsClient({ settings, users, canManage }: { settings: SettingsView; users: UserView[]; canManage: boolean }) {
+const EMPTY_NEW_USER = { name: "", email: "", password: "", role: "CASHIER" as "OWNER" | "MANAGER" | "CASHIER" };
+
+export function SettingsClient({ settings, users, canManage, isOwner, currentUserId }: { settings: SettingsView; users: UserView[]; canManage: boolean; isOwner: boolean; currentUserId: string }) {
   const { showToast } = useApp();
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<"shop" | "security" | "users">("shop");
+
+  const [showAddUser, setShowAddUser] = useState(false);
+  const [newUser, setNewUser] = useState({ ...EMPTY_NEW_USER });
+  const [savingUser, setSavingUser] = useState(false);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [resettingId, setResettingId] = useState<string | null>(null);
+  const [newPassword, setNewPassword] = useState("");
+  const [savingReset, setSavingReset] = useState(false);
+
+  const saveNewUser = async () => {
+    if (!newUser.name.trim() || !newUser.email.trim() || newUser.password.length < 6) {
+      showToast("Fill in name, email, and a password of at least 6 characters", "error");
+      return;
+    }
+    setSavingUser(true);
+    try {
+      await createUser(newUser);
+      showToast("User created", "success");
+      setShowAddUser(false);
+      setNewUser({ ...EMPTY_NEW_USER });
+      router.refresh();
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "Could not create user", "error");
+    } finally {
+      setSavingUser(false);
+    }
+  };
+
+  const toggleActive = async (id: string, active: boolean) => {
+    setTogglingId(id);
+    try {
+      await setUserActive(id, active);
+      showToast(active ? "User reactivated" : "User deactivated", "success");
+      router.refresh();
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "Could not update user", "error");
+    } finally {
+      setTogglingId(null);
+    }
+  };
+
+  const saveResetPassword = async () => {
+    if (!resettingId) return;
+    if (newPassword.length < 6) { showToast("Password must be at least 6 characters", "error"); return; }
+    setSavingReset(true);
+    try {
+      await resetUserPassword(resettingId, newPassword);
+      showToast("Password reset", "success");
+      setResettingId(null);
+      setNewPassword("");
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "Could not reset password", "error");
+    } finally {
+      setSavingReset(false);
+    }
+  };
   const [shop, setShop] = useState({
     name: settings.name, phone: settings.phone, email: settings.email,
     ntn: settings.ntn, address: settings.address, receiptFooter: settings.receiptFooter,
@@ -148,7 +207,15 @@ export function SettingsClient({ settings, users, canManage }: { settings: Setti
 
       {activeTab === "users" && (
         <div className="glass-card p-5">
-          <h3 className="text-sm font-semibold mb-4">Users & Roles</h3>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-sm font-semibold">Users & Roles</h3>
+            {isOwner && (
+              <button onClick={() => setShowAddUser(true)}
+                className="flex items-center gap-2 px-3 py-1.5 bg-primary text-white rounded-xl text-xs font-medium hover:bg-primary-hover transition-colors cursor-pointer">
+                <Plus className="w-3.5 h-3.5" /> Add User
+              </button>
+            )}
+          </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -157,6 +224,7 @@ export function SettingsClient({ settings, users, canManage }: { settings: Setti
                   <th className="text-left py-3 px-3 text-xs font-medium text-muted-foreground">Email</th>
                   <th className="text-center py-3 px-3 text-xs font-medium text-muted-foreground">Role</th>
                   <th className="text-center py-3 px-3 text-xs font-medium text-muted-foreground">Status</th>
+                  {isOwner && <th className="text-center py-3 px-3 text-xs font-medium text-muted-foreground">Actions</th>}
                 </tr>
               </thead>
               <tbody>
@@ -181,10 +249,81 @@ export function SettingsClient({ settings, users, canManage }: { settings: Setti
                         {u.active ? "Active" : "Inactive"}
                       </span>
                     </td>
+                    {isOwner && (
+                      <td className="py-3 px-3">
+                        <div className="flex items-center justify-center gap-1.5">
+                          <button onClick={() => { setResettingId(u.id); setNewPassword(""); }} title="Reset password"
+                            className="p-1.5 rounded-lg hover:bg-surface-hover cursor-pointer">
+                            <KeyRound className="w-3.5 h-3.5 text-muted-foreground" />
+                          </button>
+                          {u.id !== currentUserId && (
+                            <button onClick={() => toggleActive(u.id, !u.active)} disabled={togglingId === u.id}
+                              title={u.active ? "Deactivate" : "Reactivate"}
+                              className="p-1.5 rounded-lg hover:bg-surface-hover cursor-pointer disabled:opacity-50">
+                              {togglingId === u.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : u.active ? <UserX className="w-3.5 h-3.5 text-destructive" /> : <UserCheck className="w-3.5 h-3.5 text-success" />}
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {showAddUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowAddUser(false)}>
+          <div className="glass-modal p-6 w-full max-w-md animate-rise" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold">Add User</h3>
+              <button onClick={() => setShowAddUser(false)} className="cursor-pointer"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Name *</label>
+                <input type="text" value={newUser.name} onChange={(e) => setNewUser({ ...newUser, name: e.target.value })} className="w-full px-4 py-2.5 glass-input text-sm" />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Email *</label>
+                <input type="email" value={newUser.email} onChange={(e) => setNewUser({ ...newUser, email: e.target.value })} className="w-full px-4 py-2.5 glass-input text-sm" />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Password *</label>
+                <input type="password" value={newUser.password} onChange={(e) => setNewUser({ ...newUser, password: e.target.value })} className="w-full px-4 py-2.5 glass-input text-sm" placeholder="At least 6 characters" />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Role</label>
+                <select value={newUser.role} onChange={(e) => setNewUser({ ...newUser, role: e.target.value as typeof newUser.role })} className="w-full px-4 py-2.5 glass-input text-sm">
+                  <option value="CASHIER">Cashier</option>
+                  <option value="MANAGER">Manager</option>
+                  <option value="OWNER">Owner</option>
+                </select>
+              </div>
+              <button onClick={saveNewUser} disabled={savingUser}
+                className="w-full py-2.5 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-primary-hover transition-colors disabled:opacity-60 flex items-center justify-center gap-2 cursor-pointer">
+                {savingUser && <Loader2 className="w-4 h-4 animate-spin" />} Add User
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {resettingId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setResettingId(null)}>
+          <div className="glass-modal p-6 w-full max-w-sm animate-rise" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold">Reset Password</h3>
+              <button onClick={() => setResettingId(null)} className="cursor-pointer"><X className="w-5 h-5" /></button>
+            </div>
+            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">New Password</label>
+            <input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className="w-full px-4 py-2.5 glass-input text-sm" placeholder="At least 6 characters" />
+            <button onClick={saveResetPassword} disabled={savingReset}
+              className="w-full mt-3 py-2.5 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-primary-hover transition-colors disabled:opacity-60 flex items-center justify-center gap-2 cursor-pointer">
+              {savingReset && <Loader2 className="w-4 h-4 animate-spin" />} Reset Password
+            </button>
           </div>
         </div>
       )}
