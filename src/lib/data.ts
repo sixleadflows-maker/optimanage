@@ -118,7 +118,7 @@ export type SaleView = Sale & { profit: number; totalCost: number; createdByName
 
 function mapSale(s: {
   id: string; invoiceNo: string; date: Date; customerId: string | null; customer: { name: string } | null;
-  items: { productId: string; productName: string; quantity: number; unitPrice: number; discount: number; total: number }[];
+  items: { id: string; productId: string; productName: string; quantity: number; unitPrice: number; discount: number; total: number; returnedQuantity: number }[];
   subtotal: number; discount: number; tax: number; total: number; paid: number; balance: number;
   paymentMethod: string; paymentStatus: "PAID" | "ADVANCE" | "BALANCE"; branchId: string | null;
   profit: number; totalCost: number; createdBy?: { name: string } | null; receivedBy?: { name: string } | null;
@@ -130,12 +130,14 @@ function mapSale(s: {
     customerId: s.customerId ?? "",
     customerName: s.customer?.name ?? "Walk-in",
     items: s.items.map((it) => ({
+      id: it.id,
       productId: it.productId,
       productName: it.productName,
       quantity: it.quantity,
       unitPrice: it.unitPrice,
       discount: it.discount,
       total: it.total,
+      returnedQuantity: it.returnedQuantity,
     })),
     subtotal: s.subtotal,
     discount: s.discount,
@@ -174,12 +176,14 @@ export async function getSales(): Promise<SaleView[]> {
     customerId: s.customerId ?? "",
     customerName: s.customer?.name ?? "Walk-in",
     items: s.items.map((it) => ({
+      id: it.id,
       productId: it.productId,
       productName: it.productName,
       quantity: it.quantity,
       unitPrice: it.unitPrice,
       discount: it.discount,
       total: it.total,
+      returnedQuantity: it.returnedQuantity,
     })),
     subtotal: s.subtotal,
     discount: s.discount,

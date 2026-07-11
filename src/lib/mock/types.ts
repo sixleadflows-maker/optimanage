@@ -46,12 +46,14 @@ export interface EyeRx {
 }
 
 export interface SaleItem {
+  id: string;
   productId: string;
   productName: string;
   quantity: number;
   unitPrice: number;
   discount: number;
   total: number;
+  returnedQuantity: number;
 }
 
 export interface Sale {

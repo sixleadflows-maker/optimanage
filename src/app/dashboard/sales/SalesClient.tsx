@@ -1,16 +1,59 @@
 "use client";
 
 import { useState, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import type { SaleView } from "@/lib/data";
 import { formatCurrency, formatDate } from "@/lib/utils/format";
-import { Search, Download, Receipt } from "lucide-react";
+import { Search, Download, Receipt, RotateCcw, X, Loader2 } from "lucide-react";
 import { useApp } from "@/lib/context";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { createReturn } from "@/lib/actions/returns";
+
+const REFUND_METHODS = ["Cash", "Card", "Bank Transfer", "JazzCash"];
 
 export function SalesClient({ sales }: { sales: SaleView[] }) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("All");
   const { showToast } = useApp();
+  const router = useRouter();
+
+  const [returningSale, setReturningSale] = useState<SaleView | null>(null);
+  const [returnQtys, setReturnQtys] = useState<Record<string, number>>({});
+  const [returnReason, setReturnReason] = useState("");
+  const [refundMethod, setRefundMethod] = useState("Cash");
+  const [savingReturn, setSavingReturn] = useState(false);
+
+  const openReturn = (sale: SaleView) => {
+    setReturnQtys({});
+    setReturnReason("");
+    setRefundMethod(sale.paymentMethod || "Cash");
+    setReturningSale(sale);
+  };
+
+  const returnableItems = (sale: SaleView) => sale.items.filter((i) => i.quantity - i.returnedQuantity > 0);
+
+  const returnTotal = returningSale
+    ? returningSale.items.reduce((sum, i) => sum + (returnQtys[i.id] || 0) * i.unitPrice, 0)
+    : 0;
+
+  const saveReturn = async () => {
+    if (!returningSale) return;
+    const items = Object.entries(returnQtys)
+      .filter(([, qty]) => qty > 0)
+      .map(([saleItemId, quantity]) => ({ saleItemId, quantity }));
+    if (items.length === 0) { showToast("Select at least one item to return", "error"); return; }
+    setSavingReturn(true);
+    try {
+      const res = await createReturn({ saleId: returningSale.id, items, reason: returnReason, refundMethod });
+      showToast(`${res.returnNo} — refund ${formatCurrency(res.totalRefund)}`, "success");
+      setReturningSale(null);
+      router.refresh();
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "Could not process return", "error");
+    } finally {
+      setSavingReturn(false);
+    }
+  };
 
   const filtered = useMemo(() => {
     return sales.filter((s) => {
@@ -111,11 +154,12 @@ export function SalesClient({ sales }: { sales: SaleView[] }) {
                 <th className="text-right py-3 px-3 text-xs font-medium text-muted-foreground">Balance</th>
                 <th className="text-center py-3 px-3 text-xs font-medium text-muted-foreground">Status</th>
                 <th className="text-center py-3 px-3 text-xs font-medium text-muted-foreground">Payment</th>
+                <th className="text-center py-3 px-3 text-xs font-medium text-muted-foreground">Return</th>
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 && (
-                <tr><td colSpan={9}>
+                <tr><td colSpan={10}>
                   <EmptyState icon={Receipt} title="No invoices yet" hint="Sales you ring up in the POS will appear here with payment status and profit." />
                 </td></tr>
               )}
@@ -132,12 +176,69 @@ export function SalesClient({ sales }: { sales: SaleView[] }) {
                     <span className={`chip chip-${sale.paymentStatus.toLowerCase()}`}>{sale.paymentStatus}</span>
                   </td>
                   <td className="py-3 px-3 text-center text-xs text-muted-foreground">{sale.paymentMethod}</td>
+                  <td className="py-3 px-3 text-center">
+                    {returnableItems(sale).length > 0 && (
+                      <button onClick={() => openReturn(sale)} title="Return / Refund"
+                        className="p-1.5 rounded-lg hover:bg-surface-hover cursor-pointer">
+                        <RotateCcw className="w-3.5 h-3.5 text-muted-foreground" />
+                      </button>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       </div>
+
+      {returningSale && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setReturningSale(null)}>
+          <div className="glass-modal p-6 w-full max-w-lg animate-rise max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold">Return / Refund — {returningSale.invoiceNo}</h3>
+              <button onClick={() => setReturningSale(null)} className="cursor-pointer"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="space-y-2">
+              {returnableItems(returningSale).map((item) => {
+                const remaining = item.quantity - item.returnedQuantity;
+                return (
+                  <div key={item.id} className="flex items-center gap-3 p-2.5 bg-surface rounded-xl">
+                    <div className="flex-1">
+                      <p className="text-xs font-medium">{item.productName}</p>
+                      <p className="text-[10px] text-muted-foreground">Sold {item.quantity} · Already returned {item.returnedQuantity} · Eligible {remaining} · {formatCurrency(item.unitPrice)} each</p>
+                    </div>
+                    <input type="number" min={0} max={remaining} value={returnQtys[item.id] ?? 0}
+                      onChange={(e) => setReturnQtys((prev) => ({ ...prev, [item.id]: Math.max(0, Math.min(remaining, Number(e.target.value))) }))}
+                      className="w-20 px-2 py-1.5 glass-input text-xs text-center" />
+                  </div>
+                );
+              })}
+
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Reason (optional)</label>
+                <input type="text" value={returnReason} onChange={(e) => setReturnReason(e.target.value)}
+                  className="w-full px-4 py-2.5 glass-input text-sm" placeholder="e.g. wrong prescription, changed mind..." />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Refund Method</label>
+                <select value={refundMethod} onChange={(e) => setRefundMethod(e.target.value)} className="w-full px-4 py-2.5 glass-input text-sm">
+                  {REFUND_METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
+                </select>
+              </div>
+
+              <div className="flex justify-between items-center pt-2 border-t border-border">
+                <span className="text-sm font-semibold">Refund Total</span>
+                <span className="text-lg font-bold text-destructive">{formatCurrency(returnTotal)}</span>
+              </div>
+
+              <button onClick={saveReturn} disabled={savingReturn || returnTotal <= 0}
+                className="w-full py-2.5 bg-destructive text-white rounded-xl text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-60 flex items-center justify-center gap-2 cursor-pointer">
+                {savingReturn && <Loader2 className="w-4 h-4 animate-spin" />} Confirm Return
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

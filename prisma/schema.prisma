@@ -22,8 +22,9 @@ model User {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  salesCreated   Sale[]   @relation("SaleCreatedBy")
-  salesReceived  Sale[]   @relation("SaleReceivedBy")
+  salesCreated     Sale[]   @relation("SaleCreatedBy")
+  salesReceived    Sale[]   @relation("SaleReceivedBy")
+  returnsProcessed Return[] @relation("ReturnProcessedBy")
 }
 
 enum Role {
@@ -171,6 +172,7 @@ model Sale {
   receivedBy      User?         @relation("SaleReceivedBy", fields: [receivedById], references: [id])
 
   prescriptions   Prescription[]
+  returns         Return[]
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 
@@ -180,22 +182,55 @@ model Sale {
 }
 
 model SaleItem {
-  id          String  @id @default(cuid())
-  saleId      String
-  sale        Sale    @relation(fields: [saleId], references: [id], onDelete: Cascade)
-  productId   String
-  product     Product @relation(fields: [productId], references: [id])
-  productName String
-  quantity    Int     @default(1)
-  unitPrice   Float   @default(0)
-  discount    Float   @default(0)
-  total       Float   @default(0)
+  id               String       @id @default(cuid())
+  saleId           String
+  sale             Sale         @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  productId        String
+  product          Product      @relation(fields: [productId], references: [id])
+  productName      String
+  quantity         Int          @default(1)
+  unitPrice        Float        @default(0)
+  discount         Float        @default(0)
+  total            Float        @default(0)
+  returnedQuantity Int          @default(0)
+
+  returnItems      ReturnItem[]
 }
 
 enum PaymentStatus {
   PAID
   ADVANCE
   BALANCE
+}
+
+// ─── Returns & Refunds ──────────────────────────────────────
+model Return {
+  id            String       @id @default(cuid())
+  returnNo      String       @unique
+  saleId        String
+  sale          Sale         @relation(fields: [saleId], references: [id])
+  date          DateTime     @default(now())
+  reason        String       @default("")
+  refundMethod  String       @default("Cash")
+  totalRefund   Float        @default(0)
+  processedById String?
+  processedBy   User?        @relation("ReturnProcessedBy", fields: [processedById], references: [id])
+  createdAt     DateTime     @default(now())
+
+  items         ReturnItem[]
+}
+
+model ReturnItem {
+  id          String   @id @default(cuid())
+  returnId    String
+  return      Return   @relation(fields: [returnId], references: [id], onDelete: Cascade)
+  saleItemId  String
+  saleItem    SaleItem @relation(fields: [saleItemId], references: [id])
+  productId   String
+  productName String
+  quantity    Int      @default(0)
+  unitPrice   Float    @default(0)
+  total       Float    @default(0)
 }
 
 // ─── Suppliers & Purchase Orders ────────────────────────────
