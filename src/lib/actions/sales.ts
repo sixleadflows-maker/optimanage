@@ -15,6 +15,7 @@ export interface SalePrescriptionInput {
   rightSph: number; rightCyl: number; rightAxis: number; rightPd: number; rightAdd: number;
   leftSph: number; leftCyl: number; leftAxis: number; leftPd: number; leftAdd: number;
   notes: string;
+  isOwnPrescription?: boolean;
 }
 
 export interface CreateSaleInput {
@@ -177,6 +178,7 @@ export async function createSale(input: CreateSaleInput) {
         rightSph: p.rightSph, rightCyl: p.rightCyl, rightAxis: p.rightAxis, rightPd: p.rightPd, rightAdd: p.rightAdd,
         leftSph: p.leftSph, leftCyl: p.leftCyl, leftAxis: p.leftAxis, leftPd: p.leftPd, leftAdd: p.leftAdd,
         notes: p.notes,
+        isOwnPrescription: p.isOwnPrescription ?? false,
       },
     });
   }

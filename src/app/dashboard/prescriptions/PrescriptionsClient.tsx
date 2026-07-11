@@ -22,6 +22,7 @@ export function PrescriptionsClient({ prescriptions, customers }: { prescription
   const [selectedCustomer, setSelectedCustomer] = useState("");
   const [customerSearch, setCustomerSearch] = useState("");
   const [saving, setSaving] = useState(false);
+  const [isOwn, setIsOwn] = useState(false);
   const [form, setForm] = useState({ ...empty });
 
   const filteredCustomers = customerSearch
@@ -42,9 +43,11 @@ export function PrescriptionsClient({ prescriptions, customers }: { prescription
         rightSph: num(form.rightSph), rightCyl: num(form.rightCyl), rightAxis: num(form.rightAxis), rightPd: num(form.rightPd), rightAdd: num(form.rightAdd),
         leftSph: num(form.leftSph), leftCyl: num(form.leftCyl), leftAxis: num(form.leftAxis), leftPd: num(form.leftPd), leftAdd: num(form.leftAdd),
         notes: form.notes,
+        isOwnPrescription: isOwn,
       });
       showToast("Prescription saved", "success");
       setForm({ ...empty });
+      setIsOwn(false);
       setSelectedCustomer("");
       setCustomerSearch("");
       router.refresh();
@@ -111,6 +114,11 @@ export function PrescriptionsClient({ prescriptions, customers }: { prescription
               rows={2} className="w-full px-4 py-2 glass-input text-sm resize-none" placeholder="Any additional notes..." />
           </div>
 
+          <label className="flex items-center gap-2 text-xs font-medium mb-4 cursor-pointer">
+            <input type="checkbox" checked={isOwn} onChange={(e) => setIsOwn(e.target.checked)} className="rounded" />
+            Own Prescription — customer brought this from outside
+          </label>
+
           <button onClick={handleSave} disabled={saving}
             className="w-full flex items-center justify-center gap-2 py-2.5 bg-primary text-white rounded-xl text-sm font-medium hover:bg-primary-hover transition-colors disabled:opacity-60">
             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} Save Prescription
@@ -130,7 +138,10 @@ export function PrescriptionsClient({ prescriptions, customers }: { prescription
                     <p className="text-sm font-medium">{rx.customerName}</p>
                     <p className="text-[10px] text-muted-foreground">{formatDate(rx.date)}</p>
                   </div>
-                  <span className="chip bg-primary/10 text-primary">Rx</span>
+                  <div className="flex items-center gap-1.5">
+                    {rx.isOwnPrescription && <span className="chip bg-warning/10 text-warning">Own Rx</span>}
+                    <span className="chip bg-primary/10 text-primary">Rx</span>
+                  </div>
                 </div>
                 <div className="grid grid-cols-2 gap-3 text-[10px]">
                   <div>

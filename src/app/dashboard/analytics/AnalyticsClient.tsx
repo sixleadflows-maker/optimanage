@@ -1,10 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import type { AnalyticsData } from "@/lib/data";
 import { formatCurrency } from "@/lib/utils/format";
-import { verifyAnalyticsPin } from "@/lib/actions/analytics";
-import { Lock, Loader2 } from "lucide-react";
+import { verifyAnalyticsPin, getMonthlyAnalytics, type MonthlyAnalyticsData } from "@/lib/actions/analytics";
+import { Lock, Loader2, ChevronLeft, ChevronRight, ArrowUpRight, ArrowDownRight } from "lucide-react";
+
+const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
 const COLORS = ["#6d5ef0", "#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#06b6d4"];
 
@@ -103,6 +105,92 @@ function DonutChart({ data, size = 180 }: { data: { name: string; value: number 
   );
 }
 
+function MonthlyPerformance() {
+  const now = new Date();
+  const [year, setYear] = useState(now.getFullYear());
+  const [month, setMonth] = useState(now.getMonth() + 1);
+  const [data, setData] = useState<MonthlyAnalyticsData | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async (y: number, m: number) => {
+    setLoading(true);
+    try {
+      const res = await getMonthlyAnalytics(y, m);
+      setData(res);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load(year, month);
+  }, [year, month, load]);
+
+  const goPrev = () => {
+    if (month === 1) { setYear((y) => y - 1); setMonth(12); }
+    else setMonth((m) => m - 1);
+  };
+  const goNext = () => {
+    if (month === 12) { setYear((y) => y + 1); setMonth(1); }
+    else setMonth((m) => m + 1);
+  };
+  const isCurrentMonth = year === now.getFullYear() && month === now.getMonth() + 1;
+
+  const delta = (curr: number, prev: number) => {
+    if (prev === 0) return curr > 0 ? 100 : 0;
+    return ((curr - prev) / Math.abs(prev)) * 100;
+  };
+
+  return (
+    <div className="glass-card p-5">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-sm font-semibold">Monthly Performance</h3>
+        <div className="flex items-center gap-1">
+          <button onClick={goPrev} className="p-1.5 rounded-lg hover:bg-surface-hover cursor-pointer"><ChevronLeft className="w-4 h-4" /></button>
+          <span className="text-sm font-medium w-32 text-center">{MONTH_NAMES[month - 1]} {year}</span>
+          <button onClick={goNext} disabled={isCurrentMonth} className="p-1.5 rounded-lg hover:bg-surface-hover disabled:opacity-30 cursor-pointer"><ChevronRight className="w-4 h-4" /></button>
+        </div>
+      </div>
+
+      {loading || !data ? (
+        <div className="flex items-center justify-center py-16"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /></div>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-5">
+            {[
+              { label: "Total Sales", value: formatCurrency(data.totalSales), delta: delta(data.totalSales, data.prevMonthSales) },
+              { label: "Net Profit", value: formatCurrency(data.netProfit), delta: delta(data.netProfit, data.prevMonthNetProfit) },
+              { label: "Number of Orders", value: data.totalOrders.toString(), delta: delta(data.totalOrders, data.prevMonthOrders) },
+              { label: "Avg Order Value", value: formatCurrency(data.avgOrderValue), delta: null as number | null },
+            ].map((k) => (
+              <div key={k.label} className="p-3 bg-surface rounded-xl">
+                <p className="text-xs text-muted-foreground">{k.label}</p>
+                <p className="text-lg font-bold mt-1">{k.value}</p>
+                {k.delta !== null && (
+                  <span className={`flex items-center gap-0.5 text-[10px] font-medium mt-1 ${k.delta >= 0 ? "text-success" : "text-destructive"}`}>
+                    {k.delta >= 0 ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
+                    {Math.abs(k.delta).toFixed(0)}% vs last month
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div>
+              <p className="text-xs font-medium text-muted-foreground mb-2">Daily Sales This Month</p>
+              <AreaChart data={data.dailyTrend} height={180} />
+            </div>
+            <div>
+              <p className="text-xs font-medium text-muted-foreground mb-2">Top Brands This Month</p>
+              <VBarChart data={data.topBrands} height={180} />
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export function AnalyticsClient({ data }: { data: AnalyticsData }) {
   const [unlocked, setUnlocked] = useState(!data.requiresPin);
   const [pin, setPin] = useState("");
@@ -156,6 +244,8 @@ export function AnalyticsClient({ data }: { data: AnalyticsData }) {
         <h1 className="text-2xl font-bold">Analytics</h1>
         <p className="text-sm text-muted-foreground mt-0.5">Business intelligence and insights</p>
       </div>
+
+      <MonthlyPerformance />
 
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
         {incomeExpense.map((item) => (

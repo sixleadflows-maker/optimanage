@@ -64,7 +64,7 @@ export type CustomerView = Customer & { visitCount: number };
 
 function mapPrescription(p: {
   id: string; date: Date; rightSph: number; rightCyl: number; rightAxis: number; rightPd: number; rightAdd: number;
-  leftSph: number; leftCyl: number; leftAxis: number; leftPd: number; leftAdd: number; notes: string;
+  leftSph: number; leftCyl: number; leftAxis: number; leftPd: number; leftAdd: number; notes: string; isOwnPrescription: boolean;
 }): Prescription {
   return {
     id: p.id,
@@ -72,6 +72,7 @@ function mapPrescription(p: {
     rightEye: { sph: p.rightSph, cyl: p.rightCyl, axis: p.rightAxis, pd: p.rightPd, add: p.rightAdd },
     leftEye: { sph: p.leftSph, cyl: p.leftCyl, axis: p.leftAxis, pd: p.leftPd, add: p.leftAdd },
     notes: p.notes,
+    isOwnPrescription: p.isOwnPrescription,
   };
 }
 

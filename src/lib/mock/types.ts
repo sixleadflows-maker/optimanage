@@ -34,6 +34,7 @@ export interface Prescription {
   rightEye: EyeRx;
   leftEye: EyeRx;
   notes: string;
+  isOwnPrescription: boolean;
 }
 
 export interface EyeRx {

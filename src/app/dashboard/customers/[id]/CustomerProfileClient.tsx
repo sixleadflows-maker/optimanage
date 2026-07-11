@@ -87,7 +87,10 @@ export function CustomerProfileClient({ customer, sales }: { customer: CustomerV
                   <div key={rx.id} className="p-4 bg-surface rounded-xl">
                     <div className="flex items-center justify-between mb-3">
                       <p className="text-sm font-medium">{formatDate(rx.date)}</p>
-                      <span className="chip bg-primary/10 text-primary">Rx</span>
+                      <div className="flex items-center gap-1.5">
+                        {rx.isOwnPrescription && <span className="chip bg-warning/10 text-warning">Own Rx</span>}
+                        <span className="chip bg-primary/10 text-primary">Rx</span>
+                      </div>
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                       <div>

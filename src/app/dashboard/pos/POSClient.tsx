@@ -12,7 +12,7 @@ import {
   Search, Plus, Minus, Trash2, X, User, CreditCard,
   Banknote, Building2, Smartphone, Printer, MessageCircle, Receipt,
   Glasses, ChevronDown, ChevronUp, TrendingUp, Lock, Edit3,
-  WifiOff, UploadCloud,
+  WifiOff, UploadCloud, ScanLine,
 } from "lucide-react";
 import { firstImage } from "@/lib/utils/images";
 import { LensLoader } from "@/components/ui/LensLoader";
@@ -67,6 +67,7 @@ export function POSClient({
 }) {
   const { showToast } = useApp();
   const router = useRouter();
+  const [entryMode, setEntryMode] = useState<"choose" | "manual" | "scan">("choose");
   const [search, setSearch] = useState("");
   const [cart, setCart] = useState<CartItem[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState<string>("");
@@ -93,6 +94,7 @@ export function POSClient({
   const [fittingCharges, setFittingCharges] = useState(0);
 
   const [recordRx, setRecordRx] = useState(false);
+  const [rxIsOwn, setRxIsOwn] = useState(false);
   const [rx, setRx] = useState({ ...EMPTY_RX });
   const [poppedId, setPoppedId] = useState<string | null>(null);
   const popTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -256,6 +258,7 @@ export function POSClient({
     if (match) {
       addToCart(match.id);
       setSearch("");
+      setEntryMode("manual");
       showToast(`Added ${match.name}`, "success");
     } else {
       showToast("No product matches that barcode", "error");
@@ -263,6 +266,7 @@ export function POSClient({
   };
 
   const resetSale = () => {
+    setEntryMode("choose");
     setShowReceipt(false);
     setShowSuccess(false);
     setCart([]);
@@ -281,6 +285,7 @@ export function POSClient({
     setLabCharges(0);
     setFittingCharges(0);
     setRecordRx(false);
+    setRxIsOwn(false);
     setRx({ ...EMPTY_RX });
     setOrderTakenBy(currentUserId);
     setBillGeneratedBy(currentUserId);
@@ -321,6 +326,7 @@ export function POSClient({
         rightSph: num(rx.rightSph), rightCyl: num(rx.rightCyl), rightAxis: num(rx.rightAxis), rightPd: num(rx.rightPd), rightAdd: num(rx.rightAdd),
         leftSph: num(rx.leftSph), leftCyl: num(rx.leftCyl), leftAxis: num(rx.leftAxis), leftPd: num(rx.leftPd), leftAdd: num(rx.leftAdd),
         notes: rx.notes,
+        isOwnPrescription: rxIsOwn,
       } : undefined,
     };
     setSaving(true);
@@ -402,7 +408,7 @@ export function POSClient({
               {customer && <p className="text-[10px]">Customer: {customer.name}</p>}
               {recordRx && (
                 <div className="text-[10px] mt-1 pt-1 border-t border-dashed border-gray-400">
-                  <p className="font-medium">Prescription</p>
+                  <p className="font-medium">Prescription{rxIsOwn ? " (Customer's Own)" : ""}</p>
                   <p>OD: SPH {rx.rightSph || 0} CYL {rx.rightCyl || 0} AXIS {rx.rightAxis || 0} PD {rx.rightPd || 0} ADD {rx.rightAdd || 0}</p>
                   <p>OS: SPH {rx.leftSph || 0} CYL {rx.leftCyl || 0} AXIS {rx.leftAxis || 0} PD {rx.leftPd || 0} ADD {rx.leftAdd || 0}</p>
                 </div>
@@ -527,6 +533,61 @@ export function POSClient({
               </button>
             </div>
           </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (cart.length === 0 && entryMode === "scan") {
+    return (
+      <div className="animate-fade-in flex flex-col items-center justify-center min-h-[60vh] gap-6 text-center px-4">
+        <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-[#6d5ef0]/15 to-[#14b8a6]/15 flex items-center justify-center">
+          <ScanLine className="w-7 h-7 text-primary" />
+        </div>
+        <div>
+          <h1 className="text-xl font-bold">Scan a product to begin</h1>
+          <p className="text-sm text-muted-foreground mt-1">Scan any product&apos;s barcode to start this order</p>
+        </div>
+        <input
+          type="text"
+          autoFocus
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          onKeyDown={handleSearchKey}
+          placeholder="Waiting for scan..."
+          className="w-full max-w-sm px-4 py-3 glass-input text-sm text-center"
+        />
+        <button onClick={() => setEntryMode("choose")} className="text-xs text-muted-foreground hover:text-foreground underline cursor-pointer">
+          ← Back
+        </button>
+      </div>
+    );
+  }
+
+  if (cart.length === 0 && entryMode === "choose") {
+    return (
+      <div className="animate-fade-in flex flex-col items-center justify-center min-h-[60vh] gap-6 text-center px-4">
+        <div>
+          <h1 className="text-2xl font-bold">Point of Sale</h1>
+          <p className="text-sm text-muted-foreground mt-1">How would you like to start this order?</p>
+        </div>
+        <div className="flex flex-col sm:flex-row gap-4">
+          <button onClick={() => setEntryMode("manual")}
+            className="flex flex-col items-center gap-3 px-10 py-8 glass-card hover:bg-surface-hover transition-colors cursor-pointer">
+            <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center">
+              <Plus className="w-6 h-6 text-primary" />
+            </div>
+            <span className="text-sm font-semibold">Create New Order</span>
+            <span className="text-xs text-muted-foreground">Browse and search products</span>
+          </button>
+          <button onClick={() => setEntryMode("scan")}
+            className="flex flex-col items-center gap-3 px-10 py-8 glass-card hover:bg-surface-hover transition-colors cursor-pointer">
+            <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center">
+              <ScanLine className="w-6 h-6 text-primary" />
+            </div>
+            <span className="text-sm font-semibold">Scan to Create New Order</span>
+            <span className="text-xs text-muted-foreground">Scan a barcode to begin</span>
+          </button>
         </div>
       </div>
     );
@@ -739,6 +800,10 @@ export function POSClient({
                 </label>
                 {recordRx && (
                   <div className="space-y-2">
+                    <label className="flex items-center gap-2 text-[10px] font-medium cursor-pointer">
+                      <input type="checkbox" checked={rxIsOwn} onChange={(e) => setRxIsOwn(e.target.checked)} className="rounded" />
+                      Own Prescription — customer brought this from outside
+                    </label>
                     {(["Right Eye (OD)", "Left Eye (OS)"] as const).map((eye) => {
                       const prefix = eye.includes("Right") ? "right" : "left";
                       return (
