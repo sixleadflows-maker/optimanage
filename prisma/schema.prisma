@@ -22,9 +22,10 @@ model User {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  salesCreated     Sale[]   @relation("SaleCreatedBy")
-  salesReceived    Sale[]   @relation("SaleReceivedBy")
-  returnsProcessed Return[] @relation("ReturnProcessedBy")
+  salesCreated     Sale[]            @relation("SaleCreatedBy")
+  salesReceived    Sale[]            @relation("SaleReceivedBy")
+  returnsProcessed Return[]          @relation("ReturnProcessedBy")
+  stockAdjustments StockAdjustment[]
 }
 
 enum Role {
@@ -120,6 +121,7 @@ model Product {
   saleItems         SaleItem[]
   purchaseItems     PurchaseOrderItem[]
   salesAsLens       Sale[]       @relation("LensProduct")
+  adjustments       StockAdjustment[]
 
   @@index([barcode])
   @@index([brand])
@@ -130,6 +132,21 @@ enum BrandTag {
   ORIGINAL
   COPY
   UNBRANDED
+}
+
+model StockAdjustment {
+  id            String   @id @default(cuid())
+  productId     String
+  product       Product  @relation(fields: [productId], references: [id])
+  productName   String
+  previousStock Int
+  newStock      Int
+  delta         Int
+  reason        String
+  notes         String   @default("")
+  adjustedById  String?
+  adjustedBy    User?    @relation(fields: [adjustedById], references: [id])
+  createdAt     DateTime @default(now())
 }
 
 // ─── Sales & Orders (with Profitability Tracking) ───────────

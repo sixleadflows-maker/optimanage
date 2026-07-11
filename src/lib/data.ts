@@ -452,6 +452,37 @@ export async function getUsers(): Promise<UserView[]> {
   }));
 }
 
+// ─── Stock Adjustments ──────────────────────────────────────
+export interface StockAdjustmentView {
+  id: string;
+  productName: string;
+  previousStock: number;
+  newStock: number;
+  delta: number;
+  reason: string;
+  notes: string;
+  adjustedByName: string;
+  date: string;
+}
+
+export async function getStockAdjustments(): Promise<StockAdjustmentView[]> {
+  const rows = await db.stockAdjustment.findMany({
+    orderBy: { createdAt: "desc" },
+    include: { adjustedBy: true },
+  });
+  return rows.map((a) => ({
+    id: a.id,
+    productName: a.productName,
+    previousStock: a.previousStock,
+    newStock: a.newStock,
+    delta: a.delta,
+    reason: a.reason,
+    notes: a.notes,
+    adjustedByName: a.adjustedBy?.name ?? "",
+    date: iso(a.createdAt),
+  }));
+}
+
 // ─── Analytics ──────────────────────────────────────────────
 export interface AnalyticsData {
   totalRevenue: number;

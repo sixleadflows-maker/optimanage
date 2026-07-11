@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils/cn";
 import {
   LayoutDashboard, ShoppingCart, Receipt, Package, Users, UserCircle,
   Eye, FlaskConical, MessageCircle, BarChart3, Settings, X, Wallet,
-  Truck, Store, Banknote, Activity, Barcode as BarcodeIcon,
+  Truck, Store, Banknote, Activity, Barcode as BarcodeIcon, ClipboardList,
 } from "lucide-react";
 
 const navGroups = [
@@ -31,6 +31,7 @@ const navGroups = [
     items: [
       { href: "/dashboard/inventory", label: "Products", icon: Package },
       { href: "/dashboard/inventory/labels", label: "Barcode Labels", icon: BarcodeIcon },
+      { href: "/dashboard/inventory/adjustments", label: "Stock Adjustments", icon: ClipboardList },
       { href: "/dashboard/suppliers", label: "Suppliers & POs", icon: Truck },
     ],
   },
