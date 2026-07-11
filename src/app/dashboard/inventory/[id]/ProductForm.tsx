@@ -7,10 +7,11 @@ import { formatCurrency } from "@/lib/utils/format";
 import { useApp } from "@/lib/context";
 import { PRODUCT_CATEGORIES, PRODUCT_TYPES, BRAND_TAGS } from "@/lib/constants";
 import { createProduct, updateProduct, deleteProduct } from "@/lib/actions/products";
-import { ArrowLeft, Save, Barcode, Shield, ShieldAlert, ShieldOff, Trash2, Loader2 } from "lucide-react";
+import { ArrowLeft, Save, Barcode, Shield, ShieldAlert, ShieldOff, Trash2, Loader2, Printer } from "lucide-react";
 import Link from "next/link";
 import { ImageCarousel } from "@/components/ui/ImageCarousel";
 import { parseImages } from "@/lib/utils/images";
+import { BarcodeSVG } from "@/components/ui/BarcodeSVG";
 
 const brandTagConfig = {
   Original: { icon: Shield, color: "bg-success/10 text-success border-success/20", label: "Original" },
@@ -81,6 +82,12 @@ export function ProductForm({ product, isNew, barcodeWidth = 2, barcodeHeight = 
       showToast("Could not delete product", "error");
       setDeleting(false);
     }
+  };
+
+  const printOnly = (mode: "label") => {
+    document.body.classList.add(`printing-${mode}`);
+    window.print();
+    document.body.classList.remove(`printing-${mode}`);
   };
 
   const barcodeDisplay = form.barcode || "0000000000000";
@@ -272,16 +279,20 @@ export function ProductForm({ product, isNew, barcodeWidth = 2, barcodeHeight = 
             <h3 className="text-sm font-semibold mb-4 flex items-center gap-2">
               <Barcode className="w-4 h-4" /> Barcode Preview
             </h3>
-            <div className="bg-white p-4 rounded-xl">
-              <div className="flex justify-center gap-[1px]">
-                {barcodeDisplay.split("").map((digit, i) => (
-                  <div key={i} className="flex flex-col items-center">
-                    <div className="bg-black" style={{ width: `${barcodeWidth}px`, height: `${barcodeHeight + (parseInt(digit) % 3) * 8}px` }} />
-                    <span className="text-[8px] text-black mt-1 font-mono">{digit}</span>
-                  </div>
-                ))}
+            <div className="bg-white p-4 rounded-xl flex justify-center">
+              <div className="product-label">
+                <BarcodeSVG value={barcodeDisplay} width={barcodeWidth} height={barcodeHeight} />
               </div>
             </div>
+            {!isNew && (
+              <button onClick={() => printOnly("label")}
+                className="no-print w-full mt-3 flex items-center justify-center gap-2 py-2.5 glass-card text-sm font-medium cursor-pointer">
+                <Printer className="w-4 h-4" /> Print Label (2&quot; x 1&quot;)
+              </button>
+            )}
+            {isNew && (
+              <p className="no-print text-xs text-muted-foreground mt-3 text-center">Save the product first to print its label.</p>
+            )}
           </div>
 
           <button onClick={handleSave} disabled={saving}
