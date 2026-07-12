@@ -1,13 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import type { Product } from "@/lib/mock/types";
 import { formatCurrency } from "@/lib/utils/format";
 import { useApp } from "@/lib/context";
 import { PRODUCT_CATEGORIES, PRODUCT_TYPES, BRAND_TAGS } from "@/lib/constants";
 import { createProduct, updateProduct, deleteProduct } from "@/lib/actions/products";
-import { ArrowLeft, Save, Barcode, Shield, ShieldAlert, ShieldOff, Trash2, Loader2, Printer } from "lucide-react";
+import { uploadProductImage } from "@/lib/actions/upload";
+import { ArrowLeft, Save, Barcode, Shield, ShieldAlert, ShieldOff, Trash2, Loader2, Printer, Upload, X } from "lucide-react";
 import Link from "next/link";
 import { ImageCarousel } from "@/components/ui/ImageCarousel";
 import { parseImages } from "@/lib/utils/images";
@@ -44,6 +45,33 @@ export function ProductForm({ product, isNew, barcodeWidth = 2, barcodeHeight = 
   });
 
   const update = (field: string, value: string | number) => setForm((p) => ({ ...p, [field]: value }));
+
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await uploadProductImage(fd);
+      const current = parseImages(form.image);
+      update("image", [...current, res.url].join(","));
+      showToast("Photo uploaded", "success");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Could not upload photo", "error");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const removeImage = (url: string) => {
+    const remaining = parseImages(form.image).filter((u) => u !== url);
+    update("image", remaining.join(","));
+  };
 
   const handleSave = async () => {
     if (!form.name.trim()) {
@@ -235,9 +263,31 @@ export function ProductForm({ product, isNew, barcodeWidth = 2, barcodeHeight = 
           <div className="glass-card p-5">
             <h3 className="text-sm font-semibold mb-4">Product Photos</h3>
             <ImageCarousel images={parseImages(form.image)} alt={form.name || "Product"} />
+
+            {parseImages(form.image).length > 0 && (
+              <div className="flex flex-wrap gap-2 mt-3">
+                {parseImages(form.image).map((url) => (
+                  <div key={url} className="relative w-14 h-14 rounded-lg overflow-hidden group">
+                    <img src={url} alt="" className="w-full h-full object-cover" />
+                    <button type="button" onClick={() => removeImage(url)}
+                      className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer">
+                      <X className="w-4 h-4 text-white" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <input ref={fileInputRef} type="file" accept="image/*" onChange={handleFileSelected} className="hidden" />
+            <button type="button" onClick={() => fileInputRef.current?.click()} disabled={uploading}
+              className="w-full mt-3 flex items-center justify-center gap-2 py-2.5 glass-card text-sm font-medium cursor-pointer disabled:opacity-60">
+              {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+              {uploading ? "Uploading..." : "Upload Photo"}
+            </button>
+
             <div className="mt-3">
               <input type="text" value={form.image} onChange={(e) => update("image", e.target.value)}
-                className="w-full px-3 py-2 glass-input text-xs" placeholder="Image URL, or several separated by commas..." />
+                className="w-full px-3 py-2 glass-input text-xs" placeholder="Or paste an image URL, several separated by commas..." />
             </div>
           </div>
 
