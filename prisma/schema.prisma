@@ -301,12 +301,26 @@ enum POStatus {
 
 // ─── Lab Orders ─────────────────────────────────────────────
 
+model Lab {
+  id        String     @id @default(cuid())
+  name      String
+  contact   String     @default("")
+  phone     String     @default("")
+  email     String     @default("")
+  address   String     @default("")
+  active    Boolean    @default(true)
+  createdAt DateTime   @default(now())
+
+  orders    LabOrder[]
+}
+
 model LabOrder {
   id           String         @id @default(cuid())
   orderNo      String         @unique
   customerId   String
   customer     Customer       @relation(fields: [customerId], references: [id])
-  lab          String
+  labId        String
+  lab          Lab            @relation(fields: [labId], references: [id])
   lensType     String         @default("")
   prescription String         @default("")
   price        Float          @default(0)

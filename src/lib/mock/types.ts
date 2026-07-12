@@ -110,6 +110,7 @@ export interface LabOrder {
   orderNo: string;
   customerId: string;
   customerName: string;
+  labId: string;
   lab: string;
   lensType: string;
   prescription: string;

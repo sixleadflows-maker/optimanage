@@ -3,11 +3,13 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { LabOrder } from "@/lib/mock/types";
+import type { LabVendorView } from "@/lib/data";
 import { formatCurrency, formatDate } from "@/lib/utils/format";
 import { useApp } from "@/lib/context";
 import { LAB_ORDER_STATUSES } from "@/lib/constants";
 import { createLabOrder, advanceLabStatus } from "@/lib/actions/lab-orders";
-import { FlaskConical, ArrowRight, Plus, X, Loader2 } from "lucide-react";
+import { createLab, updateLab } from "@/lib/actions/labs";
+import { FlaskConical, ArrowRight, Plus, X, Loader2, Beaker, Pencil } from "lucide-react";
 import { EmptyState } from "@/components/ui/EmptyState";
 
 const statusColors: Record<string, string> = {
@@ -17,19 +19,26 @@ const statusColors: Record<string, string> = {
   "Fitted": "bg-primary/10 text-primary border-primary/20",
 };
 
+const EMPTY_LAB = { name: "", contact: "", phone: "", email: "", address: "" };
+
 interface LabCustomer { id: string; name: string; }
 
-export function LabOrdersClient({ labOrders, customers }: { labOrders: LabOrder[]; customers: LabCustomer[] }) {
+export function LabOrdersClient({ labOrders, customers, labs }: { labOrders: LabOrder[]; customers: LabCustomer[]; labs: LabVendorView[] }) {
   const { showToast } = useApp();
   const router = useRouter();
+  const [topTab, setTopTab] = useState<"orders" | "labs">("orders");
   const [viewMode, setViewMode] = useState<"kanban" | "table">("kanban");
   const [showAdd, setShowAdd] = useState(false);
   const [saving, setSaving] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [form, setForm] = useState({
-    customerId: "", lab: "", lensType: "", prescription: "", price: 0,
+    customerId: "", labId: "", lensType: "", prescription: "", price: 0,
     expectedDate: "", notes: "",
   });
+
+  const [labModal, setLabModal] = useState<{ mode: "add" | "edit"; id?: string } | null>(null);
+  const [labForm, setLabForm] = useState({ ...EMPTY_LAB });
+  const [savingLab, setSavingLab] = useState(false);
 
   const advance = async (orderId: string) => {
     setBusy(orderId);
@@ -45,8 +54,8 @@ export function LabOrdersClient({ labOrders, customers }: { labOrders: LabOrder[
   };
 
   const handleAdd = async () => {
-    if (!form.customerId || !form.lab.trim()) {
-      showToast("Select a customer and enter the lab", "error");
+    if (!form.customerId || !form.labId) {
+      showToast("Select a customer and a lab", "error");
       return;
     }
     setSaving(true);
@@ -54,39 +63,113 @@ export function LabOrdersClient({ labOrders, customers }: { labOrders: LabOrder[
       const res = await createLabOrder(form);
       showToast(`Lab order created — ${res.orderNo}`, "success");
       setShowAdd(false);
-      setForm({ customerId: "", lab: "", lensType: "", prescription: "", price: 0, expectedDate: "", notes: "" });
+      setForm({ customerId: "", labId: "", lensType: "", prescription: "", price: 0, expectedDate: "", notes: "" });
       router.refresh();
-    } catch {
-      showToast("Could not create lab order", "error");
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "Could not create lab order", "error");
     } finally {
       setSaving(false);
     }
   };
 
+  const openAddLab = () => { setLabForm({ ...EMPTY_LAB }); setLabModal({ mode: "add" }); };
+  const openEditLab = (l: LabVendorView) => {
+    setLabForm({ name: l.name, contact: l.contact, phone: l.phone, email: l.email, address: l.address });
+    setLabModal({ mode: "edit", id: l.id });
+  };
+
+  const saveLab = async () => {
+    if (!labForm.name.trim()) { showToast("Lab name is required", "error"); return; }
+    setSavingLab(true);
+    try {
+      if (labModal?.mode === "edit" && labModal.id) {
+        await updateLab(labModal.id, labForm);
+        showToast("Lab updated", "success");
+      } else {
+        await createLab(labForm);
+        showToast("Lab added", "success");
+      }
+      setLabModal(null);
+      router.refresh();
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "Could not save lab", "error");
+    } finally {
+      setSavingLab(false);
+    }
+  };
+
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold">Lab Orders</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">Track outsourced lens jobs</p>
+          <p className="text-sm text-muted-foreground mt-0.5">Track outsourced lens jobs and lab vendors</p>
         </div>
-        <div className="flex gap-1.5">
-          <button onClick={() => setShowAdd(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-xl text-sm font-medium hover:bg-primary-hover transition-colors">
-            <Plus className="w-4 h-4" /> New Order
+        {topTab === "orders" ? (
+          <div className="flex gap-1.5">
+            <button onClick={() => setShowAdd(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-xl text-sm font-medium hover:bg-primary-hover transition-colors">
+              <Plus className="w-4 h-4" /> New Order
+            </button>
+            <button onClick={() => setViewMode("kanban")}
+              className={`px-3 py-2 rounded-xl text-xs font-medium ${viewMode === "kanban" ? "bg-primary text-white" : "bg-surface hover:bg-surface-hover"}`}>
+              Kanban
+            </button>
+            <button onClick={() => setViewMode("table")}
+              className={`px-3 py-2 rounded-xl text-xs font-medium ${viewMode === "table" ? "bg-primary text-white" : "bg-surface hover:bg-surface-hover"}`}>
+              Table
+            </button>
+          </div>
+        ) : (
+          <button onClick={openAddLab}
+            className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-xl text-sm font-medium hover:bg-primary-hover transition-colors cursor-pointer">
+            <Plus className="w-4 h-4" /> Add Lab
           </button>
-          <button onClick={() => setViewMode("kanban")}
-            className={`px-3 py-2 rounded-xl text-xs font-medium ${viewMode === "kanban" ? "bg-primary text-white" : "bg-surface hover:bg-surface-hover"}`}>
-            Kanban
-          </button>
-          <button onClick={() => setViewMode("table")}
-            className={`px-3 py-2 rounded-xl text-xs font-medium ${viewMode === "table" ? "bg-primary text-white" : "bg-surface hover:bg-surface-hover"}`}>
-            Table
-          </button>
-        </div>
+        )}
       </div>
 
-      {viewMode === "kanban" ? (
+      <div className="flex gap-1.5">
+        <button onClick={() => setTopTab("orders")}
+          className={`px-4 py-2 rounded-xl text-sm font-medium transition-all ${topTab === "orders" ? "bg-primary text-white" : "bg-surface hover:bg-surface-hover"}`}>
+          <span className="flex items-center gap-2"><FlaskConical className="w-4 h-4" /> Orders ({labOrders.length})</span>
+        </button>
+        <button onClick={() => setTopTab("labs")}
+          className={`px-4 py-2 rounded-xl text-sm font-medium transition-all ${topTab === "labs" ? "bg-primary text-white" : "bg-surface hover:bg-surface-hover"}`}>
+          <span className="flex items-center gap-2"><Beaker className="w-4 h-4" /> Labs ({labs.length})</span>
+        </button>
+      </div>
+
+      {topTab === "labs" ? (
+        labs.length === 0 ? (
+          <EmptyState icon={Beaker} title="No labs yet" hint="Add the labs you outsource lens jobs to — they'll show up as a picker when creating an order." />
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 stagger-rise">
+            {labs.map((l) => (
+              <div key={l.id} className="glass-card p-5">
+                <div className="flex items-start justify-between mb-3">
+                  <div>
+                    <h3 className="font-semibold text-sm">{l.name}</h3>
+                    {l.contact && <p className="text-xs text-muted-foreground mt-0.5">Contact: {l.contact}</p>}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => openEditLab(l)} className="p-1.5 rounded-lg hover:bg-surface-hover cursor-pointer">
+                      <Pencil className="w-3.5 h-3.5 text-muted-foreground" />
+                    </button>
+                    <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
+                      <Beaker className="w-4 h-4 text-primary" />
+                    </div>
+                  </div>
+                </div>
+                <div className="space-y-1.5 text-xs text-muted-foreground">
+                  {l.phone && <p>📞 {l.phone}</p>}
+                  {l.email && <p>✉️ {l.email}</p>}
+                  {l.address && <p>📍 {l.address}</p>}
+                </div>
+              </div>
+            ))}
+          </div>
+        )
+      ) : viewMode === "kanban" ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           {LAB_ORDER_STATUSES.map((status) => {
             const orders = labOrders.filter((o) => o.status === status);
@@ -174,7 +257,7 @@ export function LabOrdersClient({ labOrders, customers }: { labOrders: LabOrder[
           <div className="glass-modal p-6 w-full max-w-lg animate-rise" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold">New Lab Order</h3>
-              <button onClick={() => setShowAdd(false)}><X className="w-5 h-5" /></button>
+              <button onClick={() => setShowAdd(false)} className="cursor-pointer"><X className="w-5 h-5" /></button>
             </div>
             <div className="space-y-3">
               <div className="grid grid-cols-2 gap-3">
@@ -187,7 +270,14 @@ export function LabOrdersClient({ labOrders, customers }: { labOrders: LabOrder[
                 </div>
                 <div>
                   <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Lab *</label>
-                  <input type="text" value={form.lab} onChange={(e) => setForm({ ...form, lab: e.target.value })} className="w-full px-4 py-2.5 glass-input text-sm" />
+                  {labs.length === 0 ? (
+                    <p className="text-xs text-warning py-2.5">No labs yet — add one in the Labs tab first.</p>
+                  ) : (
+                    <select value={form.labId} onChange={(e) => setForm({ ...form, labId: e.target.value })} className="w-full px-3 py-2.5 glass-input text-sm">
+                      <option value="">Select…</option>
+                      {labs.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+                    </select>
+                  )}
                 </div>
                 <div>
                   <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Lens Type</label>
@@ -211,8 +301,47 @@ export function LabOrdersClient({ labOrders, customers }: { labOrders: LabOrder[
                 <input type="text" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} className="w-full px-4 py-2.5 glass-input text-sm" />
               </div>
               <button onClick={handleAdd} disabled={saving}
-                className="w-full py-2.5 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-primary-hover transition-colors disabled:opacity-60 flex items-center justify-center gap-2">
+                className="w-full py-2.5 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-primary-hover transition-colors disabled:opacity-60 flex items-center justify-center gap-2 cursor-pointer">
                 {saving && <Loader2 className="w-4 h-4 animate-spin" />} Create Order
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {labModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setLabModal(null)}>
+          <div className="glass-modal p-6 w-full max-w-md animate-rise" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold">{labModal.mode === "edit" ? "Edit Lab" : "Add Lab"}</h3>
+              <button onClick={() => setLabModal(null)} className="cursor-pointer"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Name *</label>
+                <input type="text" value={labForm.name} onChange={(e) => setLabForm({ ...labForm, name: e.target.value })} className="w-full px-4 py-2.5 glass-input text-sm" />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Contact Person</label>
+                <input type="text" value={labForm.contact} onChange={(e) => setLabForm({ ...labForm, contact: e.target.value })} className="w-full px-4 py-2.5 glass-input text-sm" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Phone</label>
+                  <input type="text" value={labForm.phone} onChange={(e) => setLabForm({ ...labForm, phone: e.target.value })} className="w-full px-3 py-2.5 glass-input text-sm" />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Email</label>
+                  <input type="email" value={labForm.email} onChange={(e) => setLabForm({ ...labForm, email: e.target.value })} className="w-full px-3 py-2.5 glass-input text-sm" />
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Address</label>
+                <input type="text" value={labForm.address} onChange={(e) => setLabForm({ ...labForm, address: e.target.value })} className="w-full px-4 py-2.5 glass-input text-sm" />
+              </div>
+              <button onClick={saveLab} disabled={savingLab}
+                className="w-full py-2.5 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-primary-hover transition-colors disabled:opacity-60 flex items-center justify-center gap-2 cursor-pointer">
+                {savingLab && <Loader2 className="w-4 h-4 animate-spin" />} {labModal.mode === "edit" ? "Save Changes" : "Add Lab"}
               </button>
             </div>
           </div>

@@ -14,7 +14,7 @@ async function requireAuth() {
 
 export interface LabOrderInput {
   customerId: string;
-  lab: string;
+  labId: string;
   lensType: string;
   prescription: string;
   price: number;
@@ -25,6 +25,7 @@ export interface LabOrderInput {
 export async function createLabOrder(input: LabOrderInput) {
   await requireAuth();
   if (!input.customerId) throw new Error("Select a customer");
+  if (!input.labId) throw new Error("Select a lab");
 
   const year = new Date().getFullYear();
   const count = await db.labOrder.count({ where: { orderNo: { startsWith: `LAB-${year}-` } } });
@@ -34,7 +35,7 @@ export async function createLabOrder(input: LabOrderInput) {
     data: {
       orderNo,
       customerId: input.customerId,
-      lab: input.lab,
+      labId: input.labId,
       lensType: input.lensType,
       prescription: input.prescription,
       price: input.price,

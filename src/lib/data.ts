@@ -262,14 +262,15 @@ export async function getExpenses(): Promise<Expense[]> {
 export async function getLabOrders(): Promise<LabOrder[]> {
   const rows = await db.labOrder.findMany({
     orderBy: { orderedDate: "desc" },
-    include: { customer: true },
+    include: { customer: true, lab: true },
   });
   return rows.map((l) => ({
     id: l.id,
     orderNo: l.orderNo,
     customerId: l.customerId,
     customerName: l.customer?.name ?? "",
-    lab: l.lab,
+    labId: l.labId,
+    lab: l.lab.name,
     lensType: l.lensType,
     prescription: l.prescription,
     price: l.price,
@@ -277,6 +278,27 @@ export async function getLabOrders(): Promise<LabOrder[]> {
     orderedDate: iso(l.orderedDate),
     expectedDate: iso(l.expectedDate),
     notes: l.notes,
+  }));
+}
+
+export interface LabVendorView {
+  id: string;
+  name: string;
+  contact: string;
+  phone: string;
+  email: string;
+  address: string;
+}
+
+export async function getLabs(): Promise<LabVendorView[]> {
+  const rows = await db.lab.findMany({ where: { active: true }, orderBy: { name: "asc" } });
+  return rows.map((l) => ({
+    id: l.id,
+    name: l.name,
+    contact: l.contact,
+    phone: l.phone,
+    email: l.email,
+    address: l.address,
   }));
 }
 
