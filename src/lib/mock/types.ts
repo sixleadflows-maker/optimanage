@@ -72,6 +72,11 @@ export interface Sale {
   paymentMethod: string;
   paymentStatus: "Paid" | "Advance" | "Balance";
   branchId: string;
+  source: "POS" | "Online";
+  fulfillmentType?: "Pickup" | "Delivery";
+  deliveryAddress: string;
+  deliveryFee: number;
+  onlineOrderStatus?: "Processing" | "Ready for Pickup" | "Out for Delivery" | "Completed" | "Cancelled";
 }
 
 export interface Supplier {

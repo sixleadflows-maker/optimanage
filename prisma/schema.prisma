@@ -188,6 +188,13 @@ model Sale {
   receivedById    String?
   receivedBy      User?         @relation("SaleReceivedBy", fields: [receivedById], references: [id])
 
+  // Storefront / online orders
+  source            SaleSource         @default(POS)
+  fulfillmentType   FulfillmentType?
+  deliveryAddress   String             @default("")
+  deliveryFee       Float              @default(0)
+  onlineOrderStatus OnlineOrderStatus?
+
   prescriptions   Prescription[]
   returns         Return[]
   createdAt       DateTime      @default(now())
@@ -196,6 +203,24 @@ model Sale {
   @@index([date])
   @@index([customerId])
   @@index([invoiceNo])
+}
+
+enum SaleSource {
+  POS
+  ONLINE
+}
+
+enum FulfillmentType {
+  PICKUP
+  DELIVERY
+}
+
+enum OnlineOrderStatus {
+  PROCESSING
+  READY_FOR_PICKUP
+  OUT_FOR_DELIVERY
+  COMPLETED
+  CANCELLED
 }
 
 model SaleItem {
@@ -406,4 +431,35 @@ model ShopSettings {
   analyticsPin  String  @default("")
   barcodeWidth  Int     @default(2)
   barcodeHeight Int     @default(40)
+  deliveryFee   Float   @default(0)
+}
+
+// ─── Storefront Checkout ────────────────────────────────────
+
+model CheckoutSession {
+  id              String         @id @default(cuid())
+  status          CheckoutStatus @default(PENDING)
+  cartItems       Json
+  subtotal        Float
+  deliveryFee     Float          @default(0)
+  total           Float
+  fulfillmentType FulfillmentType
+  deliveryAddress String         @default("")
+  customerName    String
+  customerPhone   String
+  customerEmail   String         @default("")
+  gatewayRef      String?        @unique
+  saleId          String?        @unique
+  failureReason   String         @default("")
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  @@index([gatewayRef])
+}
+
+enum CheckoutStatus {
+  PENDING
+  PAID
+  FAILED
+  EXPIRED
 }

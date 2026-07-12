@@ -7,6 +7,12 @@ import type {
 const brandTagLabel = { ORIGINAL: "Original", COPY: "Copy", UNBRANDED: "Unbranded" } as const;
 const paymentStatusLabel = { PAID: "Paid", ADVANCE: "Advance", BALANCE: "Balance" } as const;
 const labStatusLabel = { ORDERED: "Ordered", IN_PROGRESS: "In Progress", RECEIVED: "Received", FITTED: "Fitted" } as const;
+const saleSourceLabel = { POS: "POS", ONLINE: "Online" } as const;
+const fulfillmentTypeLabel = { PICKUP: "Pickup", DELIVERY: "Delivery" } as const;
+const onlineOrderStatusLabel = {
+  PROCESSING: "Processing", READY_FOR_PICKUP: "Ready for Pickup", OUT_FOR_DELIVERY: "Out for Delivery",
+  COMPLETED: "Completed", CANCELLED: "Cancelled",
+} as const;
 
 const iso = (d: Date | null | undefined) => (d ? d.toISOString().slice(0, 10) : "");
 
@@ -34,6 +40,11 @@ export async function getProducts(): Promise<Product[]> {
     brandTag: brandTagLabel[p.brandTag],
     priceThreshold: p.priceThreshold || undefined,
   }));
+}
+
+export async function getStorefrontProducts(): Promise<Product[]> {
+  const products = await getProducts();
+  return products.filter((p) => p.stock > 0);
 }
 
 export async function getProduct(id: string): Promise<Product | null> {
@@ -122,6 +133,8 @@ function mapSale(s: {
   subtotal: number; discount: number; tax: number; total: number; paid: number; balance: number;
   paymentMethod: string; paymentStatus: "PAID" | "ADVANCE" | "BALANCE"; branchId: string | null;
   profit: number; totalCost: number; createdBy?: { name: string } | null; receivedBy?: { name: string } | null;
+  source: "POS" | "ONLINE"; fulfillmentType: "PICKUP" | "DELIVERY" | null; deliveryAddress: string; deliveryFee: number;
+  onlineOrderStatus: "PROCESSING" | "READY_FOR_PICKUP" | "OUT_FOR_DELIVERY" | "COMPLETED" | "CANCELLED" | null;
 }): SaleView {
   return {
     id: s.id,
@@ -152,6 +165,11 @@ function mapSale(s: {
     totalCost: s.totalCost,
     createdByName: s.createdBy?.name ?? "",
     receivedByName: s.receivedBy?.name ?? "",
+    source: saleSourceLabel[s.source],
+    fulfillmentType: s.fulfillmentType ? fulfillmentTypeLabel[s.fulfillmentType] : undefined,
+    deliveryAddress: s.deliveryAddress,
+    deliveryFee: s.deliveryFee,
+    onlineOrderStatus: s.onlineOrderStatus ? onlineOrderStatusLabel[s.onlineOrderStatus] : undefined,
   };
 }
 
@@ -169,36 +187,7 @@ export async function getSales(): Promise<SaleView[]> {
     orderBy: { date: "desc" },
     include: { items: true, customer: true, createdBy: true, receivedBy: true },
   });
-  return rows.map((s) => ({
-    id: s.id,
-    invoiceNo: s.invoiceNo,
-    date: iso(s.date),
-    customerId: s.customerId ?? "",
-    customerName: s.customer?.name ?? "Walk-in",
-    items: s.items.map((it) => ({
-      id: it.id,
-      productId: it.productId,
-      productName: it.productName,
-      quantity: it.quantity,
-      unitPrice: it.unitPrice,
-      discount: it.discount,
-      total: it.total,
-      returnedQuantity: it.returnedQuantity,
-    })),
-    subtotal: s.subtotal,
-    discount: s.discount,
-    tax: s.tax,
-    total: s.total,
-    paid: s.paid,
-    balance: s.balance,
-    paymentMethod: s.paymentMethod,
-    paymentStatus: paymentStatusLabel[s.paymentStatus],
-    branchId: s.branchId ?? "",
-    profit: s.profit,
-    totalCost: s.totalCost,
-    createdByName: s.createdBy?.name ?? "",
-    receivedByName: s.receivedBy?.name ?? "",
-  }));
+  return rows.map(mapSale);
 }
 
 // ─── Suppliers ──────────────────────────────────────────────
@@ -437,6 +426,7 @@ export interface SettingsView {
   taxRate: number; receiptFooter: string;
   barcodeWidth: number; barcodeHeight: number;
   hasAnalyticsPin: boolean;
+  deliveryFee: number;
 }
 
 export async function getSettings(): Promise<SettingsView> {
@@ -452,6 +442,7 @@ export async function getSettings(): Promise<SettingsView> {
     barcodeWidth: s?.barcodeWidth ?? 2,
     barcodeHeight: s?.barcodeHeight ?? 40,
     hasAnalyticsPin: !!(s?.analyticsPin),
+    deliveryFee: s?.deliveryFee ?? 0,
   };
 }
 

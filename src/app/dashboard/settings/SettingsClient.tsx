@@ -81,6 +81,7 @@ export function SettingsClient({ settings, users, canManage, isOwner, currentUse
     ntn: settings.ntn, address: settings.address, receiptFooter: settings.receiptFooter,
     taxRate: settings.taxRate,
     barcodeWidth: settings.barcodeWidth, barcodeHeight: settings.barcodeHeight,
+    deliveryFee: settings.deliveryFee,
   });
   const [saving, setSaving] = useState(false);
   const [pin, setPin] = useState("");
@@ -177,6 +178,10 @@ export function SettingsClient({ settings, users, canManage, isOwner, currentUse
             <div>
               <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Barcode height (px)</label>
               <input type="number" min={20} max={120} value={shop.barcodeHeight || ""} onChange={(e) => setShop({ ...shop, barcodeHeight: Number(e.target.value) })} className="w-full px-4 py-2.5 glass-input text-sm" />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Online store delivery fee (Rs.)</label>
+              <input type="number" min={0} value={shop.deliveryFee || ""} onChange={(e) => setShop({ ...shop, deliveryFee: Number(e.target.value) })} className="w-full px-4 py-2.5 glass-input text-sm" />
             </div>
           </div>
           <button onClick={saveShop} disabled={saving || !canManage}

@@ -22,6 +22,7 @@ export interface ShopProfileInput {
   taxRate: number;
   barcodeWidth: number;
   barcodeHeight: number;
+  deliveryFee: number;
 }
 
 export async function updateShopSettings(input: ShopProfileInput) {
@@ -33,6 +34,8 @@ export async function updateShopSettings(input: ShopProfileInput) {
   });
   revalidatePath("/dashboard/settings");
   revalidatePath("/dashboard/pos");
+  revalidatePath("/shop");
+  revalidatePath("/shop/checkout");
   return { ok: true };
 }
 

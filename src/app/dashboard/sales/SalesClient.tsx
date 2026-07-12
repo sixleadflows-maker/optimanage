@@ -8,12 +8,21 @@ import { Search, Download, Receipt, RotateCcw, X, Loader2 } from "lucide-react";
 import { useApp } from "@/lib/context";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { createReturn } from "@/lib/actions/returns";
+import { updateOnlineOrderStatus, type OnlineOrderStatusValue } from "@/lib/actions/sales";
 
 const REFUND_METHODS = ["Cash", "Card", "Bank Transfer", "JazzCash"];
+const ONLINE_ORDER_STATUSES: { value: OnlineOrderStatusValue; label: string }[] = [
+  { value: "PROCESSING", label: "Processing" },
+  { value: "READY_FOR_PICKUP", label: "Ready for Pickup" },
+  { value: "OUT_FOR_DELIVERY", label: "Out for Delivery" },
+  { value: "COMPLETED", label: "Completed" },
+  { value: "CANCELLED", label: "Cancelled" },
+];
 
 export function SalesClient({ sales }: { sales: SaleView[] }) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("All");
+  const [sourceFilter, setSourceFilter] = useState<string>("All");
   const { showToast } = useApp();
   const router = useRouter();
 
@@ -61,9 +70,19 @@ export function SalesClient({ sales }: { sales: SaleView[] }) {
         s.customerName.toLowerCase().includes(search.toLowerCase()) ||
         s.invoiceNo.toLowerCase().includes(search.toLowerCase());
       const matchesStatus = statusFilter === "All" || s.paymentStatus === statusFilter;
-      return matchesSearch && matchesStatus;
+      const matchesSource = sourceFilter === "All" || s.source === sourceFilter;
+      return matchesSearch && matchesStatus && matchesSource;
     });
-  }, [sales, search, statusFilter]);
+  }, [sales, search, statusFilter, sourceFilter]);
+
+  const handleStatusChange = async (saleId: string, status: OnlineOrderStatusValue) => {
+    try {
+      await updateOnlineOrderStatus(saleId, status);
+      router.refresh();
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "Could not update order status", "error");
+    }
+  };
 
   const totalRevenue = filtered.reduce((sum, s) => sum + s.total, 0);
   const totalPaid = filtered.reduce((sum, s) => sum + s.paid, 0);
@@ -139,6 +158,19 @@ export function SalesClient({ sales }: { sales: SaleView[] }) {
               </button>
             ))}
           </div>
+          <div className="flex gap-1.5">
+            {["All", "POS", "Online"].map((source) => (
+              <button
+                key={source}
+                onClick={() => setSourceFilter(source)}
+                className={`px-3 py-2 rounded-xl text-xs font-medium transition-all ${
+                  sourceFilter === source ? "bg-secondary text-white" : "bg-surface hover:bg-surface-hover"
+                }`}
+              >
+                {source}
+              </button>
+            ))}
+          </div>
         </div>
 
         <div className="overflow-x-auto">
@@ -154,12 +186,14 @@ export function SalesClient({ sales }: { sales: SaleView[] }) {
                 <th className="text-right py-3 px-3 text-xs font-medium text-muted-foreground">Balance</th>
                 <th className="text-center py-3 px-3 text-xs font-medium text-muted-foreground">Status</th>
                 <th className="text-center py-3 px-3 text-xs font-medium text-muted-foreground">Payment</th>
+                <th className="text-center py-3 px-3 text-xs font-medium text-muted-foreground">Source</th>
+                <th className="text-center py-3 px-3 text-xs font-medium text-muted-foreground">Fulfillment</th>
                 <th className="text-center py-3 px-3 text-xs font-medium text-muted-foreground">Return</th>
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 && (
-                <tr><td colSpan={10}>
+                <tr><td colSpan={12}>
                   <EmptyState icon={Receipt} title="No invoices yet" hint="Sales you ring up in the POS will appear here with payment status and profit." />
                 </td></tr>
               )}
@@ -176,6 +210,26 @@ export function SalesClient({ sales }: { sales: SaleView[] }) {
                     <span className={`chip chip-${sale.paymentStatus.toLowerCase()}`}>{sale.paymentStatus}</span>
                   </td>
                   <td className="py-3 px-3 text-center text-xs text-muted-foreground">{sale.paymentMethod}</td>
+                  <td className="py-3 px-3 text-center">
+                    <span className={`text-[10px] px-2 py-0.5 rounded-md font-medium ${sale.source === "Online" ? "bg-secondary/10 text-secondary" : "bg-surface text-muted-foreground"}`}>
+                      {sale.source}
+                    </span>
+                  </td>
+                  <td className="py-3 px-3 text-center">
+                    {sale.source === "Online" ? (
+                      <select
+                        value={sale.onlineOrderStatus ?? "Processing"}
+                        onChange={(e) => handleStatusChange(sale.id, ONLINE_ORDER_STATUSES.find((s) => s.label === e.target.value)!.value)}
+                        className="px-2 py-1 glass-input text-[11px]"
+                      >
+                        {ONLINE_ORDER_STATUSES.map((s) => (
+                          <option key={s.value} value={s.label}>{s.label}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <span className="text-muted-foreground text-xs">—</span>
+                    )}
+                  </td>
                   <td className="py-3 px-3 text-center">
                     {returnableItems(sale).length > 0 && (
                       <button onClick={() => openReturn(sale)} title="Return / Refund"
