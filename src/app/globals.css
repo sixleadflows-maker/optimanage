@@ -729,14 +729,17 @@ a:hover .nav-icon { transform: translateY(-1px) scale(1.08); }
     visibility: visible;
   }
 
-  /* Thermal thin-strokes fonts (Courier New) and light Tailwind weights read
-     as faint on thermal/receipt printers -- force everything bold on the
-     physical printout regardless of what weight a given element normally is. */
+  /* Thermal printers print faint thin strokes and let ink bleed between
+     small, tightly packed letters -- force everything bold italic on the
+     physical printout regardless of an element's normal weight/style.
+     Neither Geist Mono nor Manrope loads an italic face, so the browser
+     synthesizes the slant; that's fine for print. */
   body.printing-thermal .receipt-paper,
   body.printing-thermal .receipt-paper *,
   body.printing-a4 .a4-invoice,
   body.printing-a4 .a4-invoice * {
     font-weight: 700 !important;
+    font-style: italic !important;
   }
 
   /* Single label (ProductForm) -- exactly one .product-label exists on that
@@ -766,18 +769,25 @@ a:hover .nav-icon { transform: translateY(-1px) scale(1.08); }
     break-inside: avoid;
   }
 
+  /* Scale the whole printout up so bled ink can't merge adjacent letters.
+     zoom (unlike transform) participates in layout: every font size, padding,
+     and gap grows proportionally, so the size hierarchy survives -- and the
+     width is pre-divided by the same factor so the zoomed result still lands
+     exactly on the paper width. */
   body.printing-thermal .receipt-paper {
     position: absolute;
     top: 0;
     left: 0;
-    width: 80mm;
+    width: calc(80mm / 1.35);
+    zoom: 1.35;
     box-shadow: none;
   }
   body.printing-a4 .a4-invoice {
     position: absolute;
     top: 0;
     left: 0;
-    width: 100%;
+    width: calc(100% / 1.25);
+    zoom: 1.25;
     box-shadow: none;
   }
 }
