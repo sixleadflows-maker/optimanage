@@ -130,3 +130,30 @@ export async function deleteProduct(id: string) {
   revalidatePath("/dashboard/inventory");
   return { ok: true };
 }
+
+export interface BarcodeLookupResult {
+  id: string;
+  name: string;
+  brand: string;
+  model: string;
+  salePrice: number;
+  stock: number;
+  lowStockThreshold: number;
+}
+
+export async function lookupProductByBarcode(barcode: string): Promise<BarcodeLookupResult | null> {
+  await requireAuth();
+  const trimmed = barcode.trim();
+  if (!trimmed) return null;
+  const product = await db.product.findFirst({ where: { barcode: trimmed, active: true } });
+  if (!product) return null;
+  return {
+    id: product.id,
+    name: product.name,
+    brand: product.brand,
+    model: product.model,
+    salePrice: product.salePrice,
+    stock: product.stock,
+    lowStockThreshold: product.lowStockThreshold,
+  };
+}

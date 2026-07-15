@@ -3,7 +3,9 @@
 import { useApp } from "@/lib/context";
 import { BRANCHES, SHOP_NAME } from "@/lib/constants";
 import { logout } from "@/lib/actions/auth";
-import { Menu, Search, Moon, Sun, Wifi, WifiOff, ChevronDown, LogOut } from "lucide-react";
+import { lookupProductByBarcode, type BarcodeLookupResult } from "@/lib/actions/products";
+import { formatCurrency } from "@/lib/utils/format";
+import { Menu, Search, Moon, Sun, Wifi, WifiOff, ChevronDown, LogOut, Loader2 } from "lucide-react";
 import { useState } from "react";
 
 interface TopbarUser {
@@ -22,6 +24,27 @@ export function Topbar({ user }: { user: TopbarUser }) {
   const [branchOpen, setBranchOpen] = useState(false);
   const [userOpen, setUserOpen] = useState(false);
   const currentBranch = BRANCHES.find((b) => b.id === activeBranch);
+
+  const [scanValue, setScanValue] = useState("");
+  const [checking, setChecking] = useState(false);
+  const [lookupResult, setLookupResult] = useState<BarcodeLookupResult | "not-found" | null>(null);
+
+  const checkStock = async () => {
+    const barcode = scanValue.trim();
+    if (!barcode) return;
+    setChecking(true);
+    try {
+      const result = await lookupProductByBarcode(barcode);
+      setLookupResult(result ?? "not-found");
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  const closeLookup = () => {
+    setLookupResult(null);
+    setScanValue("");
+  };
 
   return (
     <header className="glass-topbar sticky top-0 z-30 px-4 lg:px-6 h-14 flex items-center gap-3">
@@ -66,12 +89,52 @@ export function Topbar({ user }: { user: TopbarUser }) {
 
       <div className="flex-1 max-w-md mx-auto">
         <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          {checking ? (
+            <Loader2 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground animate-spin" />
+          ) : (
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          )}
           <input
             type="text"
-            placeholder="Search products, customers, invoices..."
+            placeholder="Scan or type a barcode to check stock..."
+            value={scanValue}
+            onChange={(e) => setScanValue(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") checkStock(); }}
             className="w-full pl-9 pr-4 py-2 glass-input text-sm"
           />
+          {lookupResult && (
+            <>
+              <div className="fixed inset-0 z-10" onClick={closeLookup} />
+              <div className="absolute top-full left-0 right-0 mt-2 glass rounded-xl p-3 z-20 animate-fade-in">
+                {lookupResult === "not-found" ? (
+                  <p className="text-sm text-muted-foreground">No product found for barcode &quot;{scanValue}&quot;.</p>
+                ) : (
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold truncate">{lookupResult.name}</p>
+                      <p className="text-xs text-muted-foreground truncate">{lookupResult.brand} {lookupResult.model}</p>
+                      <p className="text-sm font-bold text-primary mt-0.5">{formatCurrency(lookupResult.salePrice)}</p>
+                    </div>
+                    <span
+                      className={`shrink-0 px-2.5 py-1 rounded-full text-xs font-semibold ${
+                        lookupResult.stock === 0
+                          ? "bg-destructive/10 text-destructive"
+                          : lookupResult.stock <= lookupResult.lowStockThreshold
+                          ? "bg-warning/10 text-warning"
+                          : "bg-success/10 text-success"
+                      }`}
+                    >
+                      {lookupResult.stock === 0
+                        ? "Out of Stock"
+                        : lookupResult.stock <= lookupResult.lowStockThreshold
+                        ? `Low Stock — ${lookupResult.stock} left`
+                        : `In Stock — ${lookupResult.stock} available`}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
         </div>
       </div>
 
