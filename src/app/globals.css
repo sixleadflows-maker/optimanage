@@ -688,11 +688,15 @@ a:hover .nav-icon { transform: translateY(-1px) scale(1.08); }
 .receipt-paper {
   background: #fff;
   color: #000;
-  font-family: "Courier New", monospace;
+  font-family: var(--font-geist-mono), "Courier New", monospace;
   width: 280px;
   padding: 16px;
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.4;
+}
+
+.a4-invoice {
+  font-family: var(--font-manrope);
 }
 
 /* Printing the thermal receipt or A4 invoice must isolate just that one
