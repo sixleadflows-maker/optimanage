@@ -392,7 +392,7 @@ export async function getReminders(): Promise<ReminderItem[]> {
           template: EYE_TEST_REMINDER_TEMPLATE,
           lastDate: iso(lastEyeTest),
           daysSince,
-          message: `Hello ${c.name}, it's been a year since your last eye test at Noor Optics. Book an appointment to get your eyes checked!`,
+          message: `Hello ${c.name}, it's been a year since your last eye test at EyeSpy. Book an appointment to get your eyes checked!`,
         });
       }
     }
@@ -410,7 +410,7 @@ export async function getReminders(): Promise<ReminderItem[]> {
           template: LENS_CHANGE_REMINDER_TEMPLATE,
           lastDate: iso(lastLensChange),
           daysSince,
-          message: `Hello ${c.name}, it's been 6 months since your last lens change at Noor Optics. Visit us for a check-up and fresh lenses!`,
+          message: `Hello ${c.name}, it's been 6 months since your last lens change at EyeSpy. Visit us for a check-up and fresh lenses!`,
         });
       }
     }
@@ -432,7 +432,7 @@ export interface SettingsView {
 export async function getSettings(): Promise<SettingsView> {
   const s = await db.shopSettings.findUnique({ where: { id: "default" } });
   return {
-    name: s?.name ?? "Noor Optics",
+    name: s?.name ?? "EyeSpy",
     address: s?.address ?? "",
     phone: s?.phone ?? "",
     email: s?.email ?? "",

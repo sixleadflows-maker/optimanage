@@ -1,5 +1,5 @@
 export const APP_NAME = "OptiManage";
-export const SHOP_NAME = "Noor Optics";
+export const SHOP_NAME = "EyeSpy";
 export const CURRENCY = "Rs.";
 export const PRIMARY_COLOR = "#6d5ef0";
 export const PRIMARY_LIGHT = "#edeafd";

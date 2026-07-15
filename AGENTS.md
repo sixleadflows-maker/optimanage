@@ -6,7 +6,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
 
 # OptiManage — Project Context
 
-This is a **real, live production system** for Noor Optics, an optical retail shop in Karachi, Pakistan — inventory, POS, prescriptions, lab orders, suppliers, customer CRM, analytics, and (since July 2026) a public customer-facing storefront with online checkout. `README.md` is stale and still describes an old mock-data prototype version of this app — ignore it for current state; this file is the source of truth. Check `git log` for detailed feature history rather than expecting it enumerated here.
+This is a **real, live production system** for EyeSpy (formerly Noor Optics — rebranded July 2026), an optical retail shop in Karachi, Pakistan — inventory, POS, prescriptions, lab orders, suppliers, customer CRM, analytics, and (since July 2026) a public customer-facing storefront with online checkout. `README.md` is stale and still describes an old mock-data prototype version of this app — ignore it for current state; this file is the source of truth. Check `git log` for detailed feature history rather than expecting it enumerated here.
 
 ## Stack
 - Next.js 16 App Router + Turbopack, TypeScript, Tailwind CSS v4
@@ -37,7 +37,7 @@ This is a **real, live production system** for Noor Optics, an optical retail sh
 - Print output: `.receipt-paper` (80mm thermal) and `.a4-invoice` classes in `globals.css`, rendered in `POSClient.tsx`. A print-scoped rule forces `font-weight: 700 !important` on both, because thin strokes (Courier New, default-weight body text) print faint on thermal printers — the on-screen previews intentionally stay at normal weight, only the physical printout is bold.
 
 ## Staff login credentials
-Do not hardcode these in any file that gets committed. Dev/seed logins are defined in `prisma/seed.ts` (one OWNER, one MANAGER, two CASHIER accounts) — read that file directly if you need to log in locally. The live production DB uses the same accounts (there's no separate staging DB), so treat them as real credentials, not throwaway demo values.
+Do not hardcode these in any file that gets committed. Dev/seed logins are defined in `prisma/seed.ts` (one OWNER, one MANAGER, two CASHIER accounts) — read that file directly if you need to log in locally. The live production DB uses the same accounts (there's no separate staging DB), so treat them as real credentials, not throwaway demo values. The user emails deliberately still end in `@nooroptics.pk` after the EyeSpy rebrand — they're live usernames staff type at login, so renaming them requires a coordinated credential rotation, not a find-and-replace (the login page placeholder matches them on purpose).
 
 ## Local development
 `npm run dev` (Turbopack). Needs `DATABASE_URL` + `AUTH_SECRET` in `.env`/`.env.local` pointing at the **same live Neon database used in production** — there is no separate dev/staging DB. Always clean up any test sales/customers/stock changes with a throwaway `tsx` script immediately after verifying a feature; don't leave test data in the shared production DB.

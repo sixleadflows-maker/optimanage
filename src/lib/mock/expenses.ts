@@ -19,18 +19,18 @@ export const expenses: Expense[] = [
 ];
 
 export const shopSettings: ShopSettings = {
-  name: "Noor Optics",
+  name: "EyeSpy",
   address: "45 Tariq Road, Karachi, Sindh 75400",
   phone: "+92 21 3456 7890",
-  email: "info@nooroptics.pk",
+  email: "info@eyespy.pk",
   gst: "1234567-8",
   taxRate: 0,
-  receiptFooter: "Thank you for choosing Noor Optics! Your vision is our mission.",
+  receiptFooter: "Thank you for choosing EyeSpy! Your vision is our mission.",
 };
 
 export const users: User[] = [
-  { id: "u1", name: "Dr. Asif Mahmood", email: "asif@nooroptics.pk", role: "Owner", avatar: "AM", active: true },
-  { id: "u2", name: "Rabia Hassan", email: "rabia@nooroptics.pk", role: "Manager", avatar: "RH", active: true },
-  { id: "u3", name: "Waqar Younis", email: "waqar@nooroptics.pk", role: "Cashier", avatar: "WY", active: true },
-  { id: "u4", name: "Saima Noor", email: "saima@nooroptics.pk", role: "Cashier", avatar: "SN", active: false },
+  { id: "u1", name: "Dr. Asif Mahmood", email: "asif@eyespy.pk", role: "Owner", avatar: "AM", active: true },
+  { id: "u2", name: "Rabia Hassan", email: "rabia@eyespy.pk", role: "Manager", avatar: "RH", active: true },
+  { id: "u3", name: "Waqar Younis", email: "waqar@eyespy.pk", role: "Cashier", avatar: "WY", active: true },
+  { id: "u4", name: "Saima Noor", email: "saima@eyespy.pk", role: "Cashier", avatar: "SN", active: false },
 ];

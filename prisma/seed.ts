@@ -54,13 +54,13 @@ async function main() {
     where: { id: "default" },
     update: {},
     create: {
-      name: "Noor Optics",
+      name: "EyeSpy",
       address: "45 Tariq Road, Karachi 75400",
       phone: "+92 21 3456 7890",
-      email: "info@nooroptics.pk",
+      email: "info@eyespy.pk",
       ntn: "1234567-8",
       taxRate: 0,
-      receiptFooter: "Thank you for choosing Noor Optics!",
+      receiptFooter: "Thank you for choosing EyeSpy!",
       analyticsPin: settingsPin,
     },
   });

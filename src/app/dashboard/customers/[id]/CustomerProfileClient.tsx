@@ -17,9 +17,9 @@ export function CustomerProfileClient({ customer, sales }: { customer: CustomerV
   };
 
   const reminders = [
-    { label: "Order Ready", icon: Bell, message: `Hello ${customer.name}, your order is ready for pickup at Noor Optics.` },
-    { label: "Eye Test", icon: Eye, message: `Hello ${customer.name}, it's time for your annual eye test. Book an appointment with Noor Optics.` },
-    { label: "Change Lens", icon: RefreshCw, message: `Hello ${customer.name}, a reminder to replace your lenses. Visit Noor Optics for a check-up.` },
+    { label: "Order Ready", icon: Bell, message: `Hello ${customer.name}, your order is ready for pickup at EyeSpy.` },
+    { label: "Eye Test", icon: Eye, message: `Hello ${customer.name}, it's time for your annual eye test. Book an appointment with EyeSpy.` },
+    { label: "Change Lens", icon: RefreshCw, message: `Hello ${customer.name}, a reminder to replace your lenses. Visit EyeSpy for a check-up.` },
   ];
 
   return (
@@ -67,7 +67,7 @@ export function CustomerProfileClient({ customer, sales }: { customer: CustomerV
                 </button>
               ))}
               <button
-                onClick={() => openWhatsApp(`Hello ${customer.name}, thank you for choosing Noor Optics!`)}
+                onClick={() => openWhatsApp(`Hello ${customer.name}, thank you for choosing EyeSpy!`)}
                 className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl bg-[#25D366]/10 hover:bg-[#25D366]/20 text-[#25D366] transition-colors text-sm">
                 <MessageCircle className="w-4 h-4 flex-shrink-0" />
                 Send WhatsApp

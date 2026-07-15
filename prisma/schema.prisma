@@ -421,7 +421,7 @@ enum MessageStatus {
 
 model ShopSettings {
   id            String  @id @default("default")
-  name          String  @default("Noor Optics")
+  name          String  @default("EyeSpy")
   address       String  @default("")
   phone         String  @default("")
   email         String  @default("")

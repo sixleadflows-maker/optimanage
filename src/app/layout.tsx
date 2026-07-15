@@ -10,7 +10,7 @@ const manrope = Manrope({ variable: "--font-manrope", subsets: ["latin"], weight
 
 export const metadata: Metadata = {
   title: "OptiManage - Optical Store Management",
-  description: "Modern optical store management system for Noor Optics — inventory, POS, prescriptions, lab orders & WhatsApp CRM",
+  description: "Modern optical store management system for EyeSpy — inventory, POS, prescriptions, lab orders & WhatsApp CRM",
   icons: { icon: "/favicon.svg" },
   openGraph: {
     title: "OptiManage — Optical Store Management",

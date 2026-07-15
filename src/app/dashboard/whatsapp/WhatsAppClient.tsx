@@ -9,12 +9,12 @@ import { MessageCircle, Send, CheckCheck, Check, AlertCircle, Bell, Eye, Refresh
 import { EmptyState } from "@/components/ui/EmptyState";
 
 const TEMPLATES = [
-  { id: "t1", name: "Order Ready", message: "Hello {name}, your order at Noor Optics is ready for pickup. See you soon!" },
-  { id: "t2", name: "Eye Test Reminder", message: "Hi {name}, it's been a while since your last eye test. Book an appointment with Noor Optics today." },
-  { id: "t3", name: "Balance Due", message: "Dear {name}, this is a friendly reminder about the outstanding balance on your Noor Optics order. Thank you!" },
-  { id: "t4", name: "Lens Replacement", message: "Hi {name}, your contact lenses may be due for replacement. Visit Noor Optics for a fresh supply." },
-  { id: "t5", name: "New Arrivals", message: "Hello {name}! New designer frames just arrived at Noor Optics. Come check out the latest collection." },
-  { id: "t6", name: "Thank You", message: "Thank you for shopping at Noor Optics, {name}! We appreciate your trust in us." },
+  { id: "t1", name: "Order Ready", message: "Hello {name}, your order at EyeSpy is ready for pickup. See you soon!" },
+  { id: "t2", name: "Eye Test Reminder", message: "Hi {name}, it's been a while since your last eye test. Book an appointment with EyeSpy today." },
+  { id: "t3", name: "Balance Due", message: "Dear {name}, this is a friendly reminder about the outstanding balance on your EyeSpy order. Thank you!" },
+  { id: "t4", name: "Lens Replacement", message: "Hi {name}, your contact lenses may be due for replacement. Visit EyeSpy for a fresh supply." },
+  { id: "t5", name: "New Arrivals", message: "Hello {name}! New designer frames just arrived at EyeSpy. Come check out the latest collection." },
+  { id: "t6", name: "Thank You", message: "Thank you for shopping at EyeSpy, {name}! We appreciate your trust in us." },
 ];
 
 const statusIcons: Record<string, React.ReactNode> = {
