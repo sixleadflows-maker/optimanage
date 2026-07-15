@@ -725,6 +725,16 @@ a:hover .nav-icon { transform: translateY(-1px) scale(1.08); }
     visibility: visible;
   }
 
+  /* Thermal thin-strokes fonts (Courier New) and light Tailwind weights read
+     as faint on thermal/receipt printers -- force everything bold on the
+     physical printout regardless of what weight a given element normally is. */
+  body.printing-thermal .receipt-paper,
+  body.printing-thermal .receipt-paper *,
+  body.printing-a4 .a4-invoice,
+  body.printing-a4 .a4-invoice * {
+    font-weight: 700 !important;
+  }
+
   /* Single label (ProductForm) -- exactly one .product-label exists on that
      page, so it's positioned to fill the label like the receipt/invoice. */
   body.printing-label .product-label {
