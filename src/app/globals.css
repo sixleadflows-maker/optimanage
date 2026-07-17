@@ -699,6 +699,19 @@ a:hover .nav-icon { transform: translateY(-1px) scale(1.08); }
   font-family: var(--font-manrope);
 }
 
+/* A barcode's rendered width scales with its digit count and the bar-width
+   setting in Settings, not with the label -- so it can come out wider or
+   taller than the fixed 2in x 1in label box. Shrink it proportionally to
+   fit instead of letting it overflow (and get clipped or blow up the page
+   size); this applies on screen too since the bulk Labels page cells are
+   already fixed-size there. */
+.product-label svg {
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
+}
+
 /* Printing the thermal receipt or A4 invoice must isolate just that one
    element -- otherwise the sidebar, topbar, and the other receipt format
    print alongside it. Only one of these two "printing-*" classes is ever
@@ -745,7 +758,11 @@ a:hover .nav-icon { transform: translateY(-1px) scale(1.08); }
   }
 
   /* Single label (ProductForm) -- exactly one .product-label exists on that
-     page, so it's positioned to fill the label like the receipt/invoice. */
+     page. The page itself is set to exactly 2in x 1in for this print job
+     (see printWithPageSize() in src/lib/utils/print.ts), so filling it
+     corner to corner here is all that's needed -- no extra centering or
+     scale math, and no risk of the OS/driver falling back to a default
+     Letter/A4 page and stretching or shrinking the label to fit it. */
   body.printing-label .product-label {
     position: absolute;
     top: 0;
@@ -754,21 +771,21 @@ a:hover .nav-icon { transform: translateY(-1px) scale(1.08); }
     height: 1in;
   }
 
-  /* Bulk label sheet -- many .product-label cells inside one .label-grid;
-     the grid itself fills the page and flows across multiple print pages,
-     each cell held to the fixed label size so nothing splits mid-label. */
+  /* Bulk labels (Zebra-style continuous roll) -- each .product-label is its
+     own printed page at the same fixed 2in x 1in size, so the printer
+     advances the roll once per label instead of trying to arrange several
+     onto one oversized virtual sheet. */
   body.printing-all-labels .label-grid {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    display: flex;
-    flex-wrap: wrap;
+    display: block;
   }
   body.printing-all-labels .label-grid .product-label {
     width: 2in;
     height: 1in;
+    break-after: page;
     break-inside: avoid;
+  }
+  body.printing-all-labels .label-grid .product-label:last-child {
+    break-after: auto;
   }
 
   /* Scale the whole printout up so bled ink can't merge adjacent letters.

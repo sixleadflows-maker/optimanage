@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { backfillBarcodes } from "@/lib/actions/products";
 import { BarcodeSVG } from "@/components/ui/BarcodeSVG";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { printWithPageSize } from "@/lib/utils/print";
 import { Search, Barcode, Printer, Wand2, Loader2 } from "lucide-react";
 
 export function LabelsClient({ products, barcodeWidth, barcodeHeight }: { products: Product[]; barcodeWidth: number; barcodeHeight: number }) {
@@ -37,9 +38,7 @@ export function LabelsClient({ products, barcodeWidth, barcodeHeight }: { produc
   };
 
   const printAll = () => {
-    document.body.classList.add("printing-all-labels");
-    window.print();
-    document.body.classList.remove("printing-all-labels");
+    printWithPageSize("printing-all-labels", "2in 1in");
   };
 
   return (

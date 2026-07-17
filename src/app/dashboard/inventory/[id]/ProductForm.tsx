@@ -13,6 +13,7 @@ import Link from "next/link";
 import { ImageCarousel } from "@/components/ui/ImageCarousel";
 import { parseImages } from "@/lib/utils/images";
 import { BarcodeSVG } from "@/components/ui/BarcodeSVG";
+import { printWithPageSize } from "@/lib/utils/print";
 
 const brandTagConfig = {
   Original: { icon: Shield, color: "bg-success/10 text-success border-success/20", label: "Original" },
@@ -113,9 +114,7 @@ export function ProductForm({ product, isNew, barcodeWidth = 2, barcodeHeight = 
   };
 
   const printOnly = (mode: "label") => {
-    document.body.classList.add(`printing-${mode}`);
-    window.print();
-    document.body.classList.remove(`printing-${mode}`);
+    printWithPageSize(`printing-${mode}`, "2in 1in");
   };
 
   const barcodeDisplay = form.barcode || "0000000000000";
@@ -330,7 +329,7 @@ export function ProductForm({ product, isNew, barcodeWidth = 2, barcodeHeight = 
               <Barcode className="w-4 h-4" /> Barcode Preview
             </h3>
             <div className="bg-white p-4 rounded-xl flex justify-center">
-              <div className="product-label">
+              <div className="product-label flex items-center justify-center" style={{ width: "2in", minHeight: "1in" }}>
                 <BarcodeSVG value={barcodeDisplay} width={barcodeWidth} height={barcodeHeight} />
               </div>
             </div>
