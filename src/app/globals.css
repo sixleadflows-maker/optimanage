@@ -771,21 +771,24 @@ a:hover .nav-icon { transform: translateY(-1px) scale(1.08); }
     height: 1in;
   }
 
-  /* Bulk labels (Zebra-style continuous roll) -- each .product-label is its
-     own printed page at the same fixed 2in x 1in size, so the printer
-     advances the roll once per label instead of trying to arrange several
-     onto one oversized virtual sheet. */
+  /* Bulk labels (Zebra-style continuous roll) -- display:block instead of
+     the on-screen flex-wrap because Chromium's print pagination doesn't
+     reliably paginate flex/grid containers (items can get cut off or
+     duplicated across page boundaries). No explicit break-after is forced:
+     since the page itself is exactly 2in x 1in (see printWithPageSize() in
+     src/lib/utils/print.ts) and each label is also exactly 2in x 1in with
+     no margin, a label already fills 100% of one page on its own, so the
+     next one naturally overflows onto its own page without needing an
+     explicit page-break instruction -- which is deliberate: a forced
+     break-after was tried here and caused the label printer to double up
+     content on some drivers, so pagination is left to happen naturally. */
   body.printing-all-labels .label-grid {
     display: block;
   }
   body.printing-all-labels .label-grid .product-label {
     width: 2in;
     height: 1in;
-    break-after: page;
     break-inside: avoid;
-  }
-  body.printing-all-labels .label-grid .product-label:last-child {
-    break-after: auto;
   }
 
   /* Scale the whole printout up so bled ink can't merge adjacent letters.
