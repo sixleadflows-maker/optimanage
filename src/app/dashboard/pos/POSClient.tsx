@@ -464,57 +464,124 @@ export function POSClient({
           <div className="glass-card p-6">
             <h3 className="text-sm font-semibold mb-4">A4 Invoice</h3>
             <div className="a4-invoice bg-white text-black rounded-lg p-6 shadow-lg text-base">
-              <div className="flex justify-between items-start mb-6">
-                <div>
-                  <h2 className="text-xl font-bold text-[#6d5ef0]">{SHOP_NAME}</h2>
-                  <p className="text-sm text-gray-500">45 Tariq Road, Karachi · NTN: 1234567-8</p>
-                </div>
+              <div className="flex justify-between items-center pb-4 border-b-2 border-[#6d5ef0]">
+                <img src="/eyespy-logo.png" alt={SHOP_NAME} className="h-12 w-auto" />
                 <div className="text-right">
-                  <p className="font-bold">INVOICE</p>
-                  <p className="text-sm text-gray-500">{saleResult.invoiceNo}</p>
-                  <p className="text-sm text-gray-500">{saleResult.date}</p>
+                  <p className="text-2xl font-extrabold tracking-wide text-[#6d5ef0]">INVOICE</p>
+                  <p className="text-sm text-gray-600">{saleResult.invoiceNo}</p>
                 </div>
               </div>
-              {customer && (
-                <div className="mb-4 p-3 bg-gray-50 rounded-lg">
-                  <p className="text-sm text-gray-500">Bill To</p>
-                  <p className="font-medium">{customer.name}</p>
-                  <p className="text-sm text-gray-500">{customer.phone}</p>
+
+              <div className="grid grid-cols-3 gap-4 py-4 border-b border-gray-200 text-sm">
+                <div>
+                  <p className="text-[10px] uppercase tracking-widest text-gray-400 mb-1">From</p>
+                  <p className="font-semibold">{SHOP_NAME}</p>
+                  <p className="text-gray-600">45 Tariq Road, Karachi 75400</p>
+                  <p className="text-gray-600">Ph: +92 21 3456 7890</p>
+                  <p className="text-gray-600">NTN: 1234567-8</p>
+                </div>
+                <div>
+                  <p className="text-[10px] uppercase tracking-widest text-gray-400 mb-1">Billed To</p>
+                  <p className="font-semibold">{customer ? customer.name : "Walk-in Customer"}</p>
+                  {customer && <p className="text-gray-600">{customer.phone}</p>}
+                </div>
+                <div>
+                  <p className="text-[10px] uppercase tracking-widest text-gray-400 mb-1">Invoice Details</p>
+                  <p className="text-gray-600">Date: {saleResult.date}</p>
+                  <p className="text-gray-600">Payment: {paymentMethod}</p>
+                  <p className="text-gray-600">Status: {paymentType}</p>
+                </div>
+              </div>
+
+              {recordRx && (
+                <div className="py-4 border-b border-gray-200">
+                  <p className="text-[10px] uppercase tracking-widest text-gray-400 mb-2">
+                    Prescription{rxIsOwn ? " (Customer's Own)" : ""}
+                  </p>
+                  <table className="w-full text-sm text-center">
+                    <thead>
+                      <tr className="bg-gray-100">
+                        <th className="py-1.5 pl-2 text-left font-semibold">Eye</th>
+                        <th className="font-semibold">SPH</th>
+                        <th className="font-semibold">CYL</th>
+                        <th className="font-semibold">AXIS</th>
+                        <th className="font-semibold">PD</th>
+                        <th className="font-semibold">ADD</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr className="border-b border-gray-100">
+                        <td className="py-1.5 pl-2 text-left">OD (Right)</td>
+                        <td>{rx.rightSph || 0}</td><td>{rx.rightCyl || 0}</td><td>{rx.rightAxis || 0}</td><td>{rx.rightPd || 0}</td><td>{rx.rightAdd || 0}</td>
+                      </tr>
+                      <tr>
+                        <td className="py-1.5 pl-2 text-left">OS (Left)</td>
+                        <td>{rx.leftSph || 0}</td><td>{rx.leftCyl || 0}</td><td>{rx.leftAxis || 0}</td><td>{rx.leftPd || 0}</td><td>{rx.leftAdd || 0}</td>
+                      </tr>
+                    </tbody>
+                  </table>
                 </div>
               )}
-              <table className="w-full text-sm mb-4">
+
+              <table className="w-full text-sm my-4">
                 <thead>
-                  <tr className="border-b-2 border-gray-200">
+                  <tr className="bg-gray-100 border-b-2 border-gray-300">
+                    <th className="text-left py-2 pl-2 w-8">#</th>
                     <th className="text-left py-2">Item</th>
                     <th className="text-center py-2">Qty</th>
-                    <th className="text-right py-2">Price</th>
-                    <th className="text-right py-2">Total</th>
+                    <th className="text-right py-2">Unit Price</th>
+                    <th className="text-right py-2">Discount</th>
+                    <th className="text-right py-2 pr-2">Amount</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {cart.map((item) => (
+                  {cart.map((item, i) => (
                     <tr key={item.productId} className="border-b border-gray-100">
+                      <td className="py-2 pl-2 text-gray-500">{i + 1}</td>
                       <td className="py-2">{item.brand} {item.name}</td>
                       <td className="text-center py-2">{item.quantity}</td>
                       <td className="text-right py-2">{formatCurrency(item.price)}</td>
-                      <td className="text-right py-2">{formatCurrency(item.price * item.quantity - item.discount)}</td>
+                      <td className="text-right py-2">{item.discount > 0 ? `-${formatCurrency(item.discount)}` : "—"}</td>
+                      <td className="text-right py-2 pr-2">{formatCurrency(item.price * item.quantity - item.discount)}</td>
                     </tr>
                   ))}
                   {useCustomLens && customLensAmount > 0 && (
                     <tr className="border-b border-gray-100">
+                      <td className="py-2 pl-2 text-gray-500">{cart.length + 1}</td>
                       <td className="py-2">{customLensName}</td>
                       <td className="text-center py-2">1</td>
                       <td className="text-right py-2">{formatCurrency(customLensAmount)}</td>
-                      <td className="text-right py-2">{formatCurrency(customLensAmount)}</td>
+                      <td className="text-right py-2">—</td>
+                      <td className="text-right py-2 pr-2">{formatCurrency(customLensAmount)}</td>
                     </tr>
                   )}
                 </tbody>
               </table>
-              <div className="border-t-2 border-gray-200 pt-3 space-y-1 text-right">
-                <p>Subtotal: {formatCurrency(subtotal)}</p>
-                {invoiceDiscount > 0 && <p>Discount: -{formatCurrency(invoiceDiscount)}</p>}
-                <p className="text-xl font-bold text-[#6d5ef0]">Total: {formatCurrency(total)}</p>
-                <p className="text-sm text-gray-500">Order taken by {saleResult.orderTakenByName} · Bill by {saleResult.billGeneratedByName}</p>
+
+              <div className="flex justify-end">
+                <div className="w-64 text-sm space-y-1">
+                  <div className="flex justify-between"><span className="text-gray-600">Subtotal</span><span>{formatCurrency(subtotal)}</span></div>
+                  {invoiceDiscount > 0 && (
+                    <div className="flex justify-between"><span className="text-gray-600">Invoice Discount</span><span>-{formatCurrency(invoiceDiscount)}</span></div>
+                  )}
+                  <div className="flex justify-between text-lg font-bold border-t-2 border-gray-800 pt-2 mt-2">
+                    <span>Total</span><span className="text-[#6d5ef0]">{formatCurrency(total)}</span>
+                  </div>
+                  {paymentType === "Advance" && (
+                    <>
+                      <div className="flex justify-between"><span className="text-gray-600">Paid (Advance)</span><span>{formatCurrency(advanceAmount)}</span></div>
+                      <div className="flex justify-between font-semibold"><span>Balance Due</span><span>{formatCurrency(total - advanceAmount)}</span></div>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              <div className="mt-8 pt-3 border-t border-gray-200 flex justify-between items-end text-xs text-gray-500">
+                <div>
+                  <p>Order taken by {saleResult.orderTakenByName} · Bill generated by {saleResult.billGeneratedByName}</p>
+                  <p className="mt-1">Thank you for choosing {SHOP_NAME}! Your vision is our mission.</p>
+                </div>
+                <p>Computer-generated invoice</p>
               </div>
             </div>
             <div className="no-print flex gap-3 mt-4">

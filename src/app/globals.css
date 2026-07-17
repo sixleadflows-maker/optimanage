@@ -688,7 +688,7 @@ a:hover .nav-icon { transform: translateY(-1px) scale(1.08); }
 .receipt-paper {
   background: #fff;
   color: #000;
-  font-family: var(--font-geist-mono), "Courier New", monospace;
+  font-family: var(--font-geist-sans), Arial, sans-serif;
   width: 280px;
   padding: 16px;
   font-size: 13px;
@@ -730,16 +730,18 @@ a:hover .nav-icon { transform: translateY(-1px) scale(1.08); }
   }
 
   /* Thermal printers print faint thin strokes and let ink bleed between
-     small, tightly packed letters -- force everything bold italic on the
-     physical printout regardless of an element's normal weight/style.
-     Neither Geist Mono nor Manrope loads an italic face, so the browser
-     synthesizes the slant; that's fine for print. */
+     small, tightly packed letters -- force everything bold on the physical
+     printout regardless of an element's normal weight. Both printouts use
+     sans-serif faces (Geist Sans receipt, Manrope invoice). color-adjust
+     keeps the invoice's section backgrounds from being stripped by the
+     browser's print defaults. */
   body.printing-thermal .receipt-paper,
   body.printing-thermal .receipt-paper *,
   body.printing-a4 .a4-invoice,
   body.printing-a4 .a4-invoice * {
     font-weight: 700 !important;
-    font-style: italic !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
 
   /* Single label (ProductForm) -- exactly one .product-label exists on that
