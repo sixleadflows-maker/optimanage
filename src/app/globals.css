@@ -758,11 +758,7 @@ a:hover .nav-icon { transform: translateY(-1px) scale(1.08); }
   }
 
   /* Single label (ProductForm) -- exactly one .product-label exists on that
-     page. The page itself is set to exactly 2in x 1in for this print job
-     (see printWithPageSize() in src/lib/utils/print.ts), so filling it
-     corner to corner here is all that's needed -- no extra centering or
-     scale math, and no risk of the OS/driver falling back to a default
-     Letter/A4 page and stretching or shrinking the label to fit it. */
+     page, so it's positioned to fill the label like the receipt/invoice. */
   body.printing-label .product-label {
     position: absolute;
     top: 0;
@@ -771,19 +767,20 @@ a:hover .nav-icon { transform: translateY(-1px) scale(1.08); }
     height: 1in;
   }
 
-  /* Bulk labels (Zebra-style continuous roll) -- display:block instead of
-     the on-screen flex-wrap because Chromium's print pagination doesn't
-     reliably paginate flex/grid containers (items can get cut off or
-     duplicated across page boundaries). No explicit break-after is forced:
-     since the page itself is exactly 2in x 1in (see printWithPageSize() in
-     src/lib/utils/print.ts) and each label is also exactly 2in x 1in with
-     no margin, a label already fills 100% of one page on its own, so the
-     next one naturally overflows onto its own page without needing an
-     explicit page-break instruction -- which is deliberate: a forced
-     break-after was tried here and caused the label printer to double up
-     content on some drivers, so pagination is left to happen naturally. */
+  /* Bulk label sheet -- many .product-label cells inside one .label-grid;
+     the grid itself fills the page and flows across multiple print pages,
+     each cell held to the fixed label size so nothing splits mid-label.
+     Deliberately no explicit @page size or break-after override here: both
+     were tried to make sizing more precise, but caused a real label printer
+     to double up content on every label -- this plain flex-wrap version is
+     the one confirmed to print one barcode per sticker correctly. */
   body.printing-all-labels .label-grid {
-    display: block;
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    display: flex;
+    flex-wrap: wrap;
   }
   body.printing-all-labels .label-grid .product-label {
     width: 2in;

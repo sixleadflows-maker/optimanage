@@ -13,7 +13,6 @@ import Link from "next/link";
 import { ImageCarousel } from "@/components/ui/ImageCarousel";
 import { parseImages } from "@/lib/utils/images";
 import { BarcodeSVG } from "@/components/ui/BarcodeSVG";
-import { printWithPageSize } from "@/lib/utils/print";
 
 const brandTagConfig = {
   Original: { icon: Shield, color: "bg-success/10 text-success border-success/20", label: "Original" },
@@ -114,7 +113,9 @@ export function ProductForm({ product, isNew, barcodeWidth = 2, barcodeHeight = 
   };
 
   const printOnly = (mode: "label") => {
-    printWithPageSize(`printing-${mode}`, "2in 1in");
+    document.body.classList.add(`printing-${mode}`);
+    window.print();
+    document.body.classList.remove(`printing-${mode}`);
   };
 
   const barcodeDisplay = form.barcode || "0000000000000";
