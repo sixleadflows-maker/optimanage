@@ -396,6 +396,7 @@ export function POSClient({
             </h3>
             <div className="receipt-paper mx-auto rounded-lg shadow-lg">
               <div className="text-center border-b border-dashed border-gray-400 pb-2 mb-2">
+                <img src="/eyespy-logo-black.png" alt={SHOP_NAME} className="h-8 w-auto mx-auto mb-1" />
                 <p className="font-bold text-base">{SHOP_NAME}</p>
                 <p className="text-[11px]">45 Tariq Road, Karachi 75400</p>
                 <p className="text-[11px]">Ph: +92 21 3456 7890</p>
@@ -465,7 +466,7 @@ export function POSClient({
             <h3 className="text-sm font-semibold mb-4">A4 Invoice</h3>
             <div className="a4-invoice bg-white text-black rounded-lg p-6 shadow-lg text-base">
               <div className="flex justify-between items-center pb-4 border-b-2 border-[#6d5ef0]">
-                <img src="/eyespy-logo.png" alt={SHOP_NAME} className="h-12 w-auto" />
+                <img src="/eyespy-logo-black.png" alt={SHOP_NAME} className="h-12 w-auto" />
                 <div className="text-right">
                   <p className="text-2xl font-extrabold tracking-wide text-[#6d5ef0]">INVOICE</p>
                   <p className="text-sm text-gray-600">{saleResult.invoiceNo}</p>
