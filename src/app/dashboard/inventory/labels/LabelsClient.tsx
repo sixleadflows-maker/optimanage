@@ -5,6 +5,7 @@ import type { Product } from "@/lib/mock/types";
 import { useApp } from "@/lib/context";
 import { useRouter } from "next/navigation";
 import { backfillBarcodes } from "@/lib/actions/products";
+import { formatCurrency } from "@/lib/utils/format";
 import { BarcodeSVG } from "@/components/ui/BarcodeSVG";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Search, Barcode, Printer, Wand2, Loader2 } from "lucide-react";
@@ -80,6 +81,7 @@ export function LabelsClient({ products, barcodeWidth, barcodeHeight }: { produc
           {filtered.map((p) => (
             <div key={p.id} className="product-label bg-white text-black rounded-lg border border-gray-200 p-2 flex flex-col items-center justify-center" style={{ width: "2in", minHeight: "1in" }}>
               <p className="text-[9px] font-semibold text-center leading-tight">{p.brand} {p.name}</p>
+              <p className="text-[9px] font-bold leading-tight">{formatCurrency(p.salePrice)}</p>
               {p.barcode ? (
                 <BarcodeSVG value={p.barcode} width={barcodeWidth} height={barcodeHeight * 0.6} fontSize={9} />
               ) : (

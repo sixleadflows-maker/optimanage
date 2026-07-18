@@ -330,7 +330,8 @@ export function ProductForm({ product, isNew, barcodeWidth = 2, barcodeHeight = 
               <Barcode className="w-4 h-4" /> Barcode Preview
             </h3>
             <div className="bg-white p-4 rounded-xl flex justify-center">
-              <div className="product-label flex items-center justify-center" style={{ width: "2in", minHeight: "1in" }}>
+              <div className="product-label flex flex-col items-center justify-center gap-1" style={{ width: "2in", minHeight: "1in" }}>
+                <p className="text-[10px] font-bold leading-tight">{formatCurrency(form.salePrice)}</p>
                 <BarcodeSVG value={barcodeDisplay} width={barcodeWidth} height={barcodeHeight} />
               </div>
             </div>
