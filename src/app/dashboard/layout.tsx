@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
+import { getBranches } from "@/lib/data";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Topbar } from "@/components/layout/Topbar";
 import { PageTransition } from "@/components/layout/PageTransition";
@@ -8,11 +9,13 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const session = await auth();
   if (!session?.user) redirect("/login");
 
+  const branches = await getBranches();
+
   return (
     <div className="flex min-h-screen">
       <Sidebar user={{ name: session.user.name, role: session.user.role }} />
       <div className="flex-1 lg:ml-[260px] flex flex-col">
-        <Topbar user={session.user} />
+        <Topbar user={session.user} branches={branches.filter((b) => b.active)} />
         <main className="flex-1 p-4 lg:p-6">
           <PageTransition>{children}</PageTransition>
         </main>

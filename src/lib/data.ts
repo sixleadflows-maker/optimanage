@@ -465,6 +465,26 @@ export async function getUsers(): Promise<UserView[]> {
   }));
 }
 
+// ─── Branches / Locations ────────────────────────────────────
+export interface BranchView {
+  id: string;
+  name: string;
+  address: string;
+  phone: string;
+  active: boolean;
+}
+
+export async function getBranches(): Promise<BranchView[]> {
+  const rows = await db.branch.findMany({ orderBy: { createdAt: "asc" } });
+  return rows.map((b) => ({
+    id: b.id,
+    name: b.name,
+    address: b.address,
+    phone: b.phone,
+    active: b.active,
+  }));
+}
+
 // ─── Stock Adjustments ──────────────────────────────────────
 export interface StockAdjustmentView {
   id: string;

@@ -76,3 +76,44 @@ export async function updateOnlineOrderStatus(saleId: string, status: OnlineOrde
   revalidatePath("/dashboard/sales");
   return { ok: true };
 }
+
+// Deleting an invoice is Owner-only -- it reverses stock and customer
+// history, so it's a stricter tier than the Return/Refund flow.
+export async function deleteSale(saleId: string) {
+  const session = await auth();
+  if (!session?.user || session.user.role !== "OWNER") throw new Error("Only the owner can delete an invoice");
+
+  const sale = await db.sale.findUnique({
+    where: { id: saleId },
+    include: { items: true, returns: true },
+  });
+  if (!sale) throw new Error("Invoice not found");
+  if (sale.returns.length > 0) {
+    throw new Error("This invoice has a return/refund on it and can't be deleted");
+  }
+
+  await db.$transaction(async (tx) => {
+    for (const item of sale.items) {
+      await tx.product.update({
+        where: { id: item.productId },
+        data: { stock: { increment: item.quantity } },
+      });
+    }
+    if (sale.customerId) {
+      await tx.customer.update({
+        where: { id: sale.customerId },
+        data: {
+          totalSpend: { decrement: sale.total },
+          visitCount: { decrement: 1 },
+        },
+      });
+    }
+    await tx.sale.delete({ where: { id: saleId } });
+  });
+
+  revalidatePath("/dashboard");
+  revalidatePath("/dashboard/sales");
+  revalidatePath("/dashboard/inventory");
+  revalidatePath("/dashboard/customers");
+  return { ok: true };
+}

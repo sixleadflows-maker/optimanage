@@ -2,11 +2,12 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import type { SettingsView, UserView } from "@/lib/data";
+import type { SettingsView, UserView, BranchView } from "@/lib/data";
 import { useApp } from "@/lib/context";
 import { updateShopSettings, setAnalyticsPin } from "@/lib/actions/settings";
 import { createUser, setUserActive, resetUserPassword } from "@/lib/actions/users";
-import { Store, Shield, Users, Save, Lock, Loader2, CheckCircle, Plus, X, KeyRound, UserX, UserCheck } from "lucide-react";
+import { createBranch, updateBranch, setBranchActive } from "@/lib/actions/branches";
+import { Store, Shield, Users, Save, Lock, Loader2, CheckCircle, Plus, X, KeyRound, UserX, UserCheck, MapPin, Pencil, Ban, RotateCcw } from "lucide-react";
 
 const roleColors: Record<string, string> = {
   Owner: "bg-primary/10 text-primary",
@@ -15,11 +16,12 @@ const roleColors: Record<string, string> = {
 };
 
 const EMPTY_NEW_USER = { name: "", email: "", password: "", role: "CASHIER" as "OWNER" | "MANAGER" | "CASHIER" };
+const EMPTY_BRANCH_FORM = { name: "", address: "", phone: "" };
 
-export function SettingsClient({ settings, users, canManage, isOwner, currentUserId }: { settings: SettingsView; users: UserView[]; canManage: boolean; isOwner: boolean; currentUserId: string }) {
+export function SettingsClient({ settings, users, branches, canManage, isOwner, currentUserId }: { settings: SettingsView; users: UserView[]; branches: BranchView[]; canManage: boolean; isOwner: boolean; currentUserId: string }) {
   const { showToast } = useApp();
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<"shop" | "security" | "users">("shop");
+  const [activeTab, setActiveTab] = useState<"shop" | "security" | "users" | "locations">("shop");
 
   const [showAddUser, setShowAddUser] = useState(false);
   const [newUser, setNewUser] = useState({ ...EMPTY_NEW_USER });
@@ -76,6 +78,58 @@ export function SettingsClient({ settings, users, canManage, isOwner, currentUse
       setSavingReset(false);
     }
   };
+
+  const [showBranchModal, setShowBranchModal] = useState(false);
+  const [editingBranchId, setEditingBranchId] = useState<string | null>(null);
+  const [branchForm, setBranchForm] = useState({ ...EMPTY_BRANCH_FORM });
+  const [savingBranch, setSavingBranch] = useState(false);
+  const [togglingBranchId, setTogglingBranchId] = useState<string | null>(null);
+
+  const openAddBranch = () => {
+    setEditingBranchId(null);
+    setBranchForm({ ...EMPTY_BRANCH_FORM });
+    setShowBranchModal(true);
+  };
+
+  const openEditBranch = (b: BranchView) => {
+    setEditingBranchId(b.id);
+    setBranchForm({ name: b.name, address: b.address, phone: b.phone });
+    setShowBranchModal(true);
+  };
+
+  const saveBranch = async () => {
+    if (!branchForm.name.trim()) { showToast("Location name is required", "error"); return; }
+    setSavingBranch(true);
+    try {
+      if (editingBranchId) {
+        await updateBranch(editingBranchId, branchForm);
+        showToast("Location updated", "success");
+      } else {
+        await createBranch(branchForm);
+        showToast("Location added", "success");
+      }
+      setShowBranchModal(false);
+      router.refresh();
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "Could not save location", "error");
+    } finally {
+      setSavingBranch(false);
+    }
+  };
+
+  const toggleBranchActive = async (id: string, active: boolean) => {
+    setTogglingBranchId(id);
+    try {
+      await setBranchActive(id, active);
+      showToast(active ? "Location reactivated" : "Location deactivated", "success");
+      router.refresh();
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "Could not update location", "error");
+    } finally {
+      setTogglingBranchId(null);
+    }
+  };
+
   const [shop, setShop] = useState({
     name: settings.name, phone: settings.phone, email: settings.email,
     ntn: settings.ntn, address: settings.address, receiptFooter: settings.receiptFooter,
@@ -92,6 +146,7 @@ export function SettingsClient({ settings, users, canManage, isOwner, currentUse
     { id: "shop" as const, label: "Shop Profile", icon: Store },
     { id: "security" as const, label: "Security", icon: Shield },
     { id: "users" as const, label: "Users & Roles", icon: Users },
+    { id: "locations" as const, label: "Locations", icon: MapPin },
   ];
 
   const saveShop = async () => {
@@ -275,6 +330,98 @@ export function SettingsClient({ settings, users, canManage, isOwner, currentUse
                 ))}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {activeTab === "locations" && (
+        <div className="glass-card p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-sm font-semibold">Locations</h3>
+            {canManage && (
+              <button onClick={openAddBranch}
+                className="flex items-center gap-2 px-3 py-1.5 bg-primary text-white rounded-xl text-xs font-medium hover:bg-primary-hover transition-colors cursor-pointer">
+                <Plus className="w-3.5 h-3.5" /> Add Location
+              </button>
+            )}
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border">
+                  <th className="text-left py-3 px-3 text-xs font-medium text-muted-foreground">Name</th>
+                  <th className="text-left py-3 px-3 text-xs font-medium text-muted-foreground">Address</th>
+                  <th className="text-left py-3 px-3 text-xs font-medium text-muted-foreground">Phone</th>
+                  <th className="text-center py-3 px-3 text-xs font-medium text-muted-foreground">Status</th>
+                  {canManage && <th className="text-center py-3 px-3 text-xs font-medium text-muted-foreground">Actions</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {branches.length === 0 && (
+                  <tr><td colSpan={5} className="py-6 text-center text-sm text-muted-foreground">No locations yet.</td></tr>
+                )}
+                {branches.map((b) => (
+                  <tr key={b.id} className="border-b border-border hover:bg-surface-hover/50">
+                    <td className="py-3 px-3">
+                      <div className="flex items-center gap-2 font-medium">
+                        <MapPin className="w-3.5 h-3.5 text-muted-foreground" />{b.name}
+                      </div>
+                    </td>
+                    <td className="py-3 px-3 text-muted-foreground">{b.address || "—"}</td>
+                    <td className="py-3 px-3 text-muted-foreground">{b.phone || "—"}</td>
+                    <td className="py-3 px-3 text-center">
+                      <span className={`chip ${b.active ? "chip-paid" : "bg-surface text-muted-foreground"}`}>
+                        {b.active ? "Active" : "Inactive"}
+                      </span>
+                    </td>
+                    {canManage && (
+                      <td className="py-3 px-3">
+                        <div className="flex items-center justify-center gap-1.5">
+                          <button onClick={() => openEditBranch(b)} title="Edit"
+                            className="p-1.5 rounded-lg hover:bg-surface-hover cursor-pointer">
+                            <Pencil className="w-3.5 h-3.5 text-muted-foreground" />
+                          </button>
+                          <button onClick={() => toggleBranchActive(b.id, !b.active)} disabled={togglingBranchId === b.id}
+                            title={b.active ? "Deactivate" : "Reactivate"}
+                            className="p-1.5 rounded-lg hover:bg-surface-hover cursor-pointer disabled:opacity-50">
+                            {togglingBranchId === b.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : b.active ? <Ban className="w-3.5 h-3.5 text-destructive" /> : <RotateCcw className="w-3.5 h-3.5 text-success" />}
+                          </button>
+                        </div>
+                      </td>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {showBranchModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowBranchModal(false)}>
+          <div className="glass-modal p-6 w-full max-w-md animate-rise" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold">{editingBranchId ? "Edit Location" : "Add Location"}</h3>
+              <button onClick={() => setShowBranchModal(false)} className="cursor-pointer"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Name *</label>
+                <input type="text" value={branchForm.name} onChange={(e) => setBranchForm({ ...branchForm, name: e.target.value })} className="w-full px-4 py-2.5 glass-input text-sm" />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Address</label>
+                <input type="text" value={branchForm.address} onChange={(e) => setBranchForm({ ...branchForm, address: e.target.value })} className="w-full px-4 py-2.5 glass-input text-sm" />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Phone</label>
+                <input type="text" value={branchForm.phone} onChange={(e) => setBranchForm({ ...branchForm, phone: e.target.value })} className="w-full px-4 py-2.5 glass-input text-sm" />
+              </div>
+              <button onClick={saveBranch} disabled={savingBranch}
+                className="w-full py-2.5 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-primary-hover transition-colors disabled:opacity-60 flex items-center justify-center gap-2 cursor-pointer">
+                {savingBranch && <Loader2 className="w-4 h-4 animate-spin" />} {editingBranchId ? "Save Changes" : "Add Location"}
+              </button>
+            </div>
           </div>
         </div>
       )}

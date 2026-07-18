@@ -1,9 +1,10 @@
 "use client";
 
 import { useApp } from "@/lib/context";
-import { BRANCHES, SHOP_NAME } from "@/lib/constants";
+import { SHOP_NAME } from "@/lib/constants";
 import { logout } from "@/lib/actions/auth";
 import { lookupProductByBarcode, type BarcodeLookupResult } from "@/lib/actions/products";
+import type { BranchView } from "@/lib/data";
 import { formatCurrency } from "@/lib/utils/format";
 import { Menu, Search, Moon, Sun, Wifi, WifiOff, ChevronDown, LogOut, Loader2 } from "lucide-react";
 import { useState } from "react";
@@ -19,11 +20,11 @@ function initials(name: string) {
   return name.split(" ").map((n) => n[0]).slice(0, 2).join("").toUpperCase();
 }
 
-export function Topbar({ user }: { user: TopbarUser }) {
+export function Topbar({ user, branches }: { user: TopbarUser; branches: BranchView[] }) {
   const { activeBranch, setActiveBranch, darkMode, toggleDarkMode, isOnline, toggleOnline, setSidebarOpen } = useApp();
   const [branchOpen, setBranchOpen] = useState(false);
   const [userOpen, setUserOpen] = useState(false);
-  const currentBranch = BRANCHES.find((b) => b.id === activeBranch);
+  const currentBranch = branches.find((b) => b.id === activeBranch) ?? branches[0];
 
   const [scanValue, setScanValue] = useState("");
   const [checking, setChecking] = useState(false);
@@ -55,37 +56,39 @@ export function Topbar({ user }: { user: TopbarUser }) {
         <Menu className="w-5 h-5" />
       </button>
 
-      <div className="hidden md:flex items-center gap-2 text-sm">
-        <span className="font-semibold">{SHOP_NAME}</span>
-        <span className="text-muted-foreground">·</span>
-        <div className="relative">
-          <button
-            onClick={() => setBranchOpen(!branchOpen)}
-            className="flex items-center gap-1 text-muted-foreground hover:text-foreground text-sm transition-colors"
-          >
-            {currentBranch?.name}
-            <ChevronDown className="w-3.5 h-3.5" />
-          </button>
-          {branchOpen && (
-            <>
-              <div className="fixed inset-0 z-10" onClick={() => setBranchOpen(false)} />
-              <div className="absolute top-full left-0 mt-2 w-56 glass rounded-xl p-1.5 z-20 animate-fade-in">
-                {BRANCHES.map((branch) => (
-                  <button
-                    key={branch.id}
-                    onClick={() => { setActiveBranch(branch.id); setBranchOpen(false); }}
-                    className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
-                      activeBranch === branch.id ? "bg-primary text-white" : "hover:bg-surface-hover"
-                    }`}
-                  >
-                    {branch.name}
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
+      {branches.length > 0 && (
+        <div className="hidden md:flex items-center gap-2 text-sm">
+          <span className="font-semibold">{SHOP_NAME}</span>
+          <span className="text-muted-foreground">·</span>
+          <div className="relative">
+            <button
+              onClick={() => setBranchOpen(!branchOpen)}
+              className="flex items-center gap-1 text-muted-foreground hover:text-foreground text-sm transition-colors"
+            >
+              {currentBranch?.name}
+              <ChevronDown className="w-3.5 h-3.5" />
+            </button>
+            {branchOpen && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setBranchOpen(false)} />
+                <div className="absolute top-full left-0 mt-2 w-56 glass rounded-xl p-1.5 z-20 animate-fade-in">
+                  {branches.map((branch) => (
+                    <button
+                      key={branch.id}
+                      onClick={() => { setActiveBranch(branch.id); setBranchOpen(false); }}
+                      className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
+                        (activeBranch || branches[0]?.id) === branch.id ? "bg-primary text-white" : "hover:bg-surface-hover"
+                      }`}
+                    >
+                      {branch.name}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       <div className="flex-1 max-w-md mx-auto">
         <div className="relative">

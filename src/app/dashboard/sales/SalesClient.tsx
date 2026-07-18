@@ -4,11 +4,11 @@ import { useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import type { SaleView } from "@/lib/data";
 import { formatCurrency, formatDate } from "@/lib/utils/format";
-import { Search, Download, Receipt, RotateCcw, X, Loader2 } from "lucide-react";
+import { Search, Download, Receipt, RotateCcw, X, Loader2, Trash2 } from "lucide-react";
 import { useApp } from "@/lib/context";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { createReturn } from "@/lib/actions/returns";
-import { updateOnlineOrderStatus, type OnlineOrderStatusValue } from "@/lib/actions/sales";
+import { updateOnlineOrderStatus, deleteSale, type OnlineOrderStatusValue } from "@/lib/actions/sales";
 
 const REFUND_METHODS = ["Cash", "Card", "Bank Transfer", "JazzCash"];
 const ONLINE_ORDER_STATUSES: { value: OnlineOrderStatusValue; label: string }[] = [
@@ -19,7 +19,7 @@ const ONLINE_ORDER_STATUSES: { value: OnlineOrderStatusValue; label: string }[] 
   { value: "CANCELLED", label: "Cancelled" },
 ];
 
-export function SalesClient({ sales }: { sales: SaleView[] }) {
+export function SalesClient({ sales, isOwner }: { sales: SaleView[]; isOwner: boolean }) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("All");
   const [sourceFilter, setSourceFilter] = useState<string>("All");
@@ -31,6 +31,24 @@ export function SalesClient({ sales }: { sales: SaleView[] }) {
   const [returnReason, setReturnReason] = useState("");
   const [refundMethod, setRefundMethod] = useState("Cash");
   const [savingReturn, setSavingReturn] = useState(false);
+
+  const [deletingSale, setDeletingSale] = useState<SaleView | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  const confirmDeleteSale = async () => {
+    if (!deletingSale) return;
+    setDeleting(true);
+    try {
+      await deleteSale(deletingSale.id);
+      showToast(`${deletingSale.invoiceNo} deleted`, "success");
+      setDeletingSale(null);
+      router.refresh();
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "Could not delete invoice", "error");
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const openReturn = (sale: SaleView) => {
     setReturnQtys({});
@@ -188,7 +206,7 @@ export function SalesClient({ sales }: { sales: SaleView[] }) {
                 <th className="text-center py-3 px-3 text-xs font-medium text-muted-foreground">Payment</th>
                 <th className="text-center py-3 px-3 text-xs font-medium text-muted-foreground">Source</th>
                 <th className="text-center py-3 px-3 text-xs font-medium text-muted-foreground">Fulfillment</th>
-                <th className="text-center py-3 px-3 text-xs font-medium text-muted-foreground">Return</th>
+                <th className="text-center py-3 px-3 text-xs font-medium text-muted-foreground">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -230,13 +248,21 @@ export function SalesClient({ sales }: { sales: SaleView[] }) {
                       <span className="text-muted-foreground text-xs">—</span>
                     )}
                   </td>
-                  <td className="py-3 px-3 text-center">
-                    {returnableItems(sale).length > 0 && (
-                      <button onClick={() => openReturn(sale)} title="Return / Refund"
-                        className="p-1.5 rounded-lg hover:bg-surface-hover cursor-pointer">
-                        <RotateCcw className="w-3.5 h-3.5 text-muted-foreground" />
-                      </button>
-                    )}
+                  <td className="py-3 px-3">
+                    <div className="flex items-center justify-center gap-1.5">
+                      {returnableItems(sale).length > 0 && (
+                        <button onClick={() => openReturn(sale)} title="Return / Refund"
+                          className="p-1.5 rounded-lg hover:bg-surface-hover cursor-pointer">
+                          <RotateCcw className="w-3.5 h-3.5 text-muted-foreground" />
+                        </button>
+                      )}
+                      {isOwner && (
+                        <button onClick={() => setDeletingSale(sale)} title="Delete Invoice"
+                          className="p-1.5 rounded-lg hover:bg-surface-hover cursor-pointer">
+                          <Trash2 className="w-3.5 h-3.5 text-destructive" />
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -288,6 +314,31 @@ export function SalesClient({ sales }: { sales: SaleView[] }) {
               <button onClick={saveReturn} disabled={savingReturn || returnTotal <= 0}
                 className="w-full py-2.5 bg-destructive text-white rounded-xl text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-60 flex items-center justify-center gap-2 cursor-pointer">
                 {savingReturn && <Loader2 className="w-4 h-4 animate-spin" />} Confirm Return
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deletingSale && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setDeletingSale(null)}>
+          <div className="glass-modal p-6 w-full max-w-sm animate-rise" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold">Delete Invoice</h3>
+              <button onClick={() => setDeletingSale(null)} className="cursor-pointer"><X className="w-5 h-5" /></button>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              Delete <span className="font-semibold text-foreground">{deletingSale.invoiceNo}</span> ({formatCurrency(deletingSale.total)})?
+              This restores stock and can&apos;t be undone.
+            </p>
+            <div className="flex gap-2 mt-5">
+              <button onClick={() => setDeletingSale(null)}
+                className="flex-1 py-2.5 glass-card text-sm font-medium cursor-pointer">
+                Cancel
+              </button>
+              <button onClick={confirmDeleteSale} disabled={deleting}
+                className="flex-1 py-2.5 bg-destructive text-white rounded-xl text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-60 flex items-center justify-center gap-2 cursor-pointer">
+                {deleting && <Loader2 className="w-4 h-4 animate-spin" />} Delete
               </button>
             </div>
           </div>

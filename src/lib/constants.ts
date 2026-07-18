@@ -4,11 +4,6 @@ export const CURRENCY = "Rs.";
 export const PRIMARY_COLOR = "#6d5ef0";
 export const PRIMARY_LIGHT = "#edeafd";
 
-export const BRANCHES = [
-  { id: "branch-1", name: "Main Branch - Tariq Road" },
-  { id: "branch-2", name: "Dolmen Mall Branch" },
-] as const;
-
 export const PAYMENT_METHODS = ["Cash", "Card", "Bank Transfer", "JazzCash"] as const;
 export const PAYMENT_STATUS = ["Paid", "Advance", "Balance"] as const;
 

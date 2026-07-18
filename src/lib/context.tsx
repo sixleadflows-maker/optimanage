@@ -27,7 +27,7 @@ interface AppContextValue {
 const AppContext = createContext<AppContextValue | null>(null);
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  const [activeBranch, setActiveBranch] = useState("branch-1");
+  const [activeBranch, setActiveBranch] = useState("");
   const [darkMode, setDarkMode] = useState(false);
   const [isOnline, setIsOnline] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
