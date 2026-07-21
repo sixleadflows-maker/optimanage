@@ -16,6 +16,7 @@ export async function logReminderSent(input: LogReminderInput) {
 
   const customer = await db.customer.findUnique({ where: { id: input.customerId } });
   if (!customer) throw new Error("Customer not found");
+  if (!customer.phone) throw new Error("This customer has no phone number on file");
 
   await db.whatsAppMessage.create({
     data: {

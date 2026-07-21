@@ -7,8 +7,10 @@ import { auth } from "@/lib/auth";
 export interface CustomerInput {
   name: string;
   phone: string;
+  serialNumber: string;
   email: string;
   address: string;
+  lastVisit: string;
 }
 
 async function requireAuth() {
@@ -18,17 +20,23 @@ async function requireAuth() {
 
 export async function createCustomer(input: CustomerInput) {
   await requireAuth();
-  if (!input.name.trim() || !input.phone.trim()) throw new Error("Name and phone are required");
+  if (!input.name.trim()) throw new Error("Name is required");
 
-  const existing = await db.customer.findUnique({ where: { phone: input.phone.trim() } });
-  if (existing) return { ok: false, error: "A customer with this phone already exists", id: existing.id };
+  // Phone is optional now; only dedupe on it when one was actually entered.
+  const phone = input.phone.trim();
+  if (phone) {
+    const existing = await db.customer.findUnique({ where: { phone } });
+    if (existing) return { ok: false, error: "A customer with this phone already exists", id: existing.id };
+  }
 
   const customer = await db.customer.create({
     data: {
       name: input.name.trim(),
-      phone: input.phone.trim(),
+      phone: phone || null,
+      serialNumber: input.serialNumber.trim(),
       email: input.email.trim(),
       address: input.address.trim(),
+      ...(input.lastVisit ? { lastVisit: new Date(input.lastVisit) } : {}),
     },
   });
   revalidatePath("/dashboard/customers");
@@ -37,13 +45,25 @@ export async function createCustomer(input: CustomerInput) {
 
 export async function updateCustomer(id: string, input: CustomerInput) {
   await requireAuth();
+  if (!input.name.trim()) throw new Error("Name is required");
+
+  const phone = input.phone.trim();
+  if (phone) {
+    const existing = await db.customer.findUnique({ where: { phone } });
+    if (existing && existing.id !== id) return { ok: false, error: "Another customer already uses this phone" };
+  }
+
   await db.customer.update({
     where: { id },
     data: {
       name: input.name.trim(),
-      phone: input.phone.trim(),
+      phone: phone || null,
+      serialNumber: input.serialNumber.trim(),
       email: input.email.trim(),
       address: input.address.trim(),
+      // Only overwrite last visit when a date was supplied; otherwise leave the
+      // auto-tracked value from the customer's sales untouched.
+      ...(input.lastVisit ? { lastVisit: new Date(input.lastVisit) } : {}),
     },
   });
   revalidatePath("/dashboard/customers");

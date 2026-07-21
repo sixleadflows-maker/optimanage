@@ -10,7 +10,9 @@ export default async function POSPage() {
   ]);
   const posCustomers = customers.map((c) => ({ id: c.id, name: c.name, phone: c.phone }));
   const staff = users.filter((u) => u.active).map((u) => ({ id: u.id, name: u.name }));
-  const canSeeCosts = session?.user?.role !== "CASHIER";
+  // Cost & profit are owner-only across the app — hidden from cashiers and
+  // managers (and never shown to customers looking at the screen).
+  const canSeeCosts = session?.user?.role === "OWNER";
   return (
     <POSClient
       products={products}

@@ -16,19 +16,19 @@ export function CustomersClient({ customers }: { customers: CustomerView[] }) {
   const [search, setSearch] = useState("");
   const [showAdd, setShowAdd] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ name: "", phone: "", email: "", address: "" });
+  const [form, setForm] = useState({ name: "", phone: "", serialNumber: "", email: "", address: "", lastVisit: "" });
 
   const filtered = useMemo(() => {
     if (!search) return customers;
     const q = search.toLowerCase();
     return customers.filter(
-      (c) => c.name.toLowerCase().includes(q) || c.phone.includes(q) || c.email.toLowerCase().includes(q)
+      (c) => c.name.toLowerCase().includes(q) || c.phone.includes(q) || c.email.toLowerCase().includes(q) || c.serialNumber.toLowerCase().includes(q)
     );
   }, [customers, search]);
 
   const handleAdd = async () => {
-    if (!form.name.trim() || !form.phone.trim()) {
-      showToast("Name and phone are required", "error");
+    if (!form.name.trim()) {
+      showToast("Customer name is required", "error");
       return;
     }
     setSaving(true);
@@ -40,7 +40,7 @@ export function CustomersClient({ customers }: { customers: CustomerView[] }) {
       }
       showToast("Customer added", "success");
       setShowAdd(false);
-      setForm({ name: "", phone: "", email: "", address: "" });
+      setForm({ name: "", phone: "", serialNumber: "", email: "", address: "", lastVisit: "" });
       router.refresh();
     } catch {
       showToast("Something went wrong", "error");
@@ -74,6 +74,7 @@ export function CustomersClient({ customers }: { customers: CustomerView[] }) {
             <thead>
               <tr className="border-b border-border">
                 <th className="text-left py-3 px-3 text-xs font-medium text-muted-foreground">Customer</th>
+                <th className="text-left py-3 px-3 text-xs font-medium text-muted-foreground">Serial #</th>
                 <th className="text-left py-3 px-3 text-xs font-medium text-muted-foreground">Phone</th>
                 <th className="text-left py-3 px-3 text-xs font-medium text-muted-foreground">Email</th>
                 <th className="text-center py-3 px-3 text-xs font-medium text-muted-foreground">Visits</th>
@@ -84,7 +85,7 @@ export function CustomersClient({ customers }: { customers: CustomerView[] }) {
             </thead>
             <tbody>
               {filtered.length === 0 && (
-                <tr><td colSpan={7}>
+                <tr><td colSpan={8}>
                   <EmptyState icon={Users} title="No customers found" hint="Try a different name or phone number, or add the customer to start their history." />
                 </td></tr>
               )}
@@ -98,7 +99,8 @@ export function CustomersClient({ customers }: { customers: CustomerView[] }) {
                       <span className="font-medium">{c.name}</span>
                     </Link>
                   </td>
-                  <td className="py-3 px-3 text-muted-foreground">{c.phone}</td>
+                  <td className="py-3 px-3 text-muted-foreground text-xs font-mono">{c.serialNumber || "—"}</td>
+                  <td className="py-3 px-3 text-muted-foreground">{c.phone || "—"}</td>
                   <td className="py-3 px-3 text-muted-foreground text-xs">{c.email}</td>
                   <td className="py-3 px-3 text-center">
                     <span className="chip bg-primary/10 text-primary">{c.visitCount}</span>
@@ -127,13 +129,25 @@ export function CustomersClient({ customers }: { customers: CustomerView[] }) {
                 <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Name *</label>
                 <input type="text" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="w-full px-4 py-2.5 glass-input text-sm" />
               </div>
-              <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Phone *</label>
-                <input type="text" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} className="w-full px-4 py-2.5 glass-input text-sm" placeholder="+92 3XX XXXXXXX" />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Phone</label>
+                  <input type="text" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} className="w-full px-4 py-2.5 glass-input text-sm" placeholder="+92 3XX XXXXXXX" />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Serial Number</label>
+                  <input type="text" value={form.serialNumber} onChange={(e) => setForm({ ...form, serialNumber: e.target.value })} className="w-full px-4 py-2.5 glass-input text-sm" placeholder="e.g. SN-0142" />
+                </div>
               </div>
-              <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Email</label>
-                <input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className="w-full px-4 py-2.5 glass-input text-sm" />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Email</label>
+                  <input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className="w-full px-4 py-2.5 glass-input text-sm" />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Last Visit Date</label>
+                  <input type="date" value={form.lastVisit} onChange={(e) => setForm({ ...form, lastVisit: e.target.value })} className="w-full px-4 py-2.5 glass-input text-sm" />
+                </div>
               </div>
               <div>
                 <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Address</label>

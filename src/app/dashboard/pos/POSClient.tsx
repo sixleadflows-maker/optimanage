@@ -109,10 +109,19 @@ export function POSClient({
   // dashboard page around it) is done with a class toggled directly on
   // document.body right before print, rather than React state, so there's
   // no risk of the print firing before a state update has actually committed.
+  // The class is removed on the afterprint event (with a timeout fallback) so
+  // it stays applied through the browser's print render instead of being torn
+  // off synchronously, which could otherwise print a blank or full page.
   const printOnly = (mode: "thermal" | "a4") => {
-    document.body.classList.add(`printing-${mode}`);
+    const cls = `printing-${mode}`;
+    const cleanup = () => {
+      document.body.classList.remove(cls);
+      window.removeEventListener("afterprint", cleanup);
+    };
+    document.body.classList.add(cls);
+    window.addEventListener("afterprint", cleanup);
     window.print();
-    document.body.classList.remove(`printing-${mode}`);
+    setTimeout(cleanup, 1500);
   };
 
   // Offline sale drafts are stored in localStorage, not component state, so
@@ -417,7 +426,7 @@ export function POSClient({
               <div className="border-t border-dashed border-gray-400 mt-2 pt-2">
                 {cart.map((item) => (
                   <div key={item.productId} className="mb-1">
-                    <p className="text-[11px] font-medium">{item.name}</p>
+                    <p className="text-[11px] font-medium">{item.brand} {item.name}</p>
                     <div className="flex justify-between text-[11px]">
                       <span>{item.quantity} x {formatCurrency(item.price)}</span>
                       <span>{formatCurrency(item.price * item.quantity - item.discount)}</span>

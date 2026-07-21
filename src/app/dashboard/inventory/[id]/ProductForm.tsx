@@ -1,14 +1,14 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import type { Product } from "@/lib/mock/types";
 import { formatCurrency } from "@/lib/utils/format";
 import { useApp } from "@/lib/context";
-import { PRODUCT_CATEGORIES, PRODUCT_TYPES, BRAND_TAGS } from "@/lib/constants";
+import { PRODUCT_CATEGORIES, PRODUCT_TYPES, BRAND_TAGS, DAMAGE_TYPES } from "@/lib/constants";
 import { createProduct, updateProduct, deleteProduct, generateBarcode } from "@/lib/actions/products";
 import { uploadProductImage } from "@/lib/actions/upload";
-import { ArrowLeft, Save, Barcode, Shield, ShieldAlert, ShieldOff, Trash2, Loader2, Printer, Upload, X, Wand2 } from "lucide-react";
+import { ArrowLeft, Save, Barcode, Shield, ShieldAlert, ShieldCheck, ShieldOff, Trash2, Loader2, Printer, Upload, X, Wand2, AlertTriangle } from "lucide-react";
 import Link from "next/link";
 import { ImageCarousel } from "@/components/ui/ImageCarousel";
 import { parseImages } from "@/lib/utils/images";
@@ -17,10 +17,11 @@ import { BarcodeSVG } from "@/components/ui/BarcodeSVG";
 const brandTagConfig = {
   Original: { icon: Shield, color: "bg-success/10 text-success border-success/20", label: "Original" },
   Copy: { icon: ShieldAlert, color: "bg-warning/10 text-warning border-warning/20", label: "Copy" },
+  Branded: { icon: ShieldCheck, color: "bg-primary/10 text-primary border-primary/20", label: "Branded" },
   Unbranded: { icon: ShieldOff, color: "bg-muted text-muted-foreground border-border", label: "Unbranded" },
 } as const;
 
-export function ProductForm({ product, isNew, barcodeWidth = 2, barcodeHeight = 40 }: { product: Product | null; isNew: boolean; barcodeWidth?: number; barcodeHeight?: number }) {
+export function ProductForm({ product, isNew, isOwner = false, barcodeWidth = 2, barcodeHeight = 40 }: { product: Product | null; isNew: boolean; isOwner?: boolean; barcodeWidth?: number; barcodeHeight?: number }) {
   const router = useRouter();
   const { showToast } = useApp();
   const [saving, setSaving] = useState(false);
@@ -40,12 +41,24 @@ export function ProductForm({ product, isNew, barcodeWidth = 2, barcodeHeight = 
     stock: product?.stock || 0,
     barcode: product?.barcode || "",
     lowStockThreshold: product?.lowStockThreshold || 5,
-    brandTag: (product?.brandTag || "Unbranded") as "Original" | "Copy" | "Unbranded",
+    brandTag: (product?.brandTag || "Unbranded") as "Original" | "Copy" | "Branded" | "Unbranded",
     priceThreshold: product?.priceThreshold || 0,
     image: product?.image || "",
+    isDamaged: product?.isDamaged || false,
+    damageType: product?.damageType || "",
   });
 
-  const update = (field: string, value: string | number) => setForm((p) => ({ ...p, [field]: value }));
+  const update = (field: string, value: string | number | boolean) => setForm((p) => ({ ...p, [field]: value }));
+
+  // Every product carries a barcode automatically — for a brand-new product,
+  // generate one as soon as the form opens so it's populated and printable
+  // without any manual step (createProduct still assigns one as a safety net).
+  useEffect(() => {
+    if (isNew && !form.barcode) {
+      generateBarcode().then((res) => update("barcode", res.barcode)).catch(() => {});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isNew]);
 
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -83,7 +96,11 @@ export function ProductForm({ product, isNew, barcodeWidth = 2, barcodeHeight = 
     try {
       if (isNew) {
         const res = await createProduct(form);
-        showToast("Product added successfully", "success");
+        if (res.merged) {
+          showToast(`Already in stock — added ${res.addedStock} unit${res.addedStock === 1 ? "" : "s"} to the existing product`, "success");
+        } else {
+          showToast("Product added successfully", "success");
+        }
         router.push(`/dashboard/inventory/${res.id}`);
       } else if (product) {
         await updateProduct(product.id, form);
@@ -126,10 +143,20 @@ export function ProductForm({ product, isNew, barcodeWidth = 2, barcodeHeight = 
     }
   };
 
+  // Keep the print-isolation class on <body> until the print dialog actually
+  // closes. Removing it synchronously right after window.print() (as before)
+  // races the browser's print render in Firefox/Safari and can print a blank
+  // or full page — the afterprint listener + timeout fallback fixes that.
   const printOnly = (mode: "label") => {
-    document.body.classList.add(`printing-${mode}`);
+    const cls = `printing-${mode}`;
+    const cleanup = () => {
+      document.body.classList.remove(cls);
+      window.removeEventListener("afterprint", cleanup);
+    };
+    document.body.classList.add(cls);
+    window.addEventListener("afterprint", cleanup);
     window.print();
-    document.body.classList.remove(`printing-${mode}`);
+    setTimeout(cleanup, 1500);
   };
 
   // Clicking the barcode preview is a shortcut for printing its label. A new,
@@ -225,7 +252,7 @@ export function ProductForm({ product, isNew, barcodeWidth = 2, barcodeHeight = 
 
           <div className="glass-card p-5">
             <h3 className="text-sm font-semibold mb-4">Brand Tag</h3>
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               {BRAND_TAGS.map((tag) => {
                 const conf = brandTagConfig[tag];
                 const Icon = conf.icon;
@@ -246,10 +273,12 @@ export function ProductForm({ product, isNew, barcodeWidth = 2, barcodeHeight = 
           <div className="glass-card p-5">
             <h3 className="text-sm font-semibold mb-4">Pricing & Stock</h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Cost Price</label>
-                <input type="number" value={form.costPrice || ""} onChange={(e) => update("costPrice", Number(e.target.value))} className="w-full px-4 py-2.5 glass-input text-sm" />
-              </div>
+              {isOwner && (
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Cost Price</label>
+                  <input type="number" value={form.costPrice || ""} onChange={(e) => update("costPrice", Number(e.target.value))} className="w-full px-4 py-2.5 glass-input text-sm" />
+                </div>
+              )}
               <div>
                 <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Sale Price</label>
                 <input type="number" value={form.salePrice || ""} onChange={(e) => update("salePrice", Number(e.target.value))}
@@ -272,7 +301,7 @@ export function ProductForm({ product, isNew, barcodeWidth = 2, barcodeHeight = 
               </div>
             </div>
             <div className="flex flex-col gap-2 mt-4">
-              {form.costPrice > 0 && form.salePrice > 0 && (
+              {isOwner && form.costPrice > 0 && form.salePrice > 0 && (
                 <div className="p-3 bg-success/5 rounded-xl">
                   <p className="text-xs text-success font-medium">
                     Margin: {formatCurrency(form.salePrice - form.costPrice)} ({((form.salePrice - form.costPrice) / form.salePrice * 100).toFixed(1)}%)
@@ -287,6 +316,31 @@ export function ProductForm({ product, isNew, barcodeWidth = 2, barcodeHeight = 
                 </div>
               )}
             </div>
+          </div>
+
+          <div className="glass-card p-5">
+            <h3 className="text-sm font-semibold mb-1 flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-destructive" /> Condition
+            </h3>
+            <p className="text-xs text-muted-foreground mb-4">Flag damaged or defective stock and price it to its condition.</p>
+            <label className="flex items-center gap-3 cursor-pointer w-fit">
+              <input type="checkbox" checked={form.isDamaged} onChange={(e) => update("isDamaged", e.target.checked)} className="w-4 h-4 accent-destructive" />
+              <span className="text-sm font-medium">This item is damaged</span>
+            </label>
+            {form.isDamaged && (
+              <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4 items-start">
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Type of Damage</label>
+                  <select value={form.damageType} onChange={(e) => update("damageType", e.target.value)} className="w-full px-4 py-2.5 glass-input text-sm">
+                    <option value="">Select damage type…</option>
+                    {DAMAGE_TYPES.map((d) => <option key={d} value={d}>{d}</option>)}
+                  </select>
+                </div>
+                <div className="p-3 bg-destructive/5 rounded-xl">
+                  <p className="text-xs text-muted-foreground">Set the <span className="font-medium text-foreground">Sale Price</span> above to this item&apos;s reduced (condition) price.</p>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 

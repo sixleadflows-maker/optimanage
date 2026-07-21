@@ -9,7 +9,7 @@ import Link from "next/link";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { firstImage } from "@/lib/utils/images";
 
-export function InventoryClient({ products }: { products: Product[] }) {
+export function InventoryClient({ products, isOwner }: { products: Product[]; isOwner: boolean }) {
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<string>("All");
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
@@ -27,7 +27,6 @@ export function InventoryClient({ products }: { products: Product[] }) {
   }, [products, search, categoryFilter]);
 
   const totalStock = products.reduce((sum, p) => sum + p.stock, 0);
-  const totalValue = products.reduce((sum, p) => sum + p.salePrice * p.stock, 0);
   const lowStockCount = products.filter((p) => p.stock <= p.lowStockThreshold).length;
 
   return (
@@ -42,14 +41,10 @@ export function InventoryClient({ products }: { products: Product[] }) {
         </Link>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="glass-card p-4">
           <p className="text-xs text-muted-foreground">Total Products</p>
           <p className="text-xl font-bold mt-1">{products.length}</p>
-        </div>
-        <div className="glass-card p-4">
-          <p className="text-xs text-muted-foreground">Stock Value</p>
-          <p className="text-xl font-bold mt-1">{formatCurrency(totalValue)}</p>
         </div>
         <div className="glass-card p-4">
           <p className="text-xs text-muted-foreground flex items-center gap-1">
@@ -98,8 +93,8 @@ export function InventoryClient({ products }: { products: Product[] }) {
                     <span className="text-2xl opacity-40">{product.category === "Contact Lenses" ? "👁" : product.category === "Sunglasses" ? "🕶" : product.category === "Lens Stock" ? "🔍" : "👓"}</span>
                   )}
                 </div>
-                <p className="text-xs font-medium truncate">{product.name}</p>
-                <p className="text-[10px] text-muted-foreground">{product.brand} · {product.model}</p>
+                <p className="text-xs font-medium truncate">{product.brand} {product.name}</p>
+                <p className="text-[10px] text-muted-foreground truncate">{product.model}</p>
                 <div className="flex items-center justify-between mt-1.5">
                   <span className="text-sm font-bold text-primary">{formatCurrency(product.salePrice)}</span>
                   <span className={`text-[10px] font-medium ${product.stock <= product.lowStockThreshold ? "text-destructive" : "text-muted-foreground"}`}>
@@ -107,8 +102,11 @@ export function InventoryClient({ products }: { products: Product[] }) {
                   </span>
                 </div>
                 <div className="flex gap-1 mt-2 flex-wrap">
-                  <span className={`text-[9px] px-1.5 py-0.5 rounded-md font-medium ${product.brandTag === "Original" ? "bg-success/10 text-success" : product.brandTag === "Copy" ? "bg-warning/10 text-warning" : "bg-surface text-muted-foreground"}`}>{product.brandTag}</span>
+                  <span className={`text-[9px] px-1.5 py-0.5 rounded-md font-medium ${product.brandTag === "Original" ? "bg-success/10 text-success" : product.brandTag === "Copy" ? "bg-warning/10 text-warning" : product.brandTag === "Branded" ? "bg-primary/10 text-primary" : "bg-surface text-muted-foreground"}`}>{product.brandTag}</span>
                   <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-surface text-muted-foreground">{product.type}</span>
+                  {product.isDamaged && (
+                    <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-destructive/10 text-destructive font-medium">⚠ Damaged</span>
+                  )}
                 </div>
               </Link>
             ))}
@@ -122,7 +120,7 @@ export function InventoryClient({ products }: { products: Product[] }) {
                   <th className="text-left py-3 px-3 text-xs font-medium text-muted-foreground">Type</th>
                   <th className="text-left py-3 px-3 text-xs font-medium text-muted-foreground">Colour</th>
                   <th className="text-left py-3 px-3 text-xs font-medium text-muted-foreground">Size</th>
-                  <th className="text-right py-3 px-3 text-xs font-medium text-muted-foreground">Cost</th>
+                  {isOwner && <th className="text-right py-3 px-3 text-xs font-medium text-muted-foreground">Cost</th>}
                   <th className="text-right py-3 px-3 text-xs font-medium text-muted-foreground">Price</th>
                   <th className="text-center py-3 px-3 text-xs font-medium text-muted-foreground">Stock</th>
                   <th className="text-left py-3 px-3 text-xs font-medium text-muted-foreground">Barcode</th>
@@ -133,14 +131,17 @@ export function InventoryClient({ products }: { products: Product[] }) {
                   <tr key={p.id} className={`border-b border-border hover:bg-surface-hover/50 transition-colors ${p.stock <= p.lowStockThreshold ? "bg-destructive/5" : ""}`}>
                     <td className="py-3 px-3">
                       <Link href={`/dashboard/inventory/${p.id}`} className="hover:text-primary">
-                        <p className="font-medium">{p.name}</p>
-                        <p className="text-xs text-muted-foreground">{p.brand} · {p.model}</p>
+                        <p className="font-medium flex items-center gap-1.5">
+                          {p.brand} {p.name}
+                          {p.isDamaged && <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-destructive/10 text-destructive font-medium">⚠ Damaged</span>}
+                        </p>
+                        <p className="text-xs text-muted-foreground">{p.model}</p>
                       </Link>
                     </td>
                     <td className="py-3 px-3 text-xs">{p.type}</td>
                     <td className="py-3 px-3 text-xs">{p.colour}</td>
                     <td className="py-3 px-3 text-xs text-muted-foreground">{p.size}</td>
-                    <td className="py-3 px-3 text-right text-xs text-muted-foreground">{formatCurrency(p.costPrice)}</td>
+                    {isOwner && <td className="py-3 px-3 text-right text-xs text-muted-foreground">{formatCurrency(p.costPrice)}</td>}
                     <td className="py-3 px-3 text-right font-medium">{formatCurrency(p.salePrice)}</td>
                     <td className="py-3 px-3 text-center">
                       <span className={`text-xs font-medium ${p.stock <= p.lowStockThreshold ? "text-destructive" : ""}`}>

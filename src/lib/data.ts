@@ -4,7 +4,7 @@ import type {
 } from "@/lib/mock/types";
 
 // ─── Enum mappers (DB enum → UI title-case) ─────────────────
-const brandTagLabel = { ORIGINAL: "Original", COPY: "Copy", UNBRANDED: "Unbranded" } as const;
+const brandTagLabel = { ORIGINAL: "Original", COPY: "Copy", BRANDED: "Branded", UNBRANDED: "Unbranded" } as const;
 const paymentStatusLabel = { PAID: "Paid", ADVANCE: "Advance", BALANCE: "Balance" } as const;
 const labStatusLabel = { ORDERED: "Ordered", IN_PROGRESS: "In Progress", RECEIVED: "Received", FITTED: "Fitted" } as const;
 const saleSourceLabel = { POS: "POS", ONLINE: "Online" } as const;
@@ -39,6 +39,8 @@ export async function getProducts(): Promise<Product[]> {
     image: p.image || undefined,
     brandTag: brandTagLabel[p.brandTag],
     priceThreshold: p.priceThreshold || undefined,
+    isDamaged: p.isDamaged,
+    damageType: p.damageType,
   }));
 }
 
@@ -67,6 +69,8 @@ export async function getProduct(id: string): Promise<Product | null> {
     image: p.image || undefined,
     brandTag: brandTagLabel[p.brandTag],
     priceThreshold: p.priceThreshold || undefined,
+    isDamaged: p.isDamaged,
+    damageType: p.damageType,
   };
 }
 
@@ -95,7 +99,8 @@ export async function getCustomers(): Promise<CustomerView[]> {
   return rows.map((c) => ({
     id: c.id,
     name: c.name,
-    phone: c.phone,
+    phone: c.phone ?? "",
+    serialNumber: c.serialNumber,
     email: c.email,
     address: c.address,
     lastVisit: iso(c.lastVisit),
@@ -114,7 +119,8 @@ export async function getCustomer(id: string): Promise<CustomerView | null> {
   return {
     id: c.id,
     name: c.name,
-    phone: c.phone,
+    phone: c.phone ?? "",
+    serialNumber: c.serialNumber,
     email: c.email,
     address: c.address,
     lastVisit: iso(c.lastVisit),

@@ -54,7 +54,8 @@ model Branch {
 model Customer {
   id            String         @id @default(cuid())
   name          String
-  phone         String         @unique
+  phone         String?        @unique
+  serialNumber  String         @default("")
   email         String         @default("")
   address       String         @default("")
   totalSpend    Float          @default(0)
@@ -114,6 +115,8 @@ model Product {
   brandTag          BrandTag     @default(UNBRANDED)
   priceThreshold    Float        @default(0)
   image             String       @default("")
+  isDamaged         Boolean      @default(false)
+  damageType        String       @default("")
   active            Boolean      @default(true)
   createdAt         DateTime     @default(now())
   updatedAt         DateTime     @updatedAt
@@ -131,6 +134,7 @@ model Product {
 enum BrandTag {
   ORIGINAL
   COPY
+  BRANDED
   UNBRANDED
 }
 

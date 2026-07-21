@@ -13,14 +13,17 @@ export interface Product {
   barcode: string;
   lowStockThreshold: number;
   image?: string;
-  brandTag: "Original" | "Copy" | "Unbranded";
+  brandTag: "Original" | "Copy" | "Branded" | "Unbranded";
   priceThreshold?: number;
+  isDamaged: boolean;
+  damageType: string;
 }
 
 export interface Customer {
   id: string;
   name: string;
   phone: string;
+  serialNumber: string;
   email: string;
   address: string;
   lastVisit: string;
