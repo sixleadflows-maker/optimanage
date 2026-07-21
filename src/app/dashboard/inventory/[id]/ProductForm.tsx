@@ -6,9 +6,9 @@ import type { Product } from "@/lib/mock/types";
 import { formatCurrency } from "@/lib/utils/format";
 import { useApp } from "@/lib/context";
 import { PRODUCT_CATEGORIES, PRODUCT_TYPES, BRAND_TAGS } from "@/lib/constants";
-import { createProduct, updateProduct, deleteProduct } from "@/lib/actions/products";
+import { createProduct, updateProduct, deleteProduct, generateBarcode } from "@/lib/actions/products";
 import { uploadProductImage } from "@/lib/actions/upload";
-import { ArrowLeft, Save, Barcode, Shield, ShieldAlert, ShieldOff, Trash2, Loader2, Printer, Upload, X } from "lucide-react";
+import { ArrowLeft, Save, Barcode, Shield, ShieldAlert, ShieldOff, Trash2, Loader2, Printer, Upload, X, Wand2 } from "lucide-react";
 import Link from "next/link";
 import { ImageCarousel } from "@/components/ui/ImageCarousel";
 import { parseImages } from "@/lib/utils/images";
@@ -25,6 +25,7 @@ export function ProductForm({ product, isNew, barcodeWidth = 2, barcodeHeight = 
   const { showToast } = useApp();
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [generatingBarcode, setGeneratingBarcode] = useState(false);
 
   const [form, setForm] = useState({
     name: product?.name || "",
@@ -112,10 +113,33 @@ export function ProductForm({ product, isNew, barcodeWidth = 2, barcodeHeight = 
     }
   };
 
+  const handleGenerateBarcode = async () => {
+    setGeneratingBarcode(true);
+    try {
+      const res = await generateBarcode();
+      update("barcode", res.barcode);
+      showToast("Barcode generated — Save to keep it", "success");
+    } catch {
+      showToast("Could not generate a barcode", "error");
+    } finally {
+      setGeneratingBarcode(false);
+    }
+  };
+
   const printOnly = (mode: "label") => {
     document.body.classList.add(`printing-${mode}`);
     window.print();
     document.body.classList.remove(`printing-${mode}`);
+  };
+
+  // Clicking the barcode preview is a shortcut for printing its label. A new,
+  // unsaved product has no label to print yet, so nudge the user to save first.
+  const handleBarcodeClick = () => {
+    if (isNew) {
+      showToast("Save the product first to print its label.", "error");
+      return;
+    }
+    printOnly("label");
   };
 
   const barcodeDisplay = form.barcode || "0000000000000";
@@ -187,7 +211,14 @@ export function ProductForm({ product, isNew, barcodeWidth = 2, barcodeHeight = 
               </div>
               <div>
                 <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Barcode</label>
-                <input type="text" value={form.barcode} onChange={(e) => update("barcode", e.target.value)} className="w-full px-4 py-2.5 glass-input text-sm font-mono" />
+                <div className="flex gap-2">
+                  <input type="text" value={form.barcode} onChange={(e) => update("barcode", e.target.value)} placeholder="Scan, type, or auto-generate" className="flex-1 min-w-0 px-4 py-2.5 glass-input text-sm font-mono" />
+                  <button type="button" onClick={handleGenerateBarcode} disabled={generatingBarcode} title="Generate an internal barcode"
+                    className="flex items-center gap-1.5 px-3 py-2.5 glass-card text-xs font-medium cursor-pointer disabled:opacity-60 whitespace-nowrap">
+                    {generatingBarcode ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Wand2 className="w-3.5 h-3.5" />}
+                    Auto-generate
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -329,7 +360,10 @@ export function ProductForm({ product, isNew, barcodeWidth = 2, barcodeHeight = 
             <h3 className="text-sm font-semibold mb-4 flex items-center gap-2">
               <Barcode className="w-4 h-4" /> Barcode Preview
             </h3>
-            <div className="bg-white p-4 rounded-xl flex justify-center">
+            <div onClick={handleBarcodeClick} role="button" tabIndex={0}
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleBarcodeClick(); } }}
+              title={isNew ? "Save the product first to print its label" : "Click to print this label"}
+              className="bg-white p-4 rounded-xl flex justify-center cursor-pointer ring-2 ring-transparent hover:ring-primary/40 transition-all">
               <div className="product-label flex flex-col items-center justify-center gap-1" style={{ width: "2in", minHeight: "1in" }}>
                 <p className="text-[10px] font-bold leading-tight">{formatCurrency(form.salePrice)}</p>
                 <BarcodeSVG value={barcodeDisplay} width={barcodeWidth} height={barcodeHeight} />

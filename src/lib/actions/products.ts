@@ -96,6 +96,14 @@ export async function backfillBarcodes(): Promise<{ updated: number }> {
   return { updated: missing.length };
 }
 
+// Returns the next available internal barcode without saving it -- powers the
+// "Auto-generate" button on the product form, so the field can be filled on
+// demand. The same value only becomes permanent once the product is saved.
+export async function generateBarcode(): Promise<{ barcode: string }> {
+  await requireAuth();
+  return { barcode: await nextBarcodeValue() };
+}
+
 export async function updateProduct(id: string, input: ProductInput) {
   await requireAuth();
   await db.product.update({
