@@ -11,7 +11,7 @@ import { useRouter } from "next/navigation";
 import {
   Search, Plus, Minus, Trash2, X, User, CreditCard,
   Banknote, Building2, Smartphone, Printer, MessageCircle, Receipt,
-  Glasses, ChevronDown, ChevronUp, TrendingUp, Lock, Edit3,
+  Glasses, ChevronDown, ChevronUp, Lock, Edit3,
   WifiOff, UploadCloud, ScanLine,
 } from "lucide-react";
 import { firstImage } from "@/lib/utils/images";
@@ -57,13 +57,12 @@ const EMPTY_RX = {
 };
 
 export function POSClient({
-  products, customers, staff, currentUserId, canSeeCosts,
+  products, customers, staff, currentUserId,
 }: {
   products: Product[];
   customers: POSCustomer[];
   staff: StaffMember[];
   currentUserId: string;
-  canSeeCosts: boolean;
 }) {
   const { showToast } = useApp();
   const router = useRouter();
@@ -229,16 +228,9 @@ export function POSClient({
   const total = subtotal - invoiceDiscount;
   const customer = customers.find((c) => c.id === selectedCustomer);
 
-  // Profitability: real cost = product costs + lab + fitting charges. A
-  // manually-entered lens has no known cost, so it's assumed zero-margin
-  // (its price counts as its own cost) rather than overstating profit.
-  const itemCost = cart.reduce((sum, i) => {
-    const p = products.find((pr) => pr.id === i.productId);
-    return sum + (p ? p.costPrice * i.quantity : 0);
-  }, 0);
-  const totalCost = itemCost + customLensAmount + labCharges + fittingCharges;
-  const profit = total - totalCost;
-  const margin = total > 0 ? (profit / total) * 100 : 0;
+  // Cost and profit are deliberately not computed or shown here — the till is
+  // visible to customers. createSale still records them server-side, so they
+  // stay available in Analytics.
   const hasSaleableItems = cart.length > 0 || (useCustomLens && customLensPrice > 0);
 
   const selectLens = (id: string) => {
@@ -405,8 +397,7 @@ export function POSClient({
             </h3>
             <div className="receipt-paper mx-auto rounded-lg shadow-lg">
               <div className="text-center border-b border-dashed border-gray-400 pb-2 mb-2">
-                <img src="/eyespy-logo-black.png" alt={SHOP_NAME} className="h-8 w-auto mx-auto mb-1" />
-                <p className="font-bold text-base">{SHOP_NAME}</p>
+                <img src="/eyespy-logo-black.png" alt={SHOP_NAME} className="h-10 w-auto mx-auto mb-1.5" />
                 <p className="text-[11px]">45 Tariq Road, Karachi 75400</p>
                 <p className="text-[11px]">Ph: +92 21 3456 7890</p>
                 <p className="text-[11px]">NTN: 1234567-8</p>
@@ -969,12 +960,6 @@ export function POSClient({
                   <span>Total</span>
                   <span className="text-primary">{formatCurrency(total)}</span>
                 </div>
-                {canSeeCosts && (
-                  <div className={`flex items-center justify-between text-[11px] mt-1 px-2 py-1.5 rounded-lg ${profit < 0 ? "bg-destructive/10 text-destructive" : "bg-success/10 text-success"}`}>
-                    <span className="flex items-center gap-1"><TrendingUp className="w-3 h-3" /> Profit (cost {formatCurrency(totalCost)})</span>
-                    <span className="font-semibold">{formatCurrency(profit)} · {margin.toFixed(0)}%</span>
-                  </div>
-                )}
               </div>
 
               <div className="mt-4 space-y-3">

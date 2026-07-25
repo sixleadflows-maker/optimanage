@@ -727,6 +727,7 @@ a:hover .nav-icon { transform: translateY(-1px) scale(1.08); }
   body.printing-thermal *,
   body.printing-a4 *,
   body.printing-label *,
+  body.printing-one-label *,
   body.printing-all-labels * {
     visibility: hidden;
   }
@@ -737,6 +738,8 @@ a:hover .nav-icon { transform: translateY(-1px) scale(1.08); }
   body.printing-a4 .a4-invoice *,
   body.printing-label .product-label,
   body.printing-label .product-label *,
+  body.printing-one-label .print-target,
+  body.printing-one-label .print-target *,
   body.printing-all-labels .label-grid,
   body.printing-all-labels .label-grid * {
     visibility: visible;
@@ -767,13 +770,32 @@ a:hover .nav-icon { transform: translateY(-1px) scale(1.08); }
     height: 1in;
   }
 
+  /* One label printed on its own from the bulk Labels page (the "Print this"
+     button marks that cell .print-target). Same treatment as the single label
+     on the product page. */
+  body.printing-one-label .print-target {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 2in;
+    height: 1in;
+    margin: 0 !important;
+    border: none !important;
+    border-radius: 0 !important;
+    overflow: hidden;
+  }
+
   /* Bulk label sheet -- many .product-label cells inside one .label-grid;
      the grid itself fills the page and flows across multiple print pages,
      each cell held to the fixed label size so nothing splits mid-label.
      Deliberately no explicit @page size or break-after override here: both
      were tried to make sizing more precise, but caused a real label printer
      to double up content on every label -- this plain flex-wrap version is
-     the one confirmed to print one barcode per sticker correctly. */
+     the one confirmed to print one barcode per sticker correctly.
+     The grid's on-screen padding/gap MUST be zeroed though: 20px of padding
+     plus a 16px gap pushes every cell off the sticker origin, so a 1in label
+     stops lining up with the 1in sticker and bleeds onto the next one -- which
+     is what made a run print an extra sticker per label. */
   body.printing-all-labels .label-grid {
     position: absolute;
     top: 0;
@@ -781,10 +803,28 @@ a:hover .nav-icon { transform: translateY(-1px) scale(1.08); }
     width: 100%;
     display: flex;
     flex-wrap: wrap;
+    padding: 0 !important;
+    gap: 0 !important;
+    margin: 0 !important;
+    background: none !important;
+    box-shadow: none !important;
+    border: none !important;
+  }
+  /* The screen-only wrapper around each label (label + its Print button) must
+     not contribute any size of its own. */
+  body.printing-all-labels .label-grid .label-cell {
+    display: block;
+    margin: 0 !important;
+    padding: 0 !important;
+    gap: 0 !important;
   }
   body.printing-all-labels .label-grid .product-label {
     width: 2in;
     height: 1in;
+    margin: 0 !important;
+    border: none !important;
+    border-radius: 0 !important;
+    overflow: hidden;
     break-inside: avoid;
   }
 

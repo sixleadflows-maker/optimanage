@@ -461,9 +461,10 @@ export function ProductForm({ product, isNew, isOwner = false, barcodeWidth = 2,
               onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleBarcodeClick(); } }}
               title={isNew ? "Save the product first to print its label" : "Click to print this label"}
               className="bg-white p-4 rounded-xl flex justify-center cursor-pointer ring-2 ring-transparent hover:ring-primary/40 transition-all">
-              <div className="product-label flex flex-col items-center justify-center gap-1" style={{ width: "2in", minHeight: "1in" }}>
+              <div className="product-label flex flex-col items-center justify-center" style={{ width: "2in", minHeight: "1in" }}>
+                <p className="text-[10px] font-semibold text-center leading-tight">{form.brand} {form.name}</p>
                 <p className="text-[10px] font-bold leading-tight">{formatCurrency(form.salePrice)}</p>
-                <BarcodeSVG value={barcodeDisplay} width={barcodeWidth} height={barcodeHeight} />
+                <BarcodeSVG value={barcodeDisplay} width={barcodeWidth} height={barcodeHeight} fontSize={14} />
               </div>
             </div>
             {!isNew && (

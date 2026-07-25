@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import type { Product } from "@/lib/mock/types";
 import { useApp } from "@/lib/context";
 import { useRouter } from "next/navigation";
@@ -37,11 +37,31 @@ export function LabelsClient({ products, barcodeWidth, barcodeHeight }: { produc
     }
   };
 
-  const printAll = () => {
-    document.body.classList.add("printing-all-labels");
+  // Keeping the print-isolation class on <body> until the dialog closes (rather
+  // than removing it on the next line) is what stops the browser printing a
+  // blank or full page -- the same fix used for the receipt and single label.
+  const runPrint = (cls: string, onDone?: () => void) => {
+    const cleanup = () => {
+      document.body.classList.remove(cls);
+      window.removeEventListener("afterprint", cleanup);
+      onDone?.();
+    };
+    document.body.classList.add(cls);
+    window.addEventListener("afterprint", cleanup);
     window.print();
-    document.body.classList.remove("printing-all-labels");
+    setTimeout(cleanup, 1500);
   };
+
+  const printAll = () => runPrint("printing-all-labels");
+
+  // Printing one sticker at a time: mark the chosen label, let React commit
+  // that class, then print -- otherwise the print fires before the DOM updates.
+  const [printingId, setPrintingId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!printingId) return;
+    runPrint("printing-one-label", () => setPrintingId(null));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [printingId]);
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -79,14 +99,22 @@ export function LabelsClient({ products, barcodeWidth, barcodeHeight }: { produc
       ) : (
         <div className="label-grid glass-card p-5 flex flex-wrap gap-4 justify-center print:bg-white">
           {filtered.map((p) => (
-            <div key={p.id} className="product-label bg-white text-black rounded-lg border border-gray-200 p-2 flex flex-col items-center justify-center" style={{ width: "2in", minHeight: "1in" }}>
-              <p className="text-[9px] font-semibold text-center leading-tight">{p.brand} {p.name}</p>
-              <p className="text-[9px] font-bold leading-tight">{formatCurrency(p.salePrice)}</p>
-              {p.barcode ? (
-                <BarcodeSVG value={p.barcode} width={barcodeWidth} height={barcodeHeight * 0.6} fontSize={9} />
-              ) : (
-                <p className="text-[9px] text-gray-400 mt-2">No barcode yet</p>
-              )}
+            <div key={p.id} className="label-cell flex flex-col items-center gap-1.5">
+              <div className={`product-label bg-white text-black rounded-lg border border-gray-200 flex flex-col items-center justify-center ${printingId === p.id ? "print-target" : ""}`}
+                style={{ width: "2in", minHeight: "1in" }}>
+                <p className="text-[10px] font-semibold text-center leading-tight">{p.brand} {p.name}</p>
+                <p className="text-[10px] font-bold leading-tight">{formatCurrency(p.salePrice)}</p>
+                {p.barcode ? (
+                  <BarcodeSVG value={p.barcode} width={barcodeWidth} height={barcodeHeight * 0.6} fontSize={13} />
+                ) : (
+                  <p className="text-[9px] text-gray-400 mt-2">No barcode yet</p>
+                )}
+              </div>
+              <button onClick={() => setPrintingId(p.id)} disabled={!p.barcode || printingId !== null}
+                title={p.barcode ? "Print just this label" : "Generate a barcode first"}
+                className="no-print flex items-center gap-1.5 px-3 py-1.5 glass-card text-[11px] font-medium cursor-pointer disabled:opacity-50">
+                <Printer className="w-3 h-3" /> Print this
+              </button>
             </div>
           ))}
         </div>
