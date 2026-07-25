@@ -6,9 +6,9 @@ import type { Product } from "@/lib/mock/types";
 import { formatCurrency } from "@/lib/utils/format";
 import { useApp } from "@/lib/context";
 import { PRODUCT_CATEGORIES, PRODUCT_TYPES, BRAND_TAGS, DAMAGE_TYPES } from "@/lib/constants";
-import { createProduct, updateProduct, deleteProduct, generateBarcode } from "@/lib/actions/products";
+import { createProduct, updateProduct, deleteProduct, generateBarcode, checkExistingProduct } from "@/lib/actions/products";
 import { uploadProductImage } from "@/lib/actions/upload";
-import { ArrowLeft, Save, Barcode, Shield, ShieldAlert, ShieldCheck, ShieldOff, Trash2, Loader2, Printer, Upload, X, Wand2, AlertTriangle } from "lucide-react";
+import { ArrowLeft, Save, Barcode, Shield, ShieldAlert, ShieldCheck, ShieldOff, Trash2, Loader2, Printer, Upload, X, Wand2, AlertTriangle, Boxes } from "lucide-react";
 import Link from "next/link";
 import { ImageCarousel } from "@/components/ui/ImageCarousel";
 import { parseImages } from "@/lib/utils/images";
@@ -59,6 +59,32 @@ export function ProductForm({ product, isNew, isOwner = false, barcodeWidth = 2,
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isNew]);
+
+  // When a box of already-stocked frames comes in, saving tops up the existing
+  // row rather than creating a duplicate — surface that here so it's visible
+  // before saving, not a surprise afterwards. Debounced while typing.
+  const [existing, setExisting] = useState<{ name: string; colour: string; stock: number } | null>(null);
+  useEffect(() => {
+    if (!isNew) return;
+    if (form.isDamaged || !form.brand.trim() || !form.model.trim()) {
+      setExisting(null);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      checkExistingProduct(form)
+        .then((res) => {
+          if (cancelled) return;
+          setExisting(res.found ? { name: res.name, colour: res.colour, stock: res.stock } : null);
+        })
+        .catch(() => {});
+    }, 400);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isNew, form.brand, form.model, form.colour, form.size, form.barcode, form.isDamaged]);
 
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -199,6 +225,21 @@ export function ProductForm({ product, isNew, isOwner = false, barcodeWidth = 2,
         )}
       </div>
 
+      {existing && (
+        <div className="glass-card p-4 border-l-4 border-primary flex items-start gap-3">
+          <Boxes className="w-5 h-5 text-primary flex-shrink-0 mt-0.5" />
+          <div className="text-sm">
+            <p className="font-semibold">Already in stock — this won&apos;t create a duplicate</p>
+            <p className="text-muted-foreground mt-0.5">
+              <span className="font-medium text-foreground">{existing.name}</span>
+              {existing.colour ? ` (${existing.colour})` : ""} already has{" "}
+              <span className="font-medium text-foreground">{existing.stock} unit{existing.stock === 1 ? "" : "s"}</span>.
+              Saving adds the quantity you enter below to that product.
+            </p>
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-4">
           <div className="glass-card p-5">
@@ -290,7 +331,9 @@ export function ProductForm({ product, isNew, isOwner = false, barcodeWidth = 2,
                   className="w-full px-4 py-2.5 glass-input text-sm" placeholder="Min sell price" />
               </div>
               <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Current Stock</label>
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
+                  {existing ? "Quantity to Add" : "Current Stock"}
+                </label>
                 <input type="number" value={form.stock || ""} onChange={(e) => update("stock", Number(e.target.value))} className="w-full px-4 py-2.5 glass-input text-sm" />
               </div>
             </div>
@@ -436,7 +479,8 @@ export function ProductForm({ product, isNew, isOwner = false, barcodeWidth = 2,
 
           <button onClick={handleSave} disabled={saving}
             className="w-full flex items-center justify-center gap-2 py-3 bg-primary text-white rounded-2xl text-sm font-semibold hover:bg-primary-hover transition-colors disabled:opacity-60">
-            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} {isNew ? "Add Product" : "Save Changes"}
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}{" "}
+            {!isNew ? "Save Changes" : existing ? "Add to Existing Stock" : "Add Product"}
           </button>
         </div>
       </div>

@@ -9,6 +9,15 @@ import Link from "next/link";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { firstImage } from "@/lib/utils/images";
 
+// Matches on substring so the kids/sports variants pick up the right icon
+// without needing a new case each time a category is added.
+function categoryIcon(category: string) {
+  if (category.includes("Contact")) return "👁";
+  if (category.includes("Sunglass")) return "🕶";
+  if (category.includes("Lens")) return "🔍";
+  return "👓";
+}
+
 export function InventoryClient({ products, isOwner }: { products: Product[]; isOwner: boolean }) {
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<string>("All");
@@ -90,7 +99,7 @@ export function InventoryClient({ products, isOwner }: { products: Product[]; is
                   {firstImage(product.image) ? (
                     <img src={firstImage(product.image)} alt={product.name} className="w-full h-full object-cover" loading="lazy" />
                   ) : (
-                    <span className="text-2xl opacity-40">{product.category === "Contact Lenses" ? "👁" : product.category === "Sunglasses" ? "🕶" : product.category === "Lens Stock" ? "🔍" : "👓"}</span>
+                    <span className="text-2xl opacity-40">{categoryIcon(product.category)}</span>
                   )}
                 </div>
                 <p className="text-xs font-medium truncate">{product.brand} {product.name}</p>

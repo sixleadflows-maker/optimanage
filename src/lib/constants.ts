@@ -11,17 +11,26 @@ export const PRODUCT_TYPES = [
   "Acetate",
   "Plastic",
   "Metal",
+  "TR",
   "Rimless",
   "Semi-rimless",
   "Titanium",
+  "Metal Clip On",
+  "TR Clip On",
+  "Acetate Clip On",
 ] as const;
 
 export const PRODUCT_CATEGORIES = [
   "Frames",
   "Sunglasses",
+  "Sports Sunglasses",
+  "Kids Frames",
+  "Kids Sunglasses",
   "Contact Lenses",
   "Lens Stock",
 ] as const;
+
+export type ProductCategory = (typeof PRODUCT_CATEGORIES)[number];
 
 export const BRAND_TAGS = ["Original", "Copy", "Branded", "Unbranded"] as const;
 

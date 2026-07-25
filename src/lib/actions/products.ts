@@ -51,24 +51,67 @@ async function nextBarcodeValue(): Promise<string> {
   return INTERNAL_BARCODE_PREFIX + String(max + 1).padStart(6, "0");
 }
 
-// Two products count as "the same physical item" when brand + name + model +
-// colour + size all match (case-insensitively) -- that's what identifies a
-// specific frame SKU. Damaged items are deliberately excluded: they're priced
-// per their condition, so they must stay as their own row, never auto-merged.
+const norm = (value: string) => value.trim().toLowerCase();
+
+// A blank value means "not recorded", not "different" -- so an item entered
+// without a colour/size still matches the same article that has one. Only a
+// stated-and-different value rules a match out.
+const softMatch = (a: string, b: string) => {
+  const x = norm(a);
+  const y = norm(b);
+  return x === "" || y === "" || x === y;
+};
+
+// Finds the existing catalogue row for the same article, so another box of
+// stock tops up that row instead of creating a duplicate. Identity is:
+//   1. the barcode, if one was scanned/entered -- the strongest signal, and it
+//      also stops two rows ever sharing a barcode (which would break POS scan);
+//   2. otherwise brand + model (the article number), with colour and size only
+//      separating variants when both sides actually state them.
+// Damaged items are excluded on purpose: they're priced to their condition, so
+// they stay their own row and never absorb (or get absorbed by) good stock.
 async function findDuplicateProduct(input: ProductInput) {
   if (input.isDamaged) return null;
-  const eq = (value: string) => ({ equals: value.trim(), mode: "insensitive" as const });
-  return db.product.findFirst({
+
+  const barcode = input.barcode.trim();
+  if (barcode) {
+    const byBarcode = await db.product.findFirst({
+      where: { barcode, active: true, isDamaged: false },
+    });
+    if (byBarcode) return byBarcode;
+  }
+
+  // Without both a brand and an article number there isn't enough to identify
+  // the item confidently -- better a new row than silently merging the wrong one.
+  const brand = input.brand.trim();
+  const model = input.model.trim();
+  if (!brand || !model) return null;
+
+  const candidates = await db.product.findMany({
     where: {
       active: true,
       isDamaged: false,
-      brand: eq(input.brand),
-      name: eq(input.name),
-      model: eq(input.model),
-      colour: eq(input.colour),
-      size: eq(input.size),
+      brand: { equals: brand, mode: "insensitive" },
+      model: { equals: model, mode: "insensitive" },
     },
   });
+  return candidates.find((c) => softMatch(c.colour, input.colour) && softMatch(c.size, input.size)) ?? null;
+}
+
+// Lets the add-product form tell the user *before* they save that this article
+// is already in the catalogue and saving will top up its stock.
+export async function checkExistingProduct(input: ProductInput) {
+  await requireAuth();
+  const match = await findDuplicateProduct(input);
+  if (!match) return { found: false as const };
+  return {
+    found: true as const,
+    id: match.id,
+    name: `${match.brand} ${match.name}`.trim(),
+    model: match.model,
+    colour: match.colour,
+    stock: match.stock,
+  };
 }
 
 export async function createProduct(input: ProductInput) {

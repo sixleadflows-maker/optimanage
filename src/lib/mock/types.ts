@@ -1,9 +1,12 @@
+import type { ProductCategory } from "@/lib/constants";
+
 export interface Product {
   id: string;
   name: string;
   brand: string;
   model: string;
-  category: "Frames" | "Sunglasses" | "Contact Lenses" | "Lens Stock";
+  // Derived from PRODUCT_CATEGORIES so adding a category in one place is enough.
+  category: ProductCategory;
   type: string;
   colour: string;
   size: string;
