@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { backfillBarcodes } from "@/lib/actions/products";
 import { LabelSticker } from "@/components/ui/LabelSticker";
 import { PrintPortal } from "@/components/ui/PrintPortal";
+import { applyLabelPageSize } from "@/lib/utils/printLabel";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Search, Barcode, Printer, Wand2, Loader2 } from "lucide-react";
 
@@ -45,8 +46,10 @@ export function LabelsClient({ products, barcodeWidth, barcodeHeight }: { produc
     if (!printJob) return;
     const cls = "printing-all-labels";
     let timer: ReturnType<typeof setTimeout>;
+    const removePageSize = applyLabelPageSize();
     const cleanup = () => {
       document.body.classList.remove(cls);
+      removePageSize();
       window.removeEventListener("afterprint", cleanup);
       setPrintJob(null);
     };

@@ -14,6 +14,7 @@ import { ImageCarousel } from "@/components/ui/ImageCarousel";
 import { parseImages } from "@/lib/utils/images";
 import { LabelSticker } from "@/components/ui/LabelSticker";
 import { PrintPortal } from "@/components/ui/PrintPortal";
+import { applyLabelPageSize } from "@/lib/utils/printLabel";
 
 const brandTagConfig = {
   Original: { icon: Shield, color: "bg-success/10 text-success border-success/20", label: "Original" },
@@ -179,8 +180,10 @@ export function ProductForm({ product, isNew, isOwner = false, barcodeWidth = 2,
     if (!printingLabel) return;
     const cls = "printing-label";
     let timer: ReturnType<typeof setTimeout>;
+    const removePageSize = applyLabelPageSize();
     const cleanup = () => {
       document.body.classList.remove(cls);
+      removePageSize();
       window.removeEventListener("afterprint", cleanup);
       setPrintingLabel(false);
     };

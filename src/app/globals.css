@@ -789,15 +789,23 @@ a:hover .nav-icon { transform: translateY(-1px) scale(1.08); }
     padding: 0;
   }
   #print-portal .product-label {
+    box-sizing: border-box;
     width: 2in !important;
     height: 1in !important;
     margin: 0 !important;
-    padding: 0 !important;
+    padding: 0.03in !important;
     border: none !important;
     border-radius: 0 !important;
     overflow: hidden;
     break-inside: avoid;
     page-break-inside: avoid;
+  }
+  /* Hard cap on the barcode so the two text lines plus the bars can never add
+     up to more than the 1in sticker and push part of the label onto the next
+     one (which printed the name on one sticker and the barcode on the next). */
+  #print-portal .product-label svg {
+    max-height: 0.62in;
+    max-width: 100%;
   }
 
   /* Scale the whole printout up so bled ink can't merge adjacent letters.
