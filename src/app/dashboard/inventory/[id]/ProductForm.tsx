@@ -12,7 +12,8 @@ import { ArrowLeft, Save, Barcode, Shield, ShieldAlert, ShieldCheck, ShieldOff, 
 import Link from "next/link";
 import { ImageCarousel } from "@/components/ui/ImageCarousel";
 import { parseImages } from "@/lib/utils/images";
-import { BarcodeSVG } from "@/components/ui/BarcodeSVG";
+import { LabelSticker } from "@/components/ui/LabelSticker";
+import { PrintPortal } from "@/components/ui/PrintPortal";
 
 const brandTagConfig = {
   Original: { icon: Shield, color: "bg-success/10 text-success border-success/20", label: "Original" },
@@ -169,21 +170,36 @@ export function ProductForm({ product, isNew, isOwner = false, barcodeWidth = 2,
     }
   };
 
-  // Keep the print-isolation class on <body> until the print dialog actually
-  // closes. Removing it synchronously right after window.print() (as before)
-  // races the browser's print render in Firefox/Safari and can print a blank
-  // or full page — the afterprint listener + timeout fallback fixes that.
-  const printOnly = (mode: "label") => {
-    const cls = `printing-${mode}`;
+  // Printing a label happens in two steps: flip `printingLabel` on so the
+  // sticker is rendered into the body-level print container, then (once React
+  // has committed that) actually print. Printing in the same tick would fire
+  // before the container has any content in it.
+  const [printingLabel, setPrintingLabel] = useState(false);
+  useEffect(() => {
+    if (!printingLabel) return;
+    const cls = "printing-label";
+    let timer: ReturnType<typeof setTimeout>;
     const cleanup = () => {
       document.body.classList.remove(cls);
       window.removeEventListener("afterprint", cleanup);
+      setPrintingLabel(false);
     };
     document.body.classList.add(cls);
     window.addEventListener("afterprint", cleanup);
-    window.print();
-    setTimeout(cleanup, 1500);
-  };
+    // Print only once the sticker has actually been painted into the print
+    // container — printing in this same frame can beat the portal's render and
+    // send an empty page to the printer.
+    const raf = requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        window.print();
+        timer = setTimeout(cleanup, 1500);
+      });
+    });
+    return () => {
+      cancelAnimationFrame(raf);
+      clearTimeout(timer);
+    };
+  }, [printingLabel]);
 
   // Clicking the barcode preview is a shortcut for printing its label. A new,
   // unsaved product has no label to print yet, so nudge the user to save first.
@@ -192,10 +208,11 @@ export function ProductForm({ product, isNew, isOwner = false, barcodeWidth = 2,
       showToast("Save the product first to print its label.", "error");
       return;
     }
-    printOnly("label");
+    setPrintingLabel(true);
   };
 
   const barcodeDisplay = form.barcode || "0000000000000";
+  const labelTitle = `${form.brand} ${form.name}`.trim();
   const belowThreshold = form.priceThreshold > 0 && form.salePrice < form.priceThreshold;
   const tagConf = brandTagConfig[form.brandTag];
   const TagIcon = tagConf.icon;
@@ -461,14 +478,11 @@ export function ProductForm({ product, isNew, isOwner = false, barcodeWidth = 2,
               onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleBarcodeClick(); } }}
               title={isNew ? "Save the product first to print its label" : "Click to print this label"}
               className="bg-white p-4 rounded-xl flex justify-center cursor-pointer ring-2 ring-transparent hover:ring-primary/40 transition-all">
-              <div className="product-label flex flex-col items-center justify-center" style={{ width: "2in", minHeight: "1in" }}>
-                <p className="text-[10px] font-semibold text-center leading-tight">{form.brand} {form.name}</p>
-                <p className="text-[10px] font-bold leading-tight">{formatCurrency(form.salePrice)}</p>
-                <BarcodeSVG value={barcodeDisplay} width={barcodeWidth} height={barcodeHeight} fontSize={14} />
-              </div>
+              <LabelSticker title={labelTitle} price={form.salePrice} barcode={barcodeDisplay}
+                barcodeWidth={barcodeWidth} barcodeHeight={barcodeHeight} />
             </div>
             {!isNew && (
-              <button onClick={() => printOnly("label")}
+              <button onClick={() => setPrintingLabel(true)}
                 className="no-print w-full mt-3 flex items-center justify-center gap-2 py-2.5 glass-card text-sm font-medium cursor-pointer">
                 <Printer className="w-4 h-4" /> Print Label (2&quot; x 1&quot;)
               </button>
@@ -485,6 +499,17 @@ export function ProductForm({ product, isNew, isOwner = false, barcodeWidth = 2,
           </button>
         </div>
       </div>
+
+      {/* Mounted from the start so its container already exists in the DOM;
+          only the sticker inside is conditional. Mounting the whole portal on
+          demand would create the container in an effect that runs *after* the
+          print call, so nothing would be there to print. */}
+      <PrintPortal>
+        {printingLabel && (
+          <LabelSticker title={labelTitle} price={form.salePrice} barcode={barcodeDisplay}
+            barcodeWidth={barcodeWidth} barcodeHeight={barcodeHeight} />
+        )}
+      </PrintPortal>
     </div>
   );
 }

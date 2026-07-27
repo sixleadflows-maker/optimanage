@@ -712,6 +712,12 @@ a:hover .nav-icon { transform: translateY(-1px) scale(1.08); }
   height: auto;
 }
 
+/* The print container lives at the end of <body> but must never show on
+   screen -- the @media print block switches it on. */
+#print-portal {
+  display: none;
+}
+
 /* Printing the thermal receipt or A4 invoice must isolate just that one
    element -- otherwise the sidebar, topbar, and the other receipt format
    print alongside it. Only one of these two "printing-*" classes is ever
@@ -725,24 +731,29 @@ a:hover .nav-icon { transform: translateY(-1px) scale(1.08); }
   }
 
   body.printing-thermal *,
-  body.printing-a4 *,
-  body.printing-label *,
-  body.printing-one-label *,
-  body.printing-all-labels * {
+  body.printing-a4 * {
     visibility: hidden;
   }
 
   body.printing-thermal .receipt-paper,
   body.printing-thermal .receipt-paper *,
   body.printing-a4 .a4-invoice,
-  body.printing-a4 .a4-invoice *,
-  body.printing-label .product-label,
-  body.printing-label .product-label *,
-  body.printing-one-label .print-target,
-  body.printing-one-label .print-target *,
-  body.printing-all-labels .label-grid,
-  body.printing-all-labels .label-grid * {
+  body.printing-a4 .a4-invoice * {
     visibility: visible;
+  }
+
+  /* Labels print from #print-portal (a body-level container) instead of being
+     revealed in place. Everything else is display:none -- not just invisible --
+     so the hidden dashboard contributes no height and therefore no extra pages.
+     `visibility: hidden` was the original approach and produced ~22 blank
+     sheets, because invisible elements still occupy their full layout height. */
+  body.printing-label > *:not(#print-portal),
+  body.printing-all-labels > *:not(#print-portal) {
+    display: none !important;
+  }
+  body.printing-label #print-portal,
+  body.printing-all-labels #print-portal {
+    display: block !important;
   }
 
   /* Thermal printers print faint thin strokes and let ink bleed between
@@ -770,62 +781,23 @@ a:hover .nav-icon { transform: translateY(-1px) scale(1.08); }
     height: 1in;
   }
 
-  /* One label printed on its own from the bulk Labels page (the "Print this"
-     button marks that cell .print-target). Same treatment as the single label
-     on the product page. */
-  body.printing-one-label .print-target {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 2in;
-    height: 1in;
-    margin: 0 !important;
-    border: none !important;
-    border-radius: 0 !important;
-    overflow: hidden;
+  /* Inside the portal the stickers stack with nothing around them: no padding,
+     no gaps, no borders. Each is exactly 2in x 1in so it lands on one sticker,
+     and break-inside stops a label being split across two of them. */
+  #print-portal {
+    margin: 0;
+    padding: 0;
   }
-
-  /* Bulk label sheet -- many .product-label cells inside one .label-grid;
-     the grid itself fills the page and flows across multiple print pages,
-     each cell held to the fixed label size so nothing splits mid-label.
-     Deliberately no explicit @page size or break-after override here: both
-     were tried to make sizing more precise, but caused a real label printer
-     to double up content on every label -- this plain flex-wrap version is
-     the one confirmed to print one barcode per sticker correctly.
-     The grid's on-screen padding/gap MUST be zeroed though: 20px of padding
-     plus a 16px gap pushes every cell off the sticker origin, so a 1in label
-     stops lining up with the 1in sticker and bleeds onto the next one -- which
-     is what made a run print an extra sticker per label. */
-  body.printing-all-labels .label-grid {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    display: flex;
-    flex-wrap: wrap;
-    padding: 0 !important;
-    gap: 0 !important;
-    margin: 0 !important;
-    background: none !important;
-    box-shadow: none !important;
-    border: none !important;
-  }
-  /* The screen-only wrapper around each label (label + its Print button) must
-     not contribute any size of its own. */
-  body.printing-all-labels .label-grid .label-cell {
-    display: block;
+  #print-portal .product-label {
+    width: 2in !important;
+    height: 1in !important;
     margin: 0 !important;
     padding: 0 !important;
-    gap: 0 !important;
-  }
-  body.printing-all-labels .label-grid .product-label {
-    width: 2in;
-    height: 1in;
-    margin: 0 !important;
     border: none !important;
     border-radius: 0 !important;
     overflow: hidden;
     break-inside: avoid;
+    page-break-inside: avoid;
   }
 
   /* Scale the whole printout up so bled ink can't merge adjacent letters.

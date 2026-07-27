@@ -5,8 +5,8 @@ import type { Product } from "@/lib/mock/types";
 import { useApp } from "@/lib/context";
 import { useRouter } from "next/navigation";
 import { backfillBarcodes } from "@/lib/actions/products";
-import { formatCurrency } from "@/lib/utils/format";
-import { BarcodeSVG } from "@/components/ui/BarcodeSVG";
+import { LabelSticker } from "@/components/ui/LabelSticker";
+import { PrintPortal } from "@/components/ui/PrintPortal";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Search, Barcode, Printer, Wand2, Loader2 } from "lucide-react";
 
@@ -37,31 +37,36 @@ export function LabelsClient({ products, barcodeWidth, barcodeHeight }: { produc
     }
   };
 
-  // Keeping the print-isolation class on <body> until the dialog closes (rather
-  // than removing it on the next line) is what stops the browser printing a
-  // blank or full page -- the same fix used for the receipt and single label.
-  const runPrint = (cls: string, onDone?: () => void) => {
+  // What to print: one product's sticker, or every filtered one. Setting this
+  // renders the stickers into the body-level print container; the effect below
+  // then prints once React has committed them.
+  const [printJob, setPrintJob] = useState<Product[] | null>(null);
+  useEffect(() => {
+    if (!printJob) return;
+    const cls = "printing-all-labels";
+    let timer: ReturnType<typeof setTimeout>;
     const cleanup = () => {
       document.body.classList.remove(cls);
       window.removeEventListener("afterprint", cleanup);
-      onDone?.();
+      setPrintJob(null);
     };
     document.body.classList.add(cls);
     window.addEventListener("afterprint", cleanup);
-    window.print();
-    setTimeout(cleanup, 1500);
-  };
+    // Wait for the stickers to be painted into the print container before
+    // printing — otherwise the print can beat the portal's render.
+    const raf = requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        window.print();
+        timer = setTimeout(cleanup, 1500);
+      });
+    });
+    return () => {
+      cancelAnimationFrame(raf);
+      clearTimeout(timer);
+    };
+  }, [printJob]);
 
-  const printAll = () => runPrint("printing-all-labels");
-
-  // Printing one sticker at a time: mark the chosen label, let React commit
-  // that class, then print -- otherwise the print fires before the DOM updates.
-  const [printingId, setPrintingId] = useState<string | null>(null);
-  useEffect(() => {
-    if (!printingId) return;
-    runPrint("printing-one-label", () => setPrintingId(null));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [printingId]);
+  const printAll = () => setPrintJob(filtered.filter((p) => p.barcode));
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -100,17 +105,9 @@ export function LabelsClient({ products, barcodeWidth, barcodeHeight }: { produc
         <div className="label-grid glass-card p-5 flex flex-wrap gap-4 justify-center print:bg-white">
           {filtered.map((p) => (
             <div key={p.id} className="label-cell flex flex-col items-center gap-1.5">
-              <div className={`product-label bg-white text-black rounded-lg border border-gray-200 flex flex-col items-center justify-center ${printingId === p.id ? "print-target" : ""}`}
-                style={{ width: "2in", minHeight: "1in" }}>
-                <p className="text-[10px] font-semibold text-center leading-tight">{p.brand} {p.name}</p>
-                <p className="text-[10px] font-bold leading-tight">{formatCurrency(p.salePrice)}</p>
-                {p.barcode ? (
-                  <BarcodeSVG value={p.barcode} width={barcodeWidth} height={barcodeHeight * 0.6} fontSize={13} />
-                ) : (
-                  <p className="text-[9px] text-gray-400 mt-2">No barcode yet</p>
-                )}
-              </div>
-              <button onClick={() => setPrintingId(p.id)} disabled={!p.barcode || printingId !== null}
+              <LabelSticker title={`${p.brand} ${p.name}`.trim()} price={p.salePrice} barcode={p.barcode}
+                barcodeWidth={barcodeWidth} barcodeHeight={barcodeHeight * 0.6} bordered />
+              <button onClick={() => setPrintJob([p])} disabled={!p.barcode || printJob !== null}
                 title={p.barcode ? "Print just this label" : "Generate a barcode first"}
                 className="no-print flex items-center gap-1.5 px-3 py-1.5 glass-card text-[11px] font-medium cursor-pointer disabled:opacity-50">
                 <Printer className="w-3 h-3" /> Print this
@@ -119,6 +116,15 @@ export function LabelsClient({ products, barcodeWidth, barcodeHeight }: { produc
           ))}
         </div>
       )}
+
+      {/* Always mounted so the print container exists before any print call;
+          only its contents are conditional (see ProductForm for the why). */}
+      <PrintPortal>
+        {printJob?.map((p) => (
+          <LabelSticker key={p.id} title={`${p.brand} ${p.name}`.trim()} price={p.salePrice} barcode={p.barcode}
+            barcodeWidth={barcodeWidth} barcodeHeight={barcodeHeight * 0.6} />
+        ))}
+      </PrintPortal>
     </div>
   );
 }
