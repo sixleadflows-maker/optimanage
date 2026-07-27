@@ -804,7 +804,7 @@ a:hover .nav-icon { transform: translateY(-1px) scale(1.08); }
      up to more than the 1in sticker and push part of the label onto the next
      one (which printed the name on one sticker and the barcode on the next). */
   #print-portal .product-label svg {
-    max-height: 0.62in;
+    max-height: 0.5in;
     max-width: 100%;
   }
 
