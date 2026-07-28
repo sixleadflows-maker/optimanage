@@ -109,7 +109,7 @@ export function LabelsClient({ products, barcodeWidth, barcodeHeight }: { produc
           {filtered.map((p) => (
             <div key={p.id} className="label-cell flex flex-col items-center gap-1.5">
               <LabelSticker title={`${p.brand} ${p.name}`.trim()} price={p.salePrice} barcode={p.barcode}
-                barcodeWidth={barcodeWidth} barcodeHeight={barcodeHeight * 0.45} bordered />
+                barcodeWidth={barcodeWidth} barcodeHeight={barcodeHeight * 0.35} bordered />
               <button onClick={() => setPrintJob([p])} disabled={!p.barcode || printJob !== null}
                 title={p.barcode ? "Print just this label" : "Generate a barcode first"}
                 className="no-print flex items-center gap-1.5 px-3 py-1.5 glass-card text-[11px] font-medium cursor-pointer disabled:opacity-50">
@@ -125,7 +125,7 @@ export function LabelsClient({ products, barcodeWidth, barcodeHeight }: { produc
       <PrintPortal>
         {printJob?.map((p) => (
           <LabelSticker key={p.id} title={`${p.brand} ${p.name}`.trim()} price={p.salePrice} barcode={p.barcode}
-            barcodeWidth={barcodeWidth} barcodeHeight={barcodeHeight * 0.45} />
+            barcodeWidth={barcodeWidth} barcodeHeight={barcodeHeight * 0.35} />
         ))}
       </PrintPortal>
     </div>

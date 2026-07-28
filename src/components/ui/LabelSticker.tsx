@@ -12,7 +12,7 @@ export function LabelSticker({
   barcode,
   barcodeWidth,
   barcodeHeight,
-  fontSize = 10,
+  fontSize = 8,
   bordered = false,
 }: {
   title: string;
@@ -28,8 +28,8 @@ export function LabelSticker({
       className={`product-label bg-white text-black flex flex-col items-center justify-center overflow-hidden ${bordered ? "rounded-lg border border-gray-200" : ""}`}
       style={{ width: "2in", height: "1in" }}
     >
-      <p className="text-[8px] font-semibold text-center leading-tight px-1 w-full truncate">{title}</p>
-      <p className="text-[9px] font-bold leading-tight">{formatCurrency(price)}</p>
+      <p className="text-[6px] font-semibold text-center leading-tight px-1 w-full truncate">{title}</p>
+      <p className="text-[7px] font-bold leading-tight">{formatCurrency(price)}</p>
       {barcode ? (
         <BarcodeSVG value={barcode} width={barcodeWidth} height={barcodeHeight} fontSize={fontSize} />
       ) : (

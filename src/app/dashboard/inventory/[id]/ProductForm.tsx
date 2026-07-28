@@ -482,7 +482,7 @@ export function ProductForm({ product, isNew, isOwner = false, barcodeWidth = 2,
               title={isNew ? "Save the product first to print its label" : "Click to print this label"}
               className="bg-white p-4 rounded-xl flex justify-center cursor-pointer ring-2 ring-transparent hover:ring-primary/40 transition-all">
               <LabelSticker title={labelTitle} price={form.salePrice} barcode={barcodeDisplay}
-                barcodeWidth={barcodeWidth} barcodeHeight={barcodeHeight * 0.45} />
+                barcodeWidth={barcodeWidth} barcodeHeight={barcodeHeight * 0.35} />
             </div>
             {!isNew && (
               <button onClick={() => setPrintingLabel(true)}
