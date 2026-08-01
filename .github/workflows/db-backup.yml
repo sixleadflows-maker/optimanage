@@ -1,0 +1,77 @@
+name: Daily database backup
+
+# Runs every night and copies a compressed snapshot of the OptiManage database
+# to Google Drive, so the catalogue never has to be re-entered by hand.
+#
+# One-time setup (see docs/BACKUPS.md):
+#   Repository secrets required
+#     DATABASE_URL  - the Neon connection string
+#     RCLONE_CONF   - contents of an rclone.conf holding a Google Drive remote
+#                     named "gdrive"
+#     GDRIVE_DIR    - optional; Drive folder to write into (default: OptiManage-Backups)
+
+on:
+  schedule:
+    # 20:00 UTC = 01:00 Pakistan time, i.e. after the shop has closed.
+    - cron: "0 20 * * *"
+  workflow_dispatch: # lets you run a backup on demand from the Actions tab
+
+concurrency:
+  group: db-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Take database snapshot
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: npm run db:backup -- backups
+
+      # Guards against silently uploading an empty or truncated file: the
+      # backup script already refuses to write a zero-row dump, this catches a
+      # dump that is suspiciously small for a real catalogue.
+      - name: Sanity-check the snapshot
+        run: |
+          set -euo pipefail
+          FILE=$(ls -1 backups/*.sql.gz | head -n 1)
+          SIZE=$(stat -c%s "$FILE")
+          echo "Backup file: $FILE ($SIZE bytes)"
+          cat backups/latest-manifest.json
+          if [ "$SIZE" -lt 2000 ]; then
+            echo "::error::Backup is only $SIZE bytes — refusing to upload it."
+            exit 1
+          fi
+
+      - name: Upload to Google Drive
+        env:
+          RCLONE_CONF: ${{ secrets.RCLONE_CONF }}
+          GDRIVE_DIR: ${{ secrets.GDRIVE_DIR }}
+        run: |
+          set -euo pipefail
+          if [ -z "${RCLONE_CONF:-}" ]; then
+            echo "::error::RCLONE_CONF secret is not set — see docs/BACKUPS.md for the one-time setup."
+            exit 1
+          fi
+          curl -fsSL https://rclone.org/install.sh | sudo bash > /dev/null
+          mkdir -p ~/.config/rclone
+          printf '%s' "$RCLONE_CONF" > ~/.config/rclone/rclone.conf
+          DEST="${GDRIVE_DIR:-OptiManage-Backups}"
+          rclone copy backups "gdrive:$DEST" --include "*.sql.gz" --include "latest-manifest.json"
+          echo "Uploaded to gdrive:$DEST"
+          # Keep roughly two months of daily snapshots; older ones are pruned.
+          rclone delete "gdrive:$DEST" --include "*.sql.gz" --min-age 60d || true
+          echo "Backups currently stored:"
+          rclone size "gdrive:$DEST"
