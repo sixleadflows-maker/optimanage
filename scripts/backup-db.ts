@@ -18,10 +18,16 @@ import dotenv from "dotenv";
 dotenv.config({ path: ".env.local" });
 dotenv.config({ path: ".env" });
 
-import { Pool } from "@neondatabase/serverless";
+import { Pool, neonConfig } from "@neondatabase/serverless";
+import ws from "ws";
 import { gzipSync } from "node:zlib";
 import fs from "node:fs";
 import path from "node:path";
+
+// Neon talks over WebSockets. Node only exposes a global WebSocket from v22, so
+// supply one explicitly — otherwise this works on a dev machine but fails on
+// any older Node (which is exactly how it broke on the CI runner).
+neonConfig.webSocketConstructor = globalThis.WebSocket ?? ws;
 
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) {

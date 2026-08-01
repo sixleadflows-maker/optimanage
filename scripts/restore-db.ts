@@ -13,10 +13,15 @@ import dotenv from "dotenv";
 dotenv.config({ path: ".env.local" });
 dotenv.config({ path: ".env" });
 
-import { Pool } from "@neondatabase/serverless";
+import { Pool, neonConfig } from "@neondatabase/serverless";
+import ws from "ws";
 import { gunzipSync } from "node:zlib";
 import fs from "node:fs";
 import readline from "node:readline/promises";
+
+// See backup-db.ts — don't depend on Node exposing a global WebSocket, since a
+// restore may well be run on whatever machine is to hand during an outage.
+neonConfig.webSocketConstructor = globalThis.WebSocket ?? ws;
 
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) {
