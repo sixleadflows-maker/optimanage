@@ -491,6 +491,62 @@ export async function getBranches(): Promise<BranchView[]> {
   }));
 }
 
+// ─── Trash ──────────────────────────────────────────────────
+export interface TrashItemView {
+  id: string;
+  kind: "product" | "location" | "staff";
+  title: string;
+  detail: string;
+  deletedAt: string;
+  daysLeft: number;
+  expired: boolean;
+}
+
+import { TRASH_RETENTION_DAYS } from "@/lib/constants";
+
+function trashTiming(deletedAt: Date | null) {
+  // Rows deleted before the trash existed have no timestamp; treat them as
+  // freshly binned rather than silently unrecoverable.
+  const when = deletedAt ?? new Date();
+  const days = Math.floor((Date.now() - when.getTime()) / 86_400_000);
+  const daysLeft = TRASH_RETENTION_DAYS - days;
+  return { deletedAt: when.toISOString(), daysLeft: Math.max(0, daysLeft), expired: daysLeft <= 0 };
+}
+
+export async function getTrashItems(): Promise<TrashItemView[]> {
+  const [products, branches, users] = await Promise.all([
+    db.product.findMany({ where: { active: false }, orderBy: { deletedAt: "desc" } }),
+    db.branch.findMany({ where: { active: false }, orderBy: { deletedAt: "desc" } }),
+    db.user.findMany({ where: { active: false }, orderBy: { deletedAt: "desc" } }),
+  ]);
+
+  const items: TrashItemView[] = [
+    ...products.map((p) => ({
+      id: p.id,
+      kind: "product" as const,
+      title: `${p.brand} ${p.name}`.trim(),
+      detail: [p.model, p.colour, p.barcode].filter(Boolean).join(" · "),
+      ...trashTiming(p.deletedAt),
+    })),
+    ...branches.map((b) => ({
+      id: b.id,
+      kind: "location" as const,
+      title: b.name,
+      detail: [b.address, b.phone].filter(Boolean).join(" · "),
+      ...trashTiming(b.deletedAt),
+    })),
+    ...users.map((u) => ({
+      id: u.id,
+      kind: "staff" as const,
+      title: u.name,
+      detail: `${u.email} · ${u.role.charAt(0) + u.role.slice(1).toLowerCase()}`,
+      ...trashTiming(u.deletedAt),
+    })),
+  ];
+
+  return items.sort((a, b) => b.deletedAt.localeCompare(a.deletedAt));
+}
+
 // ─── Stock Adjustments ──────────────────────────────────────
 export interface StockAdjustmentView {
   id: string;

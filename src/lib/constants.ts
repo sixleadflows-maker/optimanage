@@ -46,3 +46,11 @@ export const DAMAGE_TYPES = [
 ] as const;
 
 export const LAB_ORDER_STATUSES = ["Ordered", "In Progress", "Received", "Fitted"] as const;
+
+// Deleted items stay recoverable in the Trash for this long.
+// Lives here rather than in actions/trash.ts because a "use server" module may
+// only export async functions — exporting a const or type from one breaks the
+// Server Actions bundle at build time.
+export const TRASH_RETENTION_DAYS = 30;
+
+export type TrashKind = "product" | "location" | "staff";

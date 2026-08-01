@@ -216,9 +216,11 @@ export async function updateProduct(id: string, input: ProductInput) {
 
 export async function deleteProduct(id: string) {
   await requireAuth();
-  // Soft delete to preserve sale history references
-  await db.product.update({ where: { id }, data: { active: false } });
+  // Soft delete to preserve sale history references. deletedAt drives the
+  // 30-day restore window on the Trash page.
+  await db.product.update({ where: { id }, data: { active: false, deletedAt: new Date() } });
   revalidatePath("/dashboard/inventory");
+  revalidatePath("/dashboard/trash");
   return { ok: true };
 }
 

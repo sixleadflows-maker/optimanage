@@ -17,6 +17,8 @@ model User {
   role           Role     @default(CASHIER)
   avatar         String   @default("")
   active         Boolean  @default(true)
+  // When this was moved to the trash. Restorable for 30 days; see /dashboard/trash.
+  deletedAt      DateTime?
   branchId       String?
   branch         Branch?  @relation(fields: [branchId], references: [id])
   createdAt      DateTime @default(now())
@@ -42,6 +44,7 @@ model Branch {
   address   String   @default("")
   phone     String   @default("")
   active    Boolean  @default(true)
+  deletedAt DateTime?
   createdAt DateTime @default(now())
 
   users     User[]
@@ -118,6 +121,7 @@ model Product {
   isDamaged         Boolean      @default(false)
   damageType        String       @default("")
   active            Boolean      @default(true)
+  deletedAt         DateTime?
   createdAt         DateTime     @default(now())
   updatedAt         DateTime     @updatedAt
 

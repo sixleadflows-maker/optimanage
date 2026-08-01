@@ -48,8 +48,22 @@ export async function createUser(input: CreateUserInput) {
 export async function setUserActive(id: string, active: boolean) {
   const session = await requireOwner();
   if (id === session.user.id) throw new Error("You cannot deactivate your own account");
-  await db.user.update({ where: { id }, data: { active } });
+
+  // Removing the last active owner would lock everyone out of the system.
+  if (!active) {
+    const target = await db.user.findUnique({ where: { id } });
+    if (target?.role === "OWNER") {
+      const otherOwners = await db.user.count({ where: { role: "OWNER", active: true, id: { not: id } } });
+      if (otherOwners === 0) throw new Error("This is the last owner account — removing it would lock you out");
+    }
+  }
+
+  await db.user.update({
+    where: { id },
+    data: { active, deletedAt: active ? null : new Date() },
+  });
   revalidatePath("/dashboard/settings");
+  revalidatePath("/dashboard/trash");
   return { ok: true };
 }
 

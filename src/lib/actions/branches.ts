@@ -38,8 +38,20 @@ export async function updateBranch(id: string, input: BranchInput) {
 
 export async function setBranchActive(id: string, active: boolean) {
   await requireManager();
-  await db.branch.update({ where: { id }, data: { active } });
+
+  // Don't let the last usable location disappear — the branch switcher and new
+  // sales both need one.
+  if (!active) {
+    const othersLeft = await db.branch.count({ where: { active: true, id: { not: id } } });
+    if (othersLeft === 0) throw new Error("This is the last active location — add another one first");
+  }
+
+  await db.branch.update({
+    where: { id },
+    data: { active, deletedAt: active ? null : new Date() },
+  });
   revalidatePath("/dashboard/settings");
+  revalidatePath("/dashboard/trash");
   revalidatePath("/dashboard");
   return { ok: true };
 }
