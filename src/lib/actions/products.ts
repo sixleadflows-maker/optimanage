@@ -43,12 +43,20 @@ async function nextBarcodeValue(): Promise<string> {
     where: { barcode: { startsWith: INTERNAL_BARCODE_PREFIX } },
     select: { barcode: true },
   });
+  const taken = new Set(existing.map((p) => p.barcode));
   let max = 0;
   for (const p of existing) {
     const n = parseInt(p.barcode.slice(INTERNAL_BARCODE_PREFIX.length), 10);
     if (!isNaN(n) && n > max) max = n;
   }
-  return INTERNAL_BARCODE_PREFIX + String(max + 1).padStart(6, "0");
+  // Step past anything already in use rather than trusting max+1 blindly.
+  let next = max + 1;
+  let candidate = INTERNAL_BARCODE_PREFIX + String(next).padStart(6, "0");
+  while (taken.has(candidate)) {
+    next++;
+    candidate = INTERNAL_BARCODE_PREFIX + String(next).padStart(6, "0");
+  }
+  return candidate;
 }
 
 const norm = (value: string) => value.trim().toLowerCase();
@@ -63,23 +71,24 @@ const softMatch = (a: string, b: string) => {
 };
 
 // Finds the existing catalogue row for the same article, so another box of
-// stock tops up that row instead of creating a duplicate. Identity is:
-//   1. the barcode, if one was scanned/entered -- the strongest signal, and it
-//      also stops two rows ever sharing a barcode (which would break POS scan);
-//   2. otherwise brand + model (the article number), with colour and size only
-//      separating variants when both sides actually state them.
+// stock tops up that row instead of creating a duplicate. An article is
+// identified by brand + model (the article number), with colour and size only
+// separating variants when both sides actually state them.
+//
+// A matching BARCODE deliberately does NOT count as a match any more. It used
+// to, and it caused real damage: the Add Product form generates a barcode when
+// it opens, so a form that had been sat open (or was restored from the router
+// cache when staff went back to add the next frame) still held a number that
+// had since been given to the product just saved. Saving then looked like "same
+// barcode = same article" and quietly added the new frame's stock onto the
+// previous one instead of creating it -- the disappearing products and stock
+// counts creeping up on their own. Barcodes now only ever identify a product
+// for scanning, never for merging.
+//
 // Damaged items are excluded on purpose: they're priced to their condition, so
 // they stay their own row and never absorb (or get absorbed by) good stock.
 async function findDuplicateProduct(input: ProductInput) {
   if (input.isDamaged) return null;
-
-  const barcode = input.barcode.trim();
-  if (barcode) {
-    const byBarcode = await db.product.findFirst({
-      where: { barcode, active: true, isDamaged: false },
-    });
-    if (byBarcode) return byBarcode;
-  }
 
   // Without both a brand and an article number there isn't enough to identify
   // the item confidently -- better a new row than silently merging the wrong one.
@@ -130,7 +139,17 @@ export async function createProduct(input: ProductInput) {
     return { ok: true, id: updated.id, merged: true, addedStock };
   }
 
-  const barcode = input.barcode.trim() || (await nextBarcodeValue());
+  // Assign the barcode at save time, not when the form opened. If the incoming
+  // one is blank or already belongs to another product (a stale form), issue a
+  // fresh number rather than creating a second product with the same barcode --
+  // scan-to-cart at the till can only match one product per barcode.
+  let barcode = input.barcode.trim();
+  if (barcode) {
+    const clash = await db.product.findFirst({ where: { barcode }, select: { id: true } });
+    if (clash) barcode = "";
+  }
+  if (!barcode) barcode = await nextBarcodeValue();
+
   const product = await db.product.create({
     data: {
       name: input.name,

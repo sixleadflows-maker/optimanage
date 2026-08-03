@@ -29,6 +29,12 @@ export function ProductForm({ product, isNew, isOwner = false, barcodeWidth = 2,
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [generatingBarcode, setGeneratingBarcode] = useState(false);
+  // The barcode shown on a new product is only a preview -- the real one is
+  // issued by the server when you save. Sending the previewed number back would
+  // reintroduce the stale-form bug, where a number already given to the
+  // previously saved product got reused. Only a barcode the user actually typed
+  // or scanned is sent.
+  const [barcodeTypedByUser, setBarcodeTypedByUser] = useState(false);
 
   const [form, setForm] = useState({
     name: product?.name || "",
@@ -123,7 +129,8 @@ export function ProductForm({ product, isNew, isOwner = false, barcodeWidth = 2,
     setSaving(true);
     try {
       if (isNew) {
-        const res = await createProduct(form);
+        // Blank barcode => the server issues a guaranteed-unique one at save time.
+        const res = await createProduct({ ...form, barcode: barcodeTypedByUser ? form.barcode : "" });
         if (res.merged) {
           showToast(`Already in stock — added ${res.addedStock} unit${res.addedStock === 1 ? "" : "s"} to the existing product`, "success");
         } else {
@@ -300,7 +307,9 @@ export function ProductForm({ product, isNew, isOwner = false, barcodeWidth = 2,
               <div>
                 <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Barcode</label>
                 <div className="flex gap-2">
-                  <input type="text" value={form.barcode} onChange={(e) => update("barcode", e.target.value)} placeholder="Scan, type, or auto-generate" className="flex-1 min-w-0 px-4 py-2.5 glass-input text-sm font-mono" />
+                  <input type="text" value={form.barcode}
+                    onChange={(e) => { setBarcodeTypedByUser(true); update("barcode", e.target.value); }}
+                    placeholder="Scan, type, or leave blank to auto-assign" className="flex-1 min-w-0 px-4 py-2.5 glass-input text-sm font-mono" />
                   <button type="button" onClick={handleGenerateBarcode} disabled={generatingBarcode} title="Generate an internal barcode"
                     className="flex items-center gap-1.5 px-3 py-2.5 glass-card text-xs font-medium cursor-pointer disabled:opacity-60 whitespace-nowrap">
                     {generatingBarcode ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Wand2 className="w-3.5 h-3.5" />}

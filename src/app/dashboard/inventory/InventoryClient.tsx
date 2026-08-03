@@ -3,7 +3,7 @@
 import { useState, useMemo } from "react";
 import type { Product } from "@/lib/mock/types";
 import { formatCurrency } from "@/lib/utils/format";
-import { PRODUCT_CATEGORIES } from "@/lib/constants";
+import { PRODUCT_CATEGORIES, BRAND_TAGS } from "@/lib/constants";
 import { Search, Grid3X3, List, Plus, AlertTriangle } from "lucide-react";
 import Link from "next/link";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -21,6 +21,7 @@ function categoryIcon(category: string) {
 export function InventoryClient({ products, isOwner }: { products: Product[]; isOwner: boolean }) {
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<string>("All");
+  const [tagFilter, setTagFilter] = useState<string>("All");
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
 
   const filtered = useMemo(() => {
@@ -31,9 +32,18 @@ export function InventoryClient({ products, isOwner }: { products: Product[]; is
         p.model.toLowerCase().includes(search.toLowerCase()) ||
         p.barcode.includes(search);
       const matchesCategory = categoryFilter === "All" || p.category === categoryFilter;
-      return matchesSearch && matchesCategory;
+      const matchesTag = tagFilter === "All" || p.brandTag === tagFilter;
+      return matchesSearch && matchesCategory && matchesTag;
     });
-  }, [products, search, categoryFilter]);
+  }, [products, search, categoryFilter, tagFilter]);
+
+  // Counts sit on the buttons so staff can see at a glance how many copies are
+  // in stock without switching filters.
+  const tagCounts = useMemo(() => {
+    const counts: Record<string, number> = { All: products.length };
+    for (const p of products) counts[p.brandTag] = (counts[p.brandTag] ?? 0) + 1;
+    return counts;
+  }, [products]);
 
   const totalStock = products.reduce((sum, p) => sum + p.stock, 0);
   const lowStockCount = products.filter((p) => p.stock <= p.lowStockThreshold).length;
@@ -64,6 +74,28 @@ export function InventoryClient({ products, isOwner }: { products: Product[]; is
       </div>
 
       <div className="glass-card p-4">
+        {/* Original vs Copy is the split staff need most when hunting for a
+            frame on the shelf, so it gets its own prominent row rather than
+            being buried as a per-product badge. */}
+        <div className="flex items-center gap-2 flex-wrap mb-4 pb-4 border-b border-border">
+          <span className="text-xs font-medium text-muted-foreground mr-1">Show:</span>
+          {["All", ...BRAND_TAGS].map((tag) => {
+            const active = tagFilter === tag;
+            const tone =
+              tag === "Original" ? "bg-success text-white"
+              : tag === "Copy" ? "bg-warning text-white"
+              : tag === "Branded" ? "bg-primary text-white"
+              : tag === "Unbranded" ? "bg-muted-foreground text-white"
+              : "bg-primary text-white";
+            return (
+              <button key={tag} onClick={() => setTagFilter(tag)}
+                className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition-all whitespace-nowrap ${active ? tone : "bg-surface hover:bg-surface-hover"}`}>
+                {tag === "All" ? "All items" : tag} ({tagCounts[tag] ?? 0})
+              </button>
+            );
+          })}
+        </div>
+
         <div className="flex flex-col sm:flex-row gap-3 mb-4">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
