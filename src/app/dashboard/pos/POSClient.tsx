@@ -129,6 +129,29 @@ export function POSClient({
     setDrafts(getDrafts());
   }, []);
 
+  // The product list (and the "N left" on each tile) is loaded once when this
+  // page opens. A till screen is typically left open all day, so a frame whose
+  // quantity was corrected in Inventory afterwards kept showing the old number
+  // here — which is how a frame with 1 in stock still read as 0 at the counter.
+  // Re-fetch whenever the till is brought back into focus, so picking the tab
+  // back up is enough to get current stock. Throttled so tabbing in and out
+  // repeatedly doesn't hammer the database.
+  useEffect(() => {
+    let lastRefresh = Date.now();
+    const refreshIfStale = () => {
+      if (document.visibilityState !== "visible") return;
+      if (Date.now() - lastRefresh < 30_000) return;
+      lastRefresh = Date.now();
+      router.refresh();
+    };
+    window.addEventListener("focus", refreshIfStale);
+    document.addEventListener("visibilitychange", refreshIfStale);
+    return () => {
+      window.removeEventListener("focus", refreshIfStale);
+      document.removeEventListener("visibilitychange", refreshIfStale);
+    };
+  }, [router]);
+
   const syncDrafts = async () => {
     if (drafts.length === 0 || syncing) return;
     setSyncing(true);
