@@ -46,7 +46,10 @@ export function ProductForm({ product, isNew, isOwner = false, barcodeWidth = 2,
     size: product?.size || "",
     costPrice: product?.costPrice || 0,
     salePrice: product?.salePrice || 0,
-    stock: product?.stock || 0,
+    // A new frame is almost always one unit. Starting at 0 meant tabbing past
+    // this box silently created a product that reads as out of stock on the
+    // shelf -- three frames were added that way before anyone noticed.
+    stock: product ? product.stock : 1,
     barcode: product?.barcode || "",
     lowStockThreshold: product?.lowStockThreshold || 5,
     brandTag: (product?.brandTag || "Unbranded") as "Original" | "Copy" | "Branded" | "Unbranded",

@@ -4,7 +4,7 @@ import { useState, useMemo } from "react";
 import type { Product } from "@/lib/mock/types";
 import { formatCurrency } from "@/lib/utils/format";
 import { PRODUCT_CATEGORIES, BRAND_TAGS } from "@/lib/constants";
-import { Search, Grid3X3, List, Plus, AlertTriangle } from "lucide-react";
+import { Search, Grid3X3, List, Plus, AlertTriangle, PackageX, X } from "lucide-react";
 import Link from "next/link";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { firstImage } from "@/lib/utils/images";
@@ -22,6 +22,7 @@ export function InventoryClient({ products, isOwner }: { products: Product[]; is
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<string>("All");
   const [tagFilter, setTagFilter] = useState<string>("All");
+  const [stockFilter, setStockFilter] = useState<"all" | "out">("all");
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
 
   const filtered = useMemo(() => {
@@ -33,9 +34,10 @@ export function InventoryClient({ products, isOwner }: { products: Product[]; is
         p.barcode.includes(search);
       const matchesCategory = categoryFilter === "All" || p.category === categoryFilter;
       const matchesTag = tagFilter === "All" || p.brandTag === tagFilter;
-      return matchesSearch && matchesCategory && matchesTag;
+      const matchesStock = stockFilter === "all" || p.stock <= 0;
+      return matchesSearch && matchesCategory && matchesTag && matchesStock;
     });
-  }, [products, search, categoryFilter, tagFilter]);
+  }, [products, search, categoryFilter, tagFilter, stockFilter]);
 
   // Counts sit on the buttons so staff can see at a glance how many copies are
   // in stock without switching filters.
@@ -47,6 +49,7 @@ export function InventoryClient({ products, isOwner }: { products: Product[]; is
 
   const totalStock = products.reduce((sum, p) => sum + p.stock, 0);
   const lowStockCount = products.filter((p) => p.stock <= p.lowStockThreshold).length;
+  const outOfStockCount = products.filter((p) => p.stock <= 0).length;
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -60,7 +63,7 @@ export function InventoryClient({ products, isOwner }: { products: Product[]; is
         </Link>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="glass-card p-4">
           <p className="text-xs text-muted-foreground">Total Products</p>
           <p className="text-xl font-bold mt-1">{products.length}</p>
@@ -71,7 +74,26 @@ export function InventoryClient({ products, isOwner }: { products: Product[]; is
           </p>
           <p className="text-xl font-bold mt-1 text-destructive">{lowStockCount} items</p>
         </div>
+        {/* Called out separately so a frame saved without a quantity, or one
+            that has sold out, is obvious rather than sitting unnoticed. */}
+        <button onClick={() => { setStockFilter(outOfStockCount > 0 ? "out" : "all"); }}
+          className="glass-card p-4 text-left cursor-pointer hover:border-primary/30 transition-all">
+          <p className="text-xs text-muted-foreground flex items-center gap-1">
+            <PackageX className="w-3 h-3" /> Out of Stock
+          </p>
+          <p className={`text-xl font-bold mt-1 ${outOfStockCount > 0 ? "text-warning" : ""}`}>{outOfStockCount} items</p>
+        </button>
       </div>
+
+      {stockFilter === "out" && (
+        <div className="glass-card p-3 flex items-center justify-between gap-3 border-l-4 border-warning">
+          <p className="text-sm">Showing only items with nothing left in stock.</p>
+          <button onClick={() => setStockFilter("all")}
+            className="flex items-center gap-1.5 px-3 py-1.5 glass-card text-xs font-medium cursor-pointer">
+            <X className="w-3 h-3" /> Show all
+          </button>
+        </div>
+      )}
 
       <div className="glass-card p-4">
         {/* Original vs Copy is the split staff need most when hunting for a
