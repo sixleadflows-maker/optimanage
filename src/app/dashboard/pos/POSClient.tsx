@@ -4,7 +4,7 @@ import { useState, useMemo, useRef, useEffect } from "react";
 import type { Product } from "@/lib/mock/types";
 import { formatCurrency } from "@/lib/utils/format";
 import { useApp } from "@/lib/context";
-import { SHOP_NAME } from "@/lib/constants";
+import { SHOP_NAME, DISCOUNT_PERCENTAGES } from "@/lib/constants";
 import { createSale, type CreateSaleInput } from "@/lib/actions/sales";
 import { getDrafts, addDraft, removeDraft, type OfflineDraft } from "@/lib/offlineDrafts";
 import { useRouter } from "next/navigation";
@@ -76,6 +76,9 @@ export function POSClient({
   const [paymentType, setPaymentType] = useState<"Full" | "Advance" | "Balance">("Full");
   const [advanceAmount, setAdvanceAmount] = useState(0);
   const [invoiceDiscount, setInvoiceDiscount] = useState(0);
+  // Which percentage is selected, if any. Kept alongside the rupee amount so
+  // the discount can follow the subtotal as items are added or removed.
+  const [discountPct, setDiscountPct] = useState<number | null>(null);
   const [showReceipt, setShowReceipt] = useState(false);
   const [customerSearch, setCustomerSearch] = useState("");
   const [saving, setSaving] = useState(false);
@@ -256,6 +259,19 @@ export function POSClient({
   // stay available in Analytics.
   const hasSaleableItems = cart.length > 0 || (useCustomLens && customLensPrice > 0);
 
+  // Picking a percentage works out the rupee amount off the current subtotal.
+  const applyDiscountPct = (pct: number | null) => {
+    setDiscountPct(pct);
+    setInvoiceDiscount(pct === null ? 0 : Math.round((subtotal * pct) / 100));
+  };
+
+  // Keep a percentage discount honest as the cart changes: adding another frame
+  // to a "10% off" sale should give 10% of the new subtotal, not the old amount.
+  useEffect(() => {
+    if (discountPct === null) return;
+    setInvoiceDiscount(Math.round((subtotal * discountPct) / 100));
+  }, [subtotal, discountPct]);
+
   const selectLens = (id: string) => {
     if (lensProductId && lensProductId !== id) {
       setCart((prev) => prev.filter((i) => i.productId !== lensProductId));
@@ -295,6 +311,7 @@ export function POSClient({
     setShowSuccess(false);
     setCart([]);
     setInvoiceDiscount(0);
+    setDiscountPct(null);
     setSelectedCustomer("");
     setAdvanceAmount(0);
     setPaymentType("Full");
@@ -969,16 +986,38 @@ export function POSClient({
                   <span className="text-muted-foreground">Subtotal</span>
                   <span>{formatCurrency(subtotal)}</span>
                 </div>
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-muted-foreground">Invoice Discount</span>
-                  <input
-                    type="number"
-                    value={invoiceDiscount || ""}
-                    onChange={(e) => setInvoiceDiscount(Number(e.target.value))}
-                    className="w-20 text-right px-2 py-1 glass-input text-xs"
-                    placeholder="0"
-                  />
+                <div className="flex items-center justify-between text-xs gap-2">
+                  <span className="text-muted-foreground whitespace-nowrap">Invoice Discount</span>
+                  <div className="flex items-center gap-1.5">
+                    <select
+                      value={discountPct ?? ""}
+                      onChange={(e) => applyDiscountPct(e.target.value === "" ? null : Number(e.target.value))}
+                      className="px-2 py-1 glass-input text-xs cursor-pointer"
+                      title="Pick a percentage and the amount is worked out for you"
+                    >
+                      <option value="">%</option>
+                      {DISCOUNT_PERCENTAGES.map((p) => (
+                        <option key={p} value={p}>{p}%</option>
+                      ))}
+                    </select>
+                    <input
+                      type="number"
+                      value={invoiceDiscount || ""}
+                      onChange={(e) => {
+                        // Typing an amount by hand overrides the percentage.
+                        setDiscountPct(null);
+                        setInvoiceDiscount(Number(e.target.value));
+                      }}
+                      className="w-20 text-right px-2 py-1 glass-input text-xs"
+                      placeholder="0"
+                    />
+                  </div>
                 </div>
+                {discountPct !== null && invoiceDiscount > 0 && (
+                  <p className="text-[10px] text-muted-foreground text-right -mt-1">
+                    {discountPct}% off {formatCurrency(subtotal)} = −{formatCurrency(invoiceDiscount)}
+                  </p>
+                )}
                 <div className="flex justify-between text-sm font-bold pt-2 border-t border-border">
                   <span>Total</span>
                   <span className="text-primary">{formatCurrency(total)}</span>
