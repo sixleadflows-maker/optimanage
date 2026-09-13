@@ -49,7 +49,7 @@ export const LAB_ORDER_STATUSES = ["Ordered", "In Progress", "Received", "Fitted
 
 // Offered in the till's discount dropdown. Picking one works out the rupee
 // amount off the bill so staff don't have to calculate it.
-export const DISCOUNT_PERCENTAGES = [5, 10, 15, 20, 25, 30, 40, 50] as const;
+export const DISCOUNT_PERCENTAGES = [5, 10, 15, 20, 25, 30, 40, 50, 60, 70, 80, 90] as const;
 
 // Deleted items stay recoverable in the Trash for this long.
 // Lives here rather than in actions/trash.ts because a "use server" module may
