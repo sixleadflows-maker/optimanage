@@ -1,8 +1,15 @@
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
+import type { Prisma } from "@/generated/prisma/client";
 
 export interface SaleCoreItem {
-  productId: string;
+  // Left out for an item typed in at the till that isn't in the inventory --
+  // it's sold by name and price only and has no stock to deduct.
+  productId?: string | null;
+  name?: string;
+  // Printed under the item on the bill (e.g. lens colour). Falls back to the
+  // product's own description when not given.
+  description?: string;
   quantity: number;
   unitPrice: number;
   discount: number;
@@ -46,33 +53,101 @@ export interface PersistSaleMeta {
   skipRevalidate?: boolean;
 }
 
+/**
+ * A problem with the sale itself (out of stock, empty cart, missing name...)
+ * as opposed to a crash or lost connection. The till shows these to staff
+ * as-is; anything else is treated as "couldn't reach the server".
+ */
+export class SaleError extends Error {}
+
 function paymentStatusFor(type: "Full" | "Advance" | "Balance") {
   if (type === "Full") return "PAID" as const;
   if (type === "Advance") return "ADVANCE" as const;
   return "BALANCE" as const;
 }
 
+/**
+ * Next number in a yearly series such as INV-2026-005.
+ *
+ * It used to be "how many invoices exist this year, plus one". Once invoices
+ * can be deleted that breaks two ways: the next number can collide with one
+ * that still exists (so the sale fails), or it quietly reuses the number of a
+ * deleted invoice a customer may still be holding. A stored counter only ever
+ * moves forward; the highest existing number is just a floor for the first use
+ * of a series (and a safety net if the counter were ever behind).
+ */
+export async function nextDocumentNumber(
+  client: Pick<Prisma.TransactionClient, "documentCounter">,
+  prefix: string,
+  existing: (startsWith: string) => Promise<string[]>,
+) {
+  const series = `${prefix}-${new Date().getFullYear()}`;
+  const start = `${series}-`;
+  const numbers = await existing(start);
+  const highestExisting = numbers.reduce((m, no) => {
+    const n = parseInt(no.slice(start.length), 10);
+    return Number.isNaN(n) ? m : Math.max(m, n);
+  }, 0);
+
+  const counter = await client.documentCounter.upsert({
+    where: { key: series },
+    create: { key: series, value: highestExisting + 1 },
+    update: { value: { increment: 1 } },
+  });
+  let next = counter.value;
+  if (next <= highestExisting) {
+    next = highestExisting + 1;
+    await client.documentCounter.update({ where: { key: series }, data: { value: next } });
+  }
+  return `${start}${String(next).padStart(3, "0")}`;
+}
+
+function isUniqueViolation(e: unknown) {
+  return typeof e === "object" && e !== null && (e as { code?: string }).code === "P2002";
+}
+
 export async function persistSale(input: PersistSaleInput, meta: PersistSaleMeta) {
   const customLensPrice = Math.max(0, input.customLensPrice ?? 0);
   const customLensName = customLensPrice > 0 ? (input.customLensName ?? "").trim() : "";
-  if (!input.items.length && customLensPrice <= 0) throw new Error("Cart is empty");
-  if (customLensPrice > 0 && !customLensName) throw new Error("Custom lens name is required");
+  if (!input.items.length && customLensPrice <= 0) throw new SaleError("Cart is empty");
+  if (customLensPrice > 0 && !customLensName) throw new SaleError("Custom lens name is required");
 
-  const productIds = input.items.map((i) => i.productId);
+  const productIds = input.items.flatMap((i) => (i.productId ? [i.productId] : []));
   const products = await db.product.findMany({ where: { id: { in: productIds } } });
   const productMap = new Map(products.map((p) => [p.id, p]));
 
   let subtotal = 0;
   let itemCost = 0;
   const saleItems = input.items.map((i) => {
-    const product = productMap.get(i.productId);
-    if (!product) throw new Error(`Product not found: ${i.productId}`);
     const lineTotal = i.unitPrice * i.quantity - i.discount;
+
+    if (!i.productId) {
+      const name = (i.name ?? "").trim();
+      if (!name) throw new SaleError("Enter a name for the item that isn't in the inventory");
+      if (i.quantity <= 0 || i.unitPrice < 0) throw new SaleError(`Check the price and quantity for "${name}"`);
+      subtotal += lineTotal;
+      // No cost is known for a typed-in item, so it adds nothing to the cost side.
+      return {
+        productId: null,
+        productName: name,
+        description: (i.description ?? "").trim(),
+        quantity: i.quantity,
+        unitPrice: i.unitPrice,
+        discount: i.discount,
+        total: lineTotal,
+      };
+    }
+
+    const product = productMap.get(i.productId);
+    if (!product) throw new SaleError(`Product not found: ${i.productId}`);
     subtotal += lineTotal;
     itemCost += product.costPrice * i.quantity;
     return {
       productId: i.productId,
-      productName: product.name,
+      // Brand and name together, so the bill (and any reprint of it) reads
+      // "Tom Ford Frame" rather than just "Frame".
+      productName: [product.brand, product.name].map((s) => s.trim()).filter(Boolean).join(" "),
+      description: (i.description ?? product.description).trim(),
       quantity: i.quantity,
       unitPrice: i.unitPrice,
       discount: i.discount,
@@ -100,26 +175,25 @@ export async function persistSale(input: PersistSaleInput, meta: PersistSaleMeta
   const paid = input.paymentType === "Full" ? total : input.paymentType === "Advance" ? input.advanceAmount : 0;
   const balance = Math.max(0, total - paid);
 
-  const year = new Date().getFullYear();
-
-  const sale = await db.$transaction(async (tx) => {
+  const createSale = () => db.$transaction(async (tx) => {
     // Atomic conditional decrement per item — a single UPDATE ... WHERE stock >= qty
     // statement, so two concurrent sales on the same low-stock item can't both pass.
     for (const i of input.items) {
+      if (!i.productId) continue;
       const result = await tx.product.updateMany({
         where: { id: i.productId, stock: { gte: i.quantity } },
         data: { stock: { decrement: i.quantity } },
       });
       if (result.count === 0) {
-        const name = productMap.get(i.productId)?.name ?? i.productId;
-        throw new Error(`Insufficient stock for ${name}`);
+        const p = productMap.get(i.productId);
+        const name = p ? [p.brand, p.name].map((s) => s.trim()).filter(Boolean).join(" ") : i.productId;
+        throw new SaleError(`Not enough stock for ${name} — refresh the page to see the current count`);
       }
     }
 
-    const countThisYear = await tx.sale.count({
-      where: { invoiceNo: { startsWith: `INV-${year}-` } },
-    });
-    const invoiceNo = `INV-${year}-${String(countThisYear + 1).padStart(3, "0")}`;
+    const invoiceNo = await nextDocumentNumber(tx, "INV", async (startsWith) =>
+      (await tx.sale.findMany({ where: { invoiceNo: { startsWith } }, select: { invoiceNo: true } })).map((s) => s.invoiceNo)
+    );
 
     const created = await tx.sale.create({
       data: {
@@ -180,6 +254,18 @@ export async function persistSale(input: PersistSaleInput, meta: PersistSaleMeta
 
     return created;
   });
+
+  // Two tills finishing a sale at the same moment can both pick the same next
+  // invoice number; the database rejects the second, so just try again. The
+  // whole transaction rolled back, so no stock was taken the first time.
+  let sale: Awaited<ReturnType<typeof createSale>> | undefined;
+  for (let attempt = 1; !sale; attempt++) {
+    try {
+      sale = await createSale();
+    } catch (e) {
+      if (!isUniqueViolation(e) || attempt >= 3) throw e;
+    }
+  }
 
   if (!meta.skipRevalidate) {
     revalidatePath("/dashboard");

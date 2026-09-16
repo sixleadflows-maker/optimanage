@@ -64,6 +64,10 @@ model Customer {
   totalSpend    Float          @default(0)
   visitCount    Int            @default(0)
   lastVisit     DateTime?
+  // Deleting a customer moves them to the Trash (restorable for 30 days) rather
+  // than erasing them, so their past invoices keep the customer's name.
+  active        Boolean        @default(true)
+  deletedAt     DateTime?
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
 
@@ -110,6 +114,8 @@ model Product {
   type              String       @default("")
   colour            String       @default("")
   size              String       @default("")
+  // Free text such as lens colour or other specifications; printed on the bill.
+  description       String       @default("")
   costPrice         Float        @default(0)
   salePrice         Float        @default(0)
   stock             Int          @default(0)
@@ -235,9 +241,12 @@ model SaleItem {
   id               String       @id @default(cuid())
   saleId           String
   sale             Sale         @relation(fields: [saleId], references: [id], onDelete: Cascade)
-  productId        String
-  product          Product      @relation(fields: [productId], references: [id])
+  // Null for an item typed in at the till that isn't in the inventory -- it's
+  // sold by name and price only, with no stock to deduct.
+  productId        String?
+  product          Product?     @relation(fields: [productId], references: [id])
   productName      String
+  description      String       @default("")
   quantity         Int          @default(1)
   unitPrice        Float        @default(0)
   discount         Float        @default(0)
@@ -307,6 +316,21 @@ model PurchaseOrder {
   date         DateTime            @default(now())
   total        Float               @default(0)
   status       POStatus            @default(DRAFT)
+
+  // Order details
+  supplierInvoiceNo String         @default("")
+  expectedDate      DateTime?
+  notes             String         @default("")
+
+  // How the purchase is paid for
+  purchaseType      String         @default("Cash") // Cash / Cheque / Other
+  purchaseTypeNote  String         @default("")     // what "Other" means
+  paymentMethod     String         @default("")
+  paymentReference  String         @default("")     // cheque no. / transaction ID
+  bankName          String         @default("")
+  paymentDate       DateTime?
+  amountPaid        Float          @default(0)
+
   createdAt    DateTime            @default(now())
 
   items        PurchaseOrderItem[]
@@ -316,9 +340,11 @@ model PurchaseOrderItem {
   id          String        @id @default(cuid())
   orderId     String
   order       PurchaseOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  productId   String
-  product     Product       @relation(fields: [productId], references: [id])
+  // Null for an item ordered that isn't in the inventory yet.
+  productId   String?
+  product     Product?      @relation(fields: [productId], references: [id])
   productName String
+  description String        @default("")
   quantity    Int           @default(0)
   unitCost    Float         @default(0)
   total       Float         @default(0)
@@ -440,6 +466,14 @@ model ShopSettings {
   barcodeWidth  Int     @default(2)
   barcodeHeight Int     @default(40)
   deliveryFee   Float   @default(0)
+}
+
+// Last number issued in each document series (e.g. "INV-2026"). Numbers come
+// from here rather than from the invoices that still exist, so once an invoice
+// is deleted its number is never handed out to a different sale.
+model DocumentCounter {
+  key   String @id
+  value Int    @default(0)
 }
 
 // ─── Storefront Checkout ────────────────────────────────────

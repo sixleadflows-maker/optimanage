@@ -1,11 +1,12 @@
 import { db } from "@/lib/db";
+import type { Prisma } from "@/generated/prisma/client";
 import type {
   Product, Customer, Sale, Supplier, Expense, LabOrder, Prescription,
 } from "@/lib/mock/types";
 
 // ─── Enum mappers (DB enum → UI title-case) ─────────────────
 const brandTagLabel = { ORIGINAL: "Original", COPY: "Copy", BRANDED: "Branded", UNBRANDED: "Unbranded" } as const;
-const paymentStatusLabel = { PAID: "Paid", ADVANCE: "Advance", BALANCE: "Balance" } as const;
+const paymentStatusLabel = { PAID: "Full Payment", ADVANCE: "Advance", BALANCE: "Balance" } as const;
 const labStatusLabel = { ORDERED: "Ordered", IN_PROGRESS: "In Progress", RECEIVED: "Received", FITTED: "Fitted" } as const;
 const saleSourceLabel = { POS: "POS", ONLINE: "Online" } as const;
 const fulfillmentTypeLabel = { PICKUP: "Pickup", DELIVERY: "Delivery" } as const;
@@ -17,41 +18,9 @@ const onlineOrderStatusLabel = {
 const iso = (d: Date | null | undefined) => (d ? d.toISOString().slice(0, 10) : "");
 
 // ─── Products ───────────────────────────────────────────────
-export async function getProducts(): Promise<Product[]> {
-  const rows = await db.product.findMany({
-    where: { active: true },
-    orderBy: { name: "asc" },
-  });
-  return rows.map((p) => ({
-    id: p.id,
-    name: p.name,
-    brand: p.brand,
-    model: p.model,
-    category: p.category as Product["category"],
-    type: p.type,
-    colour: p.colour,
-    size: p.size,
-    costPrice: p.costPrice,
-    salePrice: p.salePrice,
-    stock: p.stock,
-    barcode: p.barcode,
-    lowStockThreshold: p.lowStockThreshold,
-    image: p.image || undefined,
-    brandTag: brandTagLabel[p.brandTag],
-    priceThreshold: p.priceThreshold || undefined,
-    isDamaged: p.isDamaged,
-    damageType: p.damageType,
-  }));
-}
+type ProductRow = Awaited<ReturnType<typeof db.product.findMany>>[number];
 
-export async function getStorefrontProducts(): Promise<Product[]> {
-  const products = await getProducts();
-  return products.filter((p) => p.stock > 0);
-}
-
-export async function getProduct(id: string): Promise<Product | null> {
-  const p = await db.product.findUnique({ where: { id } });
-  if (!p) return null;
+function mapProduct(p: ProductRow): Product {
   return {
     id: p.id,
     name: p.name,
@@ -61,6 +30,7 @@ export async function getProduct(id: string): Promise<Product | null> {
     type: p.type,
     colour: p.colour,
     size: p.size,
+    description: p.description,
     costPrice: p.costPrice,
     salePrice: p.salePrice,
     stock: p.stock,
@@ -72,6 +42,24 @@ export async function getProduct(id: string): Promise<Product | null> {
     isDamaged: p.isDamaged,
     damageType: p.damageType,
   };
+}
+
+export async function getProducts(): Promise<Product[]> {
+  const rows = await db.product.findMany({
+    where: { active: true },
+    orderBy: { name: "asc" },
+  });
+  return rows.map(mapProduct);
+}
+
+export async function getStorefrontProducts(): Promise<Product[]> {
+  const products = await getProducts();
+  return products.filter((p) => p.stock > 0);
+}
+
+export async function getProduct(id: string): Promise<Product | null> {
+  const p = await db.product.findUnique({ where: { id } });
+  return p ? mapProduct(p) : null;
 }
 
 // ─── Customers ──────────────────────────────────────────────
@@ -93,6 +81,7 @@ function mapPrescription(p: {
 
 export async function getCustomers(): Promise<CustomerView[]> {
   const rows = await db.customer.findMany({
+    where: { active: true },
     orderBy: { name: "asc" },
     include: { prescriptions: { orderBy: { date: "desc" } } },
   });
@@ -115,7 +104,7 @@ export async function getCustomer(id: string): Promise<CustomerView | null> {
     where: { id },
     include: { prescriptions: { orderBy: { date: "desc" } } },
   });
-  if (!c) return null;
+  if (!c || !c.active) return null;
   return {
     id: c.id,
     name: c.name,
@@ -131,33 +120,56 @@ export async function getCustomer(id: string): Promise<CustomerView | null> {
 }
 
 // ─── Sales ──────────────────────────────────────────────────
-export type SaleView = Sale & { profit: number; totalCost: number; createdByName: string; receivedByName: string };
+export type SaleView = Sale & {
+  profit: number; totalCost: number; createdByName: string; receivedByName: string;
+  // Everything needed to reopen and reprint a past invoice exactly as it was billed.
+  dateTime: string;
+  customerPhone: string;
+  customLensName: string;
+  customLensPrice: number;
+  prescription: Prescription | null;
+};
 
-function mapSale(s: {
-  id: string; invoiceNo: string; date: Date; customerId: string | null; customer: { name: string } | null;
-  items: { id: string; productId: string; productName: string; quantity: number; unitPrice: number; discount: number; total: number; returnedQuantity: number }[];
-  subtotal: number; discount: number; tax: number; total: number; paid: number; balance: number;
-  paymentMethod: string; paymentStatus: "PAID" | "ADVANCE" | "BALANCE"; branchId: string | null;
-  profit: number; totalCost: number; createdBy?: { name: string } | null; receivedBy?: { name: string } | null;
-  source: "POS" | "ONLINE"; fulfillmentType: "PICKUP" | "DELIVERY" | null; deliveryAddress: string; deliveryFee: number;
-  onlineOrderStatus: "PROCESSING" | "READY_FOR_PICKUP" | "OUT_FOR_DELIVERY" | "COMPLETED" | "CANCELLED" | null;
-}): SaleView {
+const saleInclude = {
+  items: { include: { product: { select: { brand: true } } } },
+  customer: true,
+  createdBy: true,
+  receivedBy: true,
+  prescriptions: { orderBy: { date: "desc" }, take: 1 },
+} satisfies Prisma.SaleInclude;
+
+type SaleRow = Prisma.SaleGetPayload<{ include: typeof saleInclude }>;
+
+// Sales made before the brand was saved into the line name only stored the
+// product's own name (often just "Frame"), so put the brand back in front.
+function saleItemName(productName: string, brand: string | undefined) {
+  if (!brand) return productName;
+  return productName.toLowerCase().startsWith(brand.toLowerCase()) ? productName : `${brand} ${productName}`;
+}
+
+function mapSale(s: SaleRow): SaleView {
   return {
     id: s.id,
     invoiceNo: s.invoiceNo,
     date: iso(s.date),
+    dateTime: s.date.toISOString(),
     customerId: s.customerId ?? "",
     customerName: s.customer?.name ?? "Walk-in",
+    customerPhone: s.customer?.phone ?? "",
     items: s.items.map((it) => ({
       id: it.id,
-      productId: it.productId,
-      productName: it.productName,
+      productId: it.productId ?? "",
+      productName: saleItemName(it.productName, it.product?.brand),
+      description: it.description,
       quantity: it.quantity,
       unitPrice: it.unitPrice,
       discount: it.discount,
       total: it.total,
       returnedQuantity: it.returnedQuantity,
     })),
+    customLensName: s.customLensName,
+    customLensPrice: s.customLensPrice,
+    prescription: s.prescriptions[0] ? mapPrescription(s.prescriptions[0]) : null,
     subtotal: s.subtotal,
     discount: s.discount,
     tax: s.tax,
@@ -183,15 +195,17 @@ export async function getCustomerSales(customerId: string): Promise<SaleView[]> 
   const rows = await db.sale.findMany({
     where: { customerId },
     orderBy: { date: "desc" },
-    include: { items: true, customer: true, createdBy: true, receivedBy: true },
+    include: saleInclude,
   });
   return rows.map(mapSale);
 }
 
+// Every invoice ever made, newest first -- there is deliberately no date
+// cut-off, so an old bill can always be found, reopened and reprinted.
 export async function getSales(): Promise<SaleView[]> {
   const rows = await db.sale.findMany({
     orderBy: { date: "desc" },
-    include: { items: true, customer: true, createdBy: true, receivedBy: true },
+    include: saleInclude,
   });
   return rows.map(mapSale);
 }
@@ -228,8 +242,9 @@ export async function getPurchaseOrders(): Promise<PurchaseOrder[]> {
     date: iso(po.date),
     items: po.items.map((it) => ({
       id: it.id,
-      productId: it.productId,
+      productId: it.productId ?? "",
       productName: it.productName,
+      description: it.description,
       quantity: it.quantity,
       unitCost: it.unitCost,
       total: it.total,
@@ -237,6 +252,16 @@ export async function getPurchaseOrders(): Promise<PurchaseOrder[]> {
     })),
     total: po.total,
     status: poStatusLabel[po.status],
+    supplierInvoiceNo: po.supplierInvoiceNo,
+    expectedDate: iso(po.expectedDate),
+    notes: po.notes,
+    purchaseType: po.purchaseType,
+    purchaseTypeNote: po.purchaseTypeNote,
+    paymentMethod: po.paymentMethod,
+    paymentReference: po.paymentReference,
+    bankName: po.bankName,
+    paymentDate: iso(po.paymentDate),
+    amountPaid: po.amountPaid,
   }));
 }
 
@@ -351,6 +376,7 @@ export interface ReminderItem {
 
 export async function getReminders(): Promise<ReminderItem[]> {
   const customers = await db.customer.findMany({
+    where: { active: true },
     select: {
       id: true,
       name: true,
@@ -494,7 +520,7 @@ export async function getBranches(): Promise<BranchView[]> {
 // ─── Trash ──────────────────────────────────────────────────
 export interface TrashItemView {
   id: string;
-  kind: "product" | "location" | "staff";
+  kind: TrashKind;
   title: string;
   detail: string;
   deletedAt: string;
@@ -502,7 +528,7 @@ export interface TrashItemView {
   expired: boolean;
 }
 
-import { TRASH_RETENTION_DAYS } from "@/lib/constants";
+import { TRASH_RETENTION_DAYS, type TrashKind } from "@/lib/constants";
 
 function trashTiming(deletedAt: Date | null) {
   // Rows deleted before the trash existed have no timestamp; treat them as
@@ -514,8 +540,9 @@ function trashTiming(deletedAt: Date | null) {
 }
 
 export async function getTrashItems(): Promise<TrashItemView[]> {
-  const [products, branches, users] = await Promise.all([
+  const [products, customers, branches, users] = await Promise.all([
     db.product.findMany({ where: { active: false }, orderBy: { deletedAt: "desc" } }),
+    db.customer.findMany({ where: { active: false }, orderBy: { deletedAt: "desc" } }),
     db.branch.findMany({ where: { active: false }, orderBy: { deletedAt: "desc" } }),
     db.user.findMany({ where: { active: false }, orderBy: { deletedAt: "desc" } }),
   ]);
@@ -527,6 +554,13 @@ export async function getTrashItems(): Promise<TrashItemView[]> {
       title: `${p.brand} ${p.name}`.trim(),
       detail: [p.model, p.colour, p.barcode].filter(Boolean).join(" · "),
       ...trashTiming(p.deletedAt),
+    })),
+    ...customers.map((c) => ({
+      id: c.id,
+      kind: "customer" as const,
+      title: c.name,
+      detail: [c.phone, c.serialNumber && `Serial ${c.serialNumber}`].filter(Boolean).join(" · "),
+      ...trashTiming(c.deletedAt),
     })),
     ...branches.map((b) => ({
       id: b.id,
@@ -614,6 +648,8 @@ export async function getAnalyticsData(): Promise<AnalyticsData> {
     const day = iso(s.date);
     days[day] = (days[day] || 0) + s.total;
     s.items.forEach((it) => {
+      // Typed-in items (no productId) have no brand, category or cost to attribute.
+      if (!it.productId) return;
       const p = productById.get(it.productId);
       if (p) {
         brands[p.brand] = (brands[p.brand] || 0) + it.total;
@@ -748,7 +784,7 @@ export async function getDashboardData(branchId?: string): Promise<DashboardData
   // Top brands by revenue
   const brands: Record<string, number> = {};
   sales.forEach((s) => s.items.forEach((it) => {
-    const brand = productBrand.get(it.productId);
+    const brand = it.productId ? productBrand.get(it.productId) : undefined;
     if (brand) brands[brand] = (brands[brand] || 0) + it.total;
   }));
   const topBrands = Object.entries(brands)

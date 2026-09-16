@@ -1,14 +1,39 @@
 "use client";
 
+import { useState } from "react";
+import { useRouter } from "next/navigation";
 import type { CustomerView, SaleView } from "@/lib/data";
 import { formatCurrency, formatDate } from "@/lib/utils/format";
 import { useApp } from "@/lib/context";
-import { ArrowLeft, MessageCircle, Bell, Eye, RefreshCw, Phone, Mail, MapPin } from "lucide-react";
+import { deleteCustomer } from "@/lib/actions/customers";
+import { paymentStatusChipClass } from "@/lib/constants";
+import { ArrowLeft, MessageCircle, Bell, Eye, RefreshCw, Phone, Mail, MapPin, Trash2, Loader2 } from "lucide-react";
 import Link from "next/link";
 
-export function CustomerProfileClient({ customer, sales }: { customer: CustomerView; sales: SaleView[] }) {
+export function CustomerProfileClient({ customer, sales, canDelete }: { customer: CustomerView; sales: SaleView[]; canDelete: boolean }) {
   const { showToast } = useApp();
+  const router = useRouter();
   const initials = customer.name.split(" ").map((n) => n[0]).join("").slice(0, 2);
+  const [deleting, setDeleting] = useState(false);
+
+  const handleDelete = async () => {
+    if (!confirm(`Delete ${customer.name}? They move to the Trash and can be restored for 30 days. Their invoices and prescriptions are kept.`)) return;
+    setDeleting(true);
+    try {
+      const res = await deleteCustomer(customer.id);
+      if (!res.ok) {
+        showToast(res.error, "error");
+        setDeleting(false);
+        return;
+      }
+      showToast(`${customer.name} moved to Trash`, "success");
+      router.push("/dashboard/customers");
+      router.refresh();
+    } catch {
+      showToast("Could not delete the customer — check the connection and try again", "error");
+      setDeleting(false);
+    }
+  };
 
   const openWhatsApp = (text: string) => {
     const phone = customer.phone.replace(/[^0-9]/g, "");
@@ -28,7 +53,13 @@ export function CustomerProfileClient({ customer, sales }: { customer: CustomerV
         <Link href="/dashboard/customers" className="p-2 rounded-xl hover:bg-surface-hover transition-colors">
           <ArrowLeft className="w-5 h-5" />
         </Link>
-        <h1 className="text-2xl font-bold">Customer Profile</h1>
+        <h1 className="text-2xl font-bold flex-1">Customer Profile</h1>
+        {canDelete && (
+          <button onClick={handleDelete} disabled={deleting}
+            className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-60 cursor-pointer">
+            {deleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />} Delete
+          </button>
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -39,7 +70,7 @@ export function CustomerProfileClient({ customer, sales }: { customer: CustomerV
             </div>
             <h2 className="font-bold text-lg">{customer.name}</h2>
             <div className="space-y-2 mt-4 text-sm text-muted-foreground">
-              <p className="flex items-center gap-2 justify-center"><Phone className="w-3.5 h-3.5" /> {customer.phone}</p>
+              <p className="flex items-center gap-2 justify-center"><Phone className="w-3.5 h-3.5" /> {customer.phone || "No phone on file"}</p>
               {customer.email && <p className="flex items-center gap-2 justify-center"><Mail className="w-3.5 h-3.5" /> {customer.email}</p>}
               {customer.address && <p className="flex items-center gap-2 justify-center"><MapPin className="w-3.5 h-3.5" /> {customer.address}</p>}
             </div>
@@ -140,7 +171,7 @@ export function CustomerProfileClient({ customer, sales }: { customer: CustomerV
                     </div>
                     <div className="text-right">
                       <p className="text-sm font-semibold">{formatCurrency(sale.total)}</p>
-                      <span className={`chip chip-${sale.paymentStatus.toLowerCase()}`}>{sale.paymentStatus}</span>
+                      <span className={`chip ${paymentStatusChipClass(sale.paymentStatus)}`}>{sale.paymentStatus}</span>
                     </div>
                   </div>
                 ))}

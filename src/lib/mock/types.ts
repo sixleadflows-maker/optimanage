@@ -1,4 +1,4 @@
-import type { ProductCategory } from "@/lib/constants";
+import type { ProductCategory, PaymentStatusLabel } from "@/lib/constants";
 
 export interface Product {
   id: string;
@@ -10,6 +10,7 @@ export interface Product {
   type: string;
   colour: string;
   size: string;
+  description: string;
   costPrice: number;
   salePrice: number;
   stock: number;
@@ -53,8 +54,10 @@ export interface EyeRx {
 
 export interface SaleItem {
   id: string;
+  // "" for an item typed in at the till that isn't in the inventory.
   productId: string;
   productName: string;
+  description: string;
   quantity: number;
   unitPrice: number;
   discount: number;
@@ -76,7 +79,7 @@ export interface Sale {
   paid: number;
   balance: number;
   paymentMethod: string;
-  paymentStatus: "Paid" | "Advance" | "Balance";
+  paymentStatus: PaymentStatusLabel;
   branchId: string;
   source: "POS" | "Online";
   fulfillmentType?: "Pickup" | "Delivery";
@@ -97,8 +100,10 @@ export interface Supplier {
 
 export interface PurchaseOrderItem {
   id: string;
+  // "" for an item ordered that isn't in the inventory yet.
   productId: string;
   productName: string;
+  description: string;
   quantity: number;
   unitCost: number;
   total: number;
@@ -114,6 +119,16 @@ export interface PurchaseOrder {
   items: PurchaseOrderItem[];
   total: number;
   status: "Draft" | "Ordered" | "Partial" | "Received";
+  supplierInvoiceNo: string;
+  expectedDate: string;
+  notes: string;
+  purchaseType: string;
+  purchaseTypeNote: string;
+  paymentMethod: string;
+  paymentReference: string;
+  bankName: string;
+  paymentDate: string;
+  amountPaid: number;
 }
 
 export interface LabOrder {

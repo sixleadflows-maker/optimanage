@@ -43,40 +43,94 @@ export async function deleteSupplier(id: string) {
 }
 
 export interface POItemInput {
-  productId: string;
+  // Left out for an item that isn't in the inventory yet.
+  productId?: string;
+  name?: string;
+  description?: string;
   quantity: number;
   unitCost: number;
 }
 
-export interface CreatePOInput {
+// Everything about an order other than its items -- editable after the order
+// is placed too, since payment often happens on or after delivery.
+export interface PODetailsInput {
+  supplierInvoiceNo: string;
+  date: string;
+  expectedDate: string;
+  notes: string;
+  purchaseType: string;
+  purchaseTypeNote: string;
+  paymentMethod: string;
+  paymentReference: string;
+  bankName: string;
+  paymentDate: string;
+  amountPaid: number;
+}
+
+export interface CreatePOInput extends PODetailsInput {
   supplierId: string;
   items: POItemInput[];
 }
 
+// A date input gives "YYYY-MM-DD"; blank means "not set".
+const toDate = (value: string) => (value ? new Date(value) : null);
+
+function detailsData(input: PODetailsInput) {
+  return {
+    supplierInvoiceNo: input.supplierInvoiceNo.trim(),
+    expectedDate: toDate(input.expectedDate),
+    notes: input.notes.trim(),
+    purchaseType: input.purchaseType || "Cash",
+    purchaseTypeNote: input.purchaseType === "Other" ? input.purchaseTypeNote.trim() : "",
+    paymentMethod: input.paymentMethod,
+    paymentReference: input.paymentReference.trim(),
+    bankName: input.bankName.trim(),
+    paymentDate: toDate(input.paymentDate),
+    amountPaid: Math.max(0, Number(input.amountPaid) || 0),
+  };
+}
+
 export async function createPurchaseOrder(input: CreatePOInput) {
   await requireAuth();
-  if (!input.supplierId) throw new Error("Select a supplier");
-  if (input.items.length === 0) throw new Error("Add at least one item");
+  if (!input.supplierId) return { ok: false as const, error: "Select a supplier" };
+  if (input.items.length === 0) return { ok: false as const, error: "Add at least one item" };
 
-  const products = await db.product.findMany({ where: { id: { in: input.items.map((i) => i.productId) } } });
+  const productIds = input.items.flatMap((i) => (i.productId ? [i.productId] : []));
+  const products = await db.product.findMany({ where: { id: { in: productIds } } });
   const productById = new Map(products.map((p) => [p.id, p]));
 
-  const year = new Date().getFullYear();
-  const countThisYear = await db.purchaseOrder.count({ where: { poNumber: { startsWith: `PO-${year}-` } } });
-  const poNumber = `PO-${year}-${String(countThisYear + 1).padStart(3, "0")}`;
-
-  const items = input.items.map((i) => {
-    const p = productById.get(i.productId);
-    if (!p) throw new Error(`Product not found: ${i.productId}`);
-    return {
-      productId: i.productId,
-      productName: p.name,
-      quantity: i.quantity,
-      unitCost: i.unitCost,
-      total: i.quantity * i.unitCost,
-    };
-  });
+  const items = [];
+  for (const i of input.items) {
+    const quantity = Math.max(1, Math.floor(i.quantity));
+    const unitCost = Math.max(0, i.unitCost);
+    if (i.productId) {
+      const p = productById.get(i.productId);
+      if (!p) return { ok: false as const, error: "One of the products was deleted — remove it and add it again" };
+      items.push({
+        productId: i.productId,
+        productName: `${p.brand} ${p.name}`.trim(),
+        description: (i.description ?? "").trim(),
+        quantity, unitCost, total: quantity * unitCost,
+      });
+    } else {
+      const name = (i.name ?? "").trim();
+      if (!name) return { ok: false as const, error: "Give each item that isn't in the inventory a name" };
+      items.push({
+        productId: null,
+        productName: name,
+        description: (i.description ?? "").trim(),
+        quantity, unitCost, total: quantity * unitCost,
+      });
+    }
+  }
   const total = items.reduce((sum, i) => sum + i.total, 0);
+
+  // Numbered from the highest existing order rather than a count, so a gap
+  // can never make two orders share a number.
+  const start = `PO-${new Date().getFullYear()}-`;
+  const existing = await db.purchaseOrder.findMany({ where: { poNumber: { startsWith: start } }, select: { poNumber: true } });
+  const max = existing.reduce((m, po) => Math.max(m, parseInt(po.poNumber.slice(start.length), 10) || 0), 0);
+  const poNumber = `${start}${String(max + 1).padStart(3, "0")}`;
 
   const po = await db.purchaseOrder.create({
     data: {
@@ -84,12 +138,29 @@ export async function createPurchaseOrder(input: CreatePOInput) {
       supplierId: input.supplierId,
       total,
       status: "ORDERED",
+      ...(input.date ? { date: new Date(input.date) } : {}),
+      ...detailsData(input),
       items: { create: items },
     },
   });
 
   revalidatePath("/dashboard/suppliers");
-  return { ok: true, id: po.id, poNumber };
+  return { ok: true as const, id: po.id, poNumber };
+}
+
+export async function updatePurchaseOrderDetails(poId: string, input: PODetailsInput) {
+  await requireAuth();
+  const po = await db.purchaseOrder.findUnique({ where: { id: poId } });
+  if (!po) return { ok: false as const, error: "This purchase order no longer exists" };
+  await db.purchaseOrder.update({
+    where: { id: poId },
+    data: {
+      ...(input.date ? { date: new Date(input.date) } : {}),
+      ...detailsData(input),
+    },
+  });
+  revalidatePath("/dashboard/suppliers");
+  return { ok: true as const };
 }
 
 export interface ReceiveInput {
@@ -114,10 +185,14 @@ export async function receiveStock(poId: string, receipts: ReceiveInput[]) {
       where: { id: item.id },
       data: { received: { increment: capped } },
     });
-    await db.product.update({
-      where: { id: item.productId },
-      data: { stock: { increment: capped } },
-    });
+    // An item that isn't in the inventory has no stock count to add to; it's
+    // marked received here and added to the inventory as a product separately.
+    if (item.productId) {
+      await db.product.update({
+        where: { id: item.productId },
+        data: { stock: { increment: capped } },
+      });
+    }
   }
 
   const updatedItems = await db.purchaseOrderItem.findMany({ where: { orderId: poId } });

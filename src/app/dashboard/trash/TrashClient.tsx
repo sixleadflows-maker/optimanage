@@ -8,17 +8,19 @@ import { restoreItem } from "@/lib/actions/trash";
 import type { TrashKind } from "@/lib/constants";
 import { formatDate } from "@/lib/utils/format";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { Trash2, RotateCcw, Package, MapPin, UserRound, Loader2 } from "lucide-react";
+import { Trash2, RotateCcw, Package, MapPin, UserRound, Users, Loader2 } from "lucide-react";
 
 const KINDS: { key: TrashKind | "all"; label: string }[] = [
   { key: "all", label: "Everything" },
   { key: "product", label: "Products" },
+  { key: "customer", label: "Customers" },
   { key: "location", label: "Locations" },
   { key: "staff", label: "Staff" },
 ];
 
 const kindMeta = {
   product: { icon: Package, label: "Product", color: "bg-primary/10 text-primary" },
+  customer: { icon: Users, label: "Customer", color: "bg-success/10 text-success" },
   location: { icon: MapPin, label: "Location", color: "bg-secondary/10 text-secondary" },
   staff: { icon: UserRound, label: "Staff", color: "bg-warning/10 text-warning" },
 } as const;
@@ -49,11 +51,15 @@ export function TrashClient({ items, isOwner }: { items: TrashItemView[]; isOwne
     }
     setRestoringId(item.id);
     try {
-      await restoreItem(item.kind, item.id);
+      const res = await restoreItem(item.kind, item.id);
+      if (!res.ok) {
+        showToast(res.error, "error");
+        return;
+      }
       showToast(`${item.title} restored`, "success");
       router.refresh();
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : "Could not restore this item", "error");
+    } catch {
+      showToast("Could not restore this item — check the connection and try again", "error");
     } finally {
       setRestoringId(null);
     }
@@ -66,7 +72,7 @@ export function TrashClient({ items, isOwner }: { items: TrashItemView[]; isOwne
           <Trash2 className="w-6 h-6" /> Trash
         </h1>
         <p className="text-sm text-muted-foreground mt-0.5">
-          Deleted products, locations and staff stay here for 30 days — restore anything within that time.
+          Deleted products, customers, locations and staff stay here for 30 days — restore anything within that time.
         </p>
       </div>
 

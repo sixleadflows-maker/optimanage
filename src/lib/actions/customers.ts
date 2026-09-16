@@ -18,15 +18,30 @@ async function requireAuth() {
   if (!session?.user) throw new Error("Unauthorized");
 }
 
-export async function createCustomer(input: CustomerInput) {
+export type CreateCustomerResult =
+  | { ok: true; id: string }
+  // `existing` is set when the phone number already belongs to a customer, so
+  // the till can simply select them instead.
+  | { ok: false; error: string; existing?: { id: string; name: string; phone: string } };
+
+export async function createCustomer(input: CustomerInput): Promise<CreateCustomerResult> {
   await requireAuth();
-  if (!input.name.trim()) throw new Error("Name is required");
+  if (!input.name.trim()) return { ok: false, error: "Name is required" };
 
   // Phone is optional now; only dedupe on it when one was actually entered.
   const phone = input.phone.trim();
   if (phone) {
     const existing = await db.customer.findUnique({ where: { phone } });
-    if (existing) return { ok: false, error: "A customer with this phone already exists", id: existing.id };
+    if (existing && !existing.active) {
+      return { ok: false, error: `${existing.name} already has this phone number but is in the Trash — restore them from there` };
+    }
+    if (existing) {
+      return {
+        ok: false,
+        error: "A customer with this phone already exists",
+        existing: { id: existing.id, name: existing.name, phone: existing.phone ?? "" },
+      };
+    }
   }
 
   const customer = await db.customer.create({
@@ -69,4 +84,23 @@ export async function updateCustomer(id: string, input: CustomerInput) {
   revalidatePath("/dashboard/customers");
   revalidatePath(`/dashboard/customers/${id}`);
   return { ok: true };
+}
+
+// Moves the customer to the Trash rather than erasing them: their invoices,
+// prescriptions and lab orders stay intact (and keep showing their name), and
+// they can be restored from the Trash for 30 days.
+export async function deleteCustomer(id: string) {
+  const session = await auth();
+  if (!session?.user) return { ok: false as const, error: "Unauthorized" };
+  if (session.user.role === "CASHIER") return { ok: false as const, error: "Only managers and owners can delete customers" };
+
+  const customer = await db.customer.findUnique({ where: { id } });
+  if (!customer || !customer.active) return { ok: false as const, error: "This customer has already been deleted" };
+
+  await db.customer.update({ where: { id }, data: { active: false, deletedAt: new Date() } });
+  revalidatePath("/dashboard/customers");
+  revalidatePath(`/dashboard/customers/${id}`);
+  revalidatePath("/dashboard/pos");
+  revalidatePath("/dashboard/trash");
+  return { ok: true as const, name: customer.name };
 }

@@ -14,6 +14,7 @@ export interface ProductInput {
   type: string;
   colour: string;
   size: string;
+  description: string;
   costPrice: number;
   salePrice: number;
   stock: number;
@@ -159,6 +160,7 @@ export async function createProduct(input: ProductInput) {
       type: input.type,
       colour: input.colour,
       size: input.size,
+      description: input.description.trim(),
       costPrice: input.costPrice,
       salePrice: input.salePrice,
       stock: input.stock,
@@ -216,6 +218,7 @@ export async function updateProduct(id: string, input: ProductInput) {
       type: input.type,
       colour: input.colour,
       size: input.size,
+      description: input.description.trim(),
       costPrice: input.costPrice,
       salePrice: input.salePrice,
       stock: input.stock,

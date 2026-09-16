@@ -240,11 +240,11 @@ h1, h2, h3 {
   letter-spacing: 0.01em;
 }
 
-.chip-paid { background: rgba(16, 185, 129, 0.13); color: #059669; }
+.chip-paid, .chip-full-payment { background: rgba(16, 185, 129, 0.13); color: #059669; }
 .chip-advance { background: rgba(245, 158, 11, 0.13); color: #d97706; }
 .chip-balance { background: rgba(239, 68, 68, 0.13); color: #dc2626; }
 
-.dark .chip-paid { background: rgba(16, 185, 129, 0.2); color: #34d399; }
+.dark .chip-paid, .dark .chip-full-payment { background: rgba(16, 185, 129, 0.2); color: #34d399; }
 .dark .chip-advance { background: rgba(245, 158, 11, 0.2); color: #fbbf24; }
 .dark .chip-balance { background: rgba(239, 68, 68, 0.2); color: #f87171; }
 
@@ -748,11 +748,13 @@ a:hover .nav-icon { transform: translateY(-1px) scale(1.08); }
      `visibility: hidden` was the original approach and produced ~22 blank
      sheets, because invisible elements still occupy their full layout height. */
   body.printing-label > *:not(#print-portal),
-  body.printing-all-labels > *:not(#print-portal) {
+  body.printing-all-labels > *:not(#print-portal),
+  body.printing-from-portal > *:not(#print-portal) {
     display: none !important;
   }
   body.printing-label #print-portal,
-  body.printing-all-labels #print-portal {
+  body.printing-all-labels #print-portal,
+  body.printing-from-portal #print-portal {
     display: block !important;
   }
 

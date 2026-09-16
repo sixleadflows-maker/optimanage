@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { auth } from "@/lib/auth";
+import { nextDocumentNumber } from "@/lib/sales/core";
 
 export interface ReturnItemInput {
   saleItemId: string;
@@ -42,9 +43,11 @@ export async function createReturn(input: CreateReturnInput) {
 
   const totalRefund = lines.reduce((sum, l) => sum + l.total, 0);
 
-  const year = new Date().getFullYear();
-  const countThisYear = await db.return.count({ where: { returnNo: { startsWith: `RET-${year}-` } } });
-  const returnNo = `RET-${year}-${String(countThisYear + 1).padStart(3, "0")}`;
+  // From the stored counter, not a count of returns -- deleting an invoice
+  // deletes its returns too, and a count would then reuse a number.
+  const returnNo = await nextDocumentNumber(db, "RET", async (startsWith) =>
+    (await db.return.findMany({ where: { returnNo: { startsWith } }, select: { returnNo: true } })).map((r) => r.returnNo)
+  );
 
   const created = await db.return.create({
     data: {
@@ -57,7 +60,7 @@ export async function createReturn(input: CreateReturnInput) {
       items: {
         create: lines.map((l) => ({
           saleItemId: l.saleItem.id,
-          productId: l.saleItem.productId,
+          productId: l.saleItem.productId ?? "",
           productName: l.saleItem.productName,
           quantity: l.quantity,
           unitPrice: l.saleItem.unitPrice,
@@ -72,10 +75,13 @@ export async function createReturn(input: CreateReturnInput) {
       where: { id: l.saleItem.id },
       data: { returnedQuantity: { increment: l.quantity } },
     });
-    await db.product.update({
-      where: { id: l.saleItem.productId },
-      data: { stock: { increment: l.quantity } },
-    });
+    // An item typed in at the till was never in stock, so nothing goes back on the shelf.
+    if (l.saleItem.productId) {
+      await db.product.update({
+        where: { id: l.saleItem.productId },
+        data: { stock: { increment: l.quantity } },
+      });
+    }
   }
 
   revalidatePath("/dashboard/sales");

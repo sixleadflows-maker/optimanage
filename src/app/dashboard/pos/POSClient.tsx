@@ -4,29 +4,28 @@ import { useState, useMemo, useRef, useEffect } from "react";
 import type { Product } from "@/lib/mock/types";
 import { formatCurrency } from "@/lib/utils/format";
 import { useApp } from "@/lib/context";
-import { SHOP_NAME, DISCOUNT_PERCENTAGES } from "@/lib/constants";
+import { DISCOUNT_PERCENTAGES, PAYMENT_TYPE_LABEL } from "@/lib/constants";
 import { createSale, type CreateSaleInput } from "@/lib/actions/sales";
+import { createCustomer } from "@/lib/actions/customers";
 import { getDrafts, addDraft, removeDraft, type OfflineDraft } from "@/lib/offlineDrafts";
 import { useRouter } from "next/navigation";
 import {
   Search, Plus, Minus, Trash2, X, User, CreditCard,
   Banknote, Building2, Smartphone, Printer, MessageCircle, Receipt,
   Glasses, ChevronDown, ChevronUp, Lock, Edit3,
-  WifiOff, UploadCloud, ScanLine,
+  WifiOff, UploadCloud, ScanLine, UserPlus, PenLine,
 } from "lucide-react";
 import { firstImage } from "@/lib/utils/images";
 import { LensLoader } from "@/components/ui/LensLoader";
-
-const KNOWN_SALE_ERRORS = ["Unauthorized", "Cart is empty", "Custom lens name is required", "Selected staff member not found"];
-function isKnownValidationError(err: unknown): boolean {
-  if (!(err instanceof Error)) return false;
-  return KNOWN_SALE_ERRORS.includes(err.message) || err.message.startsWith("Product not found:");
-}
+import { ThermalReceipt, A4Invoice, type InvoiceData, type ShopDetails } from "@/components/invoice/InvoiceDocuments";
 
 interface CartItem {
-  productId: string;
+  // productId for an inventory item; a generated key for a typed-in one.
+  key: string;
+  productId: string | null;
   name: string;
   brand: string;
+  description: string;
   price: number;
   quantity: number;
   discount: number;
@@ -36,6 +35,7 @@ interface POSCustomer {
   id: string;
   name: string;
   phone: string;
+  serialNumber: string;
 }
 
 interface StaffMember {
@@ -48,6 +48,8 @@ interface SaleResult {
   orderTakenByName: string;
   billGeneratedByName: string;
   date: string;
+  paid: number;
+  balance: number;
 }
 
 const EMPTY_RX = {
@@ -56,13 +58,23 @@ const EMPTY_RX = {
   notes: "",
 };
 
+const EMPTY_MANUAL_ITEM = { name: "", description: "", price: "", quantity: "1" };
+const EMPTY_NEW_CUSTOMER = { name: "", phone: "", serialNumber: "" };
+
+const PAYMENT_TYPE_HINT = {
+  Full: "Customer pays the whole amount now.",
+  Advance: "Customer pays part now — the rest is due on collection.",
+  Balance: "Nothing is paid now — the whole amount is due later.",
+} as const;
+
 export function POSClient({
-  products, customers, staff, currentUserId,
+  products, customers, staff, currentUserId, shop,
 }: {
   products: Product[];
   customers: POSCustomer[];
   staff: StaffMember[];
   currentUserId: string;
+  shop: ShopDetails;
 }) {
   const { showToast } = useApp();
   const router = useRouter();
@@ -101,10 +113,24 @@ export function POSClient({
   const [poppedId, setPoppedId] = useState<string | null>(null);
   const popTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const pop = (productId: string) => {
-    setPoppedId(productId);
+  // Typing in an item that isn't in the inventory.
+  const [showManualItem, setShowManualItem] = useState(false);
+  const [manualItem, setManualItem] = useState({ ...EMPTY_MANUAL_ITEM });
+  const manualCounter = useRef(0);
+
+  // Which cart line's details (description) is being edited.
+  const [editingDetailsKey, setEditingDetailsKey] = useState<string | null>(null);
+
+  // Adding a new customer without leaving the sale.
+  const [showNewCustomer, setShowNewCustomer] = useState(false);
+  const [newCustomer, setNewCustomer] = useState({ ...EMPTY_NEW_CUSTOMER });
+  const [savingCustomer, setSavingCustomer] = useState(false);
+  const [addedCustomers, setAddedCustomers] = useState<POSCustomer[]>([]);
+
+  const pop = (key: string) => {
+    setPoppedId(key);
     if (popTimer.current) clearTimeout(popTimer.current);
-    popTimer.current = setTimeout(() => setPoppedId((cur) => (cur === productId ? null : cur)), 420);
+    popTimer.current = setTimeout(() => setPoppedId((cur) => (cur === key ? null : cur)), 420);
   };
 
   // Printing only the thermal receipt or only the A4 invoice (not the whole
@@ -160,11 +186,17 @@ export function POSClient({
     setSyncing(true);
     let succeeded = 0;
     let failed = 0;
+    let lastError = "";
     for (const draft of drafts) {
       try {
-        await createSale(draft.input);
-        removeDraft(draft.id);
-        succeeded++;
+        const res = await createSale(draft.input);
+        if (res.ok) {
+          removeDraft(draft.id);
+          succeeded++;
+        } else {
+          failed++;
+          lastError = res.error;
+        }
       } catch {
         failed++;
       }
@@ -174,10 +206,17 @@ export function POSClient({
     if (failed === 0) {
       showToast(`Synced ${succeeded} offline sale${succeeded === 1 ? "" : "s"}`, "success");
     } else {
-      showToast(`Synced ${succeeded}, ${failed} still pending — will retry next time`, "error");
+      showToast(`Synced ${succeeded}, ${failed} still pending${lastError ? ` — ${lastError}` : " — will retry next time"}`, "error");
     }
     router.refresh();
   };
+
+  // Customers added from this screen show up straight away, before the page's
+  // own customer list has been refreshed.
+  const allCustomers = useMemo(
+    () => [...customers, ...addedCustomers.filter((a) => !customers.some((c) => c.id === a.id))],
+    [customers, addedCustomers]
+  );
 
   const lensProducts = useMemo(
     () => products.filter((p) => p.category === "Lens Stock" || p.category === "Contact Lenses"),
@@ -192,17 +231,18 @@ export function POSClient({
         p.name.toLowerCase().includes(q) ||
         p.brand.toLowerCase().includes(q) ||
         p.model.toLowerCase().includes(q) ||
+        p.description.toLowerCase().includes(q) ||
         p.barcode.includes(q)
     );
   }, [products, search]);
 
   const filteredCustomers = useMemo(() => {
-    if (!customerSearch) return customers.slice(0, 5);
+    if (!customerSearch) return allCustomers.slice(0, 5);
     const q = customerSearch.toLowerCase();
-    return customers.filter(
-      (c) => c.name.toLowerCase().includes(q) || c.phone.includes(q)
+    return allCustomers.filter(
+      (c) => c.name.toLowerCase().includes(q) || c.phone.includes(q) || c.serialNumber.toLowerCase().includes(q)
     );
-  }, [customers, customerSearch]);
+  }, [allCustomers, customerSearch]);
 
   const filteredLensProducts = useMemo(() => {
     if (!lensSearch) return lensProducts.slice(0, 6);
@@ -222,37 +262,104 @@ export function POSClient({
     if (!product) return;
     pop(productId);
     setCart((prev) => {
-      const existing = prev.find((i) => i.productId === productId);
+      const existing = prev.find((i) => i.key === productId);
       if (existing) {
         return prev.map((i) =>
-          i.productId === productId ? { ...i, quantity: i.quantity + 1 } : i
+          i.key === productId ? { ...i, quantity: i.quantity + 1 } : i
         );
       }
-      return [...prev, { productId, name: product.name, brand: product.brand, price: product.salePrice, quantity: 1, discount: 0 }];
+      return [...prev, {
+        key: productId, productId, name: product.name, brand: product.brand,
+        description: product.description, price: product.salePrice, quantity: 1, discount: 0,
+      }];
     });
   };
 
-  const updateQuantity = (productId: string, delta: number) => {
+  const addManualItem = () => {
+    const name = manualItem.name.trim();
+    const price = Number(manualItem.price);
+    const quantity = Math.max(1, Math.floor(Number(manualItem.quantity) || 1));
+    if (!name) { showToast("Enter the item's name", "error"); return; }
+    if (!(price > 0)) { showToast("Enter the item's price", "error"); return; }
+    manualCounter.current += 1;
+    const key = `manual-${Date.now()}-${manualCounter.current}`;
+    setCart((prev) => [...prev, {
+      key, productId: null, name, brand: "", description: manualItem.description.trim(), price, quantity, discount: 0,
+    }]);
+    pop(key);
+    setManualItem({ ...EMPTY_MANUAL_ITEM });
+    setShowManualItem(false);
+    showToast(`Added ${name}`, "success");
+  };
+
+  const updateQuantity = (key: string, delta: number) => {
     setCart((prev) =>
       prev
         .map((i) =>
-          i.productId === productId ? { ...i, quantity: Math.max(0, i.quantity + delta) } : i
+          i.key === key ? { ...i, quantity: Math.max(0, i.quantity + delta) } : i
         )
         .filter((i) => i.quantity > 0)
     );
   };
 
-  const updateItemDiscount = (productId: string, discount: number) => {
+  const updateItemDiscount = (key: string, discount: number) => {
     setCart((prev) =>
-      prev.map((i) => (i.productId === productId ? { ...i, discount } : i))
+      prev.map((i) => (i.key === key ? { ...i, discount } : i))
     );
+  };
+
+  const updateItemDescription = (key: string, description: string) => {
+    setCart((prev) => prev.map((i) => (i.key === key ? { ...i, description } : i)));
+  };
+
+  const openNewCustomer = () => {
+    // Whatever was typed into the search box is usually the new customer's
+    // name or number, so start the form with it.
+    const typed = customerSearch.trim();
+    const looksLikePhone = /^[+\d][\d\s-]{5,}$/.test(typed);
+    setNewCustomer({ ...EMPTY_NEW_CUSTOMER, name: looksLikePhone ? "" : typed, phone: looksLikePhone ? typed : "" });
+    setShowNewCustomer(true);
+  };
+
+  const saveNewCustomer = async () => {
+    const name = newCustomer.name.trim();
+    if (!name) { showToast("Enter the customer's name", "error"); return; }
+    setSavingCustomer(true);
+    try {
+      const res = await createCustomer({
+        name, phone: newCustomer.phone, serialNumber: newCustomer.serialNumber,
+        email: "", address: "", lastVisit: "",
+      });
+      if (res.ok) {
+        const id = res.id;
+        setAddedCustomers((prev) => [...prev, { id, name, phone: newCustomer.phone.trim(), serialNumber: newCustomer.serialNumber.trim() }]);
+        setSelectedCustomer(id);
+        showToast(`${name} added and selected`, "success");
+      } else if (res.existing) {
+        // Already on file under that phone number — just use them.
+        const existing = res.existing;
+        setAddedCustomers((prev) => [...prev, { ...existing, serialNumber: "" }]);
+        setSelectedCustomer(existing.id);
+        showToast(`${existing.name} is already registered with that number — selected them`, "info");
+      } else {
+        showToast(res.error, "error");
+        return;
+      }
+      setShowNewCustomer(false);
+      setNewCustomer({ ...EMPTY_NEW_CUSTOMER });
+      setCustomerSearch("");
+    } catch {
+      showToast("Could not add the customer — check the connection and try again", "error");
+    } finally {
+      setSavingCustomer(false);
+    }
   };
 
   const cartSubtotal = cart.reduce((sum, i) => sum + i.price * i.quantity - i.discount, 0);
   const customLensAmount = useCustomLens ? customLensPrice : 0;
   const subtotal = cartSubtotal + customLensAmount;
   const total = subtotal - invoiceDiscount;
-  const customer = customers.find((c) => c.id === selectedCustomer);
+  const customer = allCustomers.find((c) => c.id === selectedCustomer);
 
   // Cost and profit are deliberately not computed or shown here — the till is
   // visible to customers. createSale still records them server-side, so they
@@ -274,7 +381,7 @@ export function POSClient({
 
   const selectLens = (id: string) => {
     if (lensProductId && lensProductId !== id) {
-      setCart((prev) => prev.filter((i) => i.productId !== lensProductId));
+      setCart((prev) => prev.filter((i) => i.key !== lensProductId));
     }
     setLensProductId(id);
     setLensSearch("");
@@ -283,7 +390,7 @@ export function POSClient({
 
   const clearLens = () => {
     if (lensProductId) {
-      setCart((prev) => prev.filter((i) => i.productId !== lensProductId));
+      setCart((prev) => prev.filter((i) => i.key !== lensProductId));
     }
     setLensProductId("");
   };
@@ -330,6 +437,11 @@ export function POSClient({
     setRx({ ...EMPTY_RX });
     setOrderTakenBy(currentUserId);
     setBillGeneratedBy(currentUserId);
+    setShowManualItem(false);
+    setManualItem({ ...EMPTY_MANUAL_ITEM });
+    setEditingDetailsKey(null);
+    setShowNewCustomer(false);
+    setNewCustomer({ ...EMPTY_NEW_CUSTOMER });
     router.refresh();
   };
 
@@ -350,7 +462,9 @@ export function POSClient({
       return;
     }
     const saleInput: CreateSaleInput = {
-      items: cart.map((i) => ({ productId: i.productId, quantity: i.quantity, unitPrice: i.price, discount: i.discount })),
+      items: cart.map((i) => (i.productId
+        ? { productId: i.productId, description: i.description, quantity: i.quantity, unitPrice: i.price, discount: i.discount }
+        : { name: i.name, description: i.description, quantity: i.quantity, unitPrice: i.price, discount: i.discount })),
       customerId: selectedCustomer || undefined,
       paymentMethod,
       paymentType,
@@ -373,11 +487,19 @@ export function POSClient({
     setSaving(true);
     try {
       const res = await createSale(saleInput);
+      if (!res.ok) {
+        // Something about the sale itself (e.g. out of stock) — the server was
+        // reached, so this is not an offline situation.
+        showToast(res.error, "error");
+        return;
+      }
       setSaleResult({
         invoiceNo: res.invoiceNo,
         orderTakenByName: res.orderTakenByName,
         billGeneratedByName: res.billGeneratedByName,
         date: new Date().toLocaleString("en-PK", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }),
+        paid: res.paid,
+        balance: res.balance,
       });
       setShowSuccess(true);
       showToast(`Sale completed — ${res.invoiceNo}`, "success");
@@ -385,22 +507,18 @@ export function POSClient({
         setShowSuccess(false);
         setShowReceipt(true);
       }, 750);
-    } catch (err) {
-      if (isKnownValidationError(err)) {
-        showToast(err instanceof Error ? err.message : "Could not complete the sale.", "error");
-      } else {
-        // Not a validation error the server would raise — most likely the
-        // request never reached the server at all. Keep the sale as a local
-        // draft instead of losing it; it can be pushed through once back online.
-        const draft = addDraft(saleInput, {
-          customerName: customer?.name ?? "Walk-in",
-          itemCount: cart.length,
-          total,
-        });
-        setDrafts((prev) => [...prev, draft]);
-        showToast("No connection — sale saved as an offline draft. Sync it once you're back online.", "info");
-        resetSale();
-      }
+    } catch {
+      // The request never got a proper answer — most likely no connection.
+      // Keep the sale as a local draft instead of losing it; it can be pushed
+      // through once back online.
+      const draft = addDraft(saleInput, {
+        customerName: customer?.name ?? "Walk-in",
+        itemCount: cart.length,
+        total,
+      });
+      setDrafts((prev) => [...prev, draft]);
+      showToast("No connection — sale saved as an offline draft. Sync it once you're back online.", "info");
+      resetSale();
     } finally {
       setSaving(false);
     }
@@ -422,6 +540,43 @@ export function POSClient({
   }
 
   if (showReceipt && saleResult) {
+    const invoice: InvoiceData = {
+      invoiceNo: saleResult.invoiceNo,
+      date: saleResult.date,
+      orderTakenBy: saleResult.orderTakenByName,
+      billGeneratedBy: saleResult.billGeneratedByName,
+      customerName: customer?.name ?? null,
+      customerPhone: customer?.phone ?? "",
+      lines: [
+        ...cart.map((item) => ({
+          key: item.key,
+          name: `${item.brand} ${item.name}`.trim(),
+          description: item.description,
+          quantity: item.quantity,
+          unitPrice: item.price,
+          discount: item.discount,
+          total: item.price * item.quantity - item.discount,
+        })),
+        ...(useCustomLens && customLensAmount > 0
+          ? [{ key: "custom-lens", name: customLensName, quantity: 1, unitPrice: customLensAmount, discount: 0, total: customLensAmount }]
+          : []),
+      ],
+      subtotal,
+      discount: invoiceDiscount,
+      total,
+      paymentMethod,
+      paymentStatus: PAYMENT_TYPE_LABEL[paymentType],
+      paid: saleResult.paid,
+      balance: saleResult.balance,
+      prescription: recordRx
+        ? {
+            right: { sph: rx.rightSph, cyl: rx.rightCyl, axis: rx.rightAxis, pd: rx.rightPd, add: rx.rightAdd },
+            left: { sph: rx.leftSph, cyl: rx.leftCyl, axis: rx.leftAxis, pd: rx.leftPd, add: rx.leftAdd },
+            isOwn: rxIsOwn,
+          }
+        : null,
+    };
+
     return (
       <div className="animate-slide-right">
         <div className="flex items-center justify-between mb-6 no-print">
@@ -435,68 +590,7 @@ export function POSClient({
             <h3 className="text-sm font-semibold mb-4 flex items-center gap-2">
               <Receipt className="w-4 h-4" /> Thermal Receipt (80mm)
             </h3>
-            <div className="receipt-paper mx-auto rounded-lg shadow-lg">
-              <div className="text-center border-b border-dashed border-gray-400 pb-2 mb-2">
-                <img src="/eyespy-logo-black.png" alt={SHOP_NAME} className="h-10 w-auto mx-auto mb-1.5" />
-                <p className="text-[11px]">45 Tariq Road, Karachi 75400</p>
-                <p className="text-[11px]">Ph: +92 21 3456 7890</p>
-                <p className="text-[11px]">NTN: 1234567-8</p>
-              </div>
-              <p className="text-[11px]">INV: {saleResult.invoiceNo}</p>
-              <p className="text-[11px]">Date: {saleResult.date}</p>
-              <p className="text-[11px]">Order taken by: {saleResult.orderTakenByName}</p>
-              <p className="text-[11px]">Bill generated by: {saleResult.billGeneratedByName}</p>
-              {customer && <p className="text-[11px]">Customer: {customer.name}</p>}
-              {recordRx && (
-                <div className="text-[11px] mt-1 pt-1 border-t border-dashed border-gray-400">
-                  <p className="font-medium">Prescription{rxIsOwn ? " (Customer's Own)" : ""}</p>
-                  <p>OD: SPH {rx.rightSph || 0} CYL {rx.rightCyl || 0} AXIS {rx.rightAxis || 0} PD {rx.rightPd || 0} ADD {rx.rightAdd || 0}</p>
-                  <p>OS: SPH {rx.leftSph || 0} CYL {rx.leftCyl || 0} AXIS {rx.leftAxis || 0} PD {rx.leftPd || 0} ADD {rx.leftAdd || 0}</p>
-                </div>
-              )}
-              <div className="border-t border-dashed border-gray-400 mt-2 pt-2">
-                {cart.map((item) => (
-                  <div key={item.productId} className="mb-1">
-                    <p className="text-[11px] font-medium">{item.brand} {item.name}</p>
-                    <div className="flex justify-between text-[11px]">
-                      <span>{item.quantity} x {formatCurrency(item.price)}</span>
-                      <span>{formatCurrency(item.price * item.quantity - item.discount)}</span>
-                    </div>
-                    {item.discount > 0 && (
-                      <p className="text-[11px] text-right">Disc: -{formatCurrency(item.discount)}</p>
-                    )}
-                  </div>
-                ))}
-                {useCustomLens && customLensAmount > 0 && (
-                  <div className="mb-1">
-                    <p className="text-[11px] font-medium">{customLensName}</p>
-                    <div className="flex justify-between text-[11px]">
-                      <span>1 x {formatCurrency(customLensAmount)}</span>
-                      <span>{formatCurrency(customLensAmount)}</span>
-                    </div>
-                  </div>
-                )}
-              </div>
-              <div className="border-t border-dashed border-gray-400 mt-2 pt-2 space-y-0.5">
-                <div className="flex justify-between text-[11px]"><span>Subtotal</span><span>{formatCurrency(subtotal)}</span></div>
-                {invoiceDiscount > 0 && (
-                  <div className="flex justify-between text-[11px]"><span>Discount</span><span>-{formatCurrency(invoiceDiscount)}</span></div>
-                )}
-                <div className="flex justify-between text-sm font-bold border-t border-dashed border-gray-400 pt-1 mt-1">
-                  <span>TOTAL</span><span>{formatCurrency(total)}</span>
-                </div>
-                <p className="text-[11px]">Payment: {paymentMethod} ({paymentType})</p>
-                {paymentType === "Advance" && (
-                  <>
-                    <p className="text-[11px]">Paid: {formatCurrency(advanceAmount)}</p>
-                    <p className="text-[11px]">Balance: {formatCurrency(total - advanceAmount)}</p>
-                  </>
-                )}
-              </div>
-              <p className="text-center text-[10px] mt-3 pt-2 border-t border-dashed border-gray-400">
-                Thank you for choosing {SHOP_NAME}!
-              </p>
-            </div>
+            <ThermalReceipt invoice={invoice} shop={shop} />
             <button onClick={() => printOnly("thermal")}
               className="no-print w-full mt-4 flex items-center justify-center gap-2 py-2.5 glass-card text-sm font-medium cursor-pointer">
               <Printer className="w-4 h-4" /> Print Receipt
@@ -504,127 +598,7 @@ export function POSClient({
           </div>
           <div className="glass-card p-6">
             <h3 className="text-sm font-semibold mb-4">A4 Invoice</h3>
-            <div className="a4-invoice bg-white text-black rounded-lg p-6 shadow-lg text-base">
-              <div className="flex justify-between items-center pb-4 border-b-2 border-[#6d5ef0]">
-                <img src="/eyespy-logo-black.png" alt={SHOP_NAME} className="h-12 w-auto" />
-                <div className="text-right">
-                  <p className="text-2xl font-extrabold tracking-wide text-[#6d5ef0]">INVOICE</p>
-                  <p className="text-sm text-gray-600">{saleResult.invoiceNo}</p>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-3 gap-4 py-4 border-b border-gray-200 text-sm">
-                <div>
-                  <p className="text-[10px] uppercase tracking-widest text-gray-400 mb-1">From</p>
-                  <p className="font-semibold">{SHOP_NAME}</p>
-                  <p className="text-gray-600">45 Tariq Road, Karachi 75400</p>
-                  <p className="text-gray-600">Ph: +92 21 3456 7890</p>
-                  <p className="text-gray-600">NTN: 1234567-8</p>
-                </div>
-                <div>
-                  <p className="text-[10px] uppercase tracking-widest text-gray-400 mb-1">Billed To</p>
-                  <p className="font-semibold">{customer ? customer.name : "Walk-in Customer"}</p>
-                  {customer && <p className="text-gray-600">{customer.phone}</p>}
-                </div>
-                <div>
-                  <p className="text-[10px] uppercase tracking-widest text-gray-400 mb-1">Invoice Details</p>
-                  <p className="text-gray-600">Date: {saleResult.date}</p>
-                  <p className="text-gray-600">Payment: {paymentMethod}</p>
-                  <p className="text-gray-600">Status: {paymentType}</p>
-                </div>
-              </div>
-
-              {recordRx && (
-                <div className="py-4 border-b border-gray-200">
-                  <p className="text-[10px] uppercase tracking-widest text-gray-400 mb-2">
-                    Prescription{rxIsOwn ? " (Customer's Own)" : ""}
-                  </p>
-                  <table className="w-full text-sm text-center">
-                    <thead>
-                      <tr className="bg-gray-100">
-                        <th className="py-1.5 pl-2 text-left font-semibold">Eye</th>
-                        <th className="font-semibold">SPH</th>
-                        <th className="font-semibold">CYL</th>
-                        <th className="font-semibold">AXIS</th>
-                        <th className="font-semibold">PD</th>
-                        <th className="font-semibold">ADD</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr className="border-b border-gray-100">
-                        <td className="py-1.5 pl-2 text-left">OD (Right)</td>
-                        <td>{rx.rightSph || 0}</td><td>{rx.rightCyl || 0}</td><td>{rx.rightAxis || 0}</td><td>{rx.rightPd || 0}</td><td>{rx.rightAdd || 0}</td>
-                      </tr>
-                      <tr>
-                        <td className="py-1.5 pl-2 text-left">OS (Left)</td>
-                        <td>{rx.leftSph || 0}</td><td>{rx.leftCyl || 0}</td><td>{rx.leftAxis || 0}</td><td>{rx.leftPd || 0}</td><td>{rx.leftAdd || 0}</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              )}
-
-              <table className="w-full text-sm my-4">
-                <thead>
-                  <tr className="bg-gray-100 border-b-2 border-gray-300">
-                    <th className="text-left py-2 pl-2 w-8">#</th>
-                    <th className="text-left py-2">Item</th>
-                    <th className="text-center py-2">Qty</th>
-                    <th className="text-right py-2">Unit Price</th>
-                    <th className="text-right py-2">Discount</th>
-                    <th className="text-right py-2 pr-2">Amount</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {cart.map((item, i) => (
-                    <tr key={item.productId} className="border-b border-gray-100">
-                      <td className="py-2 pl-2 text-gray-500">{i + 1}</td>
-                      <td className="py-2">{item.brand} {item.name}</td>
-                      <td className="text-center py-2">{item.quantity}</td>
-                      <td className="text-right py-2">{formatCurrency(item.price)}</td>
-                      <td className="text-right py-2">{item.discount > 0 ? `-${formatCurrency(item.discount)}` : "—"}</td>
-                      <td className="text-right py-2 pr-2">{formatCurrency(item.price * item.quantity - item.discount)}</td>
-                    </tr>
-                  ))}
-                  {useCustomLens && customLensAmount > 0 && (
-                    <tr className="border-b border-gray-100">
-                      <td className="py-2 pl-2 text-gray-500">{cart.length + 1}</td>
-                      <td className="py-2">{customLensName}</td>
-                      <td className="text-center py-2">1</td>
-                      <td className="text-right py-2">{formatCurrency(customLensAmount)}</td>
-                      <td className="text-right py-2">—</td>
-                      <td className="text-right py-2 pr-2">{formatCurrency(customLensAmount)}</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-
-              <div className="flex justify-end">
-                <div className="w-64 text-sm space-y-1">
-                  <div className="flex justify-between"><span className="text-gray-600">Subtotal</span><span>{formatCurrency(subtotal)}</span></div>
-                  {invoiceDiscount > 0 && (
-                    <div className="flex justify-between"><span className="text-gray-600">Invoice Discount</span><span>-{formatCurrency(invoiceDiscount)}</span></div>
-                  )}
-                  <div className="flex justify-between text-lg font-bold border-t-2 border-gray-800 pt-2 mt-2">
-                    <span>Total</span><span className="text-[#6d5ef0]">{formatCurrency(total)}</span>
-                  </div>
-                  {paymentType === "Advance" && (
-                    <>
-                      <div className="flex justify-between"><span className="text-gray-600">Paid (Advance)</span><span>{formatCurrency(advanceAmount)}</span></div>
-                      <div className="flex justify-between font-semibold"><span>Balance Due</span><span>{formatCurrency(total - advanceAmount)}</span></div>
-                    </>
-                  )}
-                </div>
-              </div>
-
-              <div className="mt-8 pt-3 border-t border-gray-200 flex justify-between items-end text-xs text-gray-500">
-                <div>
-                  <p>Order taken by {saleResult.orderTakenByName} · Bill generated by {saleResult.billGeneratedByName}</p>
-                  <p className="mt-1">Thank you for choosing {SHOP_NAME}! Your vision is our mission.</p>
-                </div>
-                <p>Computer-generated invoice</p>
-              </div>
-            </div>
+            <A4Invoice invoice={invoice} shop={shop} />
             <div className="no-print flex gap-3 mt-4">
               <button onClick={() => printOnly("a4")}
                 className="flex-1 flex items-center justify-center gap-2 py-2.5 glass-card text-sm font-medium cursor-pointer">
@@ -632,9 +606,9 @@ export function POSClient({
               </button>
               <button onClick={() => {
                   const phone = customer?.phone.replace(/[^0-9]/g, "");
-                  const msg = encodeURIComponent(`Thank you for shopping at ${SHOP_NAME}! Your invoice ${saleResult.invoiceNo} total is ${formatCurrency(total)}.`);
+                  const msg = encodeURIComponent(`Thank you for shopping at ${shop.name}! Your invoice ${saleResult.invoiceNo} total is ${formatCurrency(total)}.`);
                   if (phone) window.open(`https://wa.me/${phone}?text=${msg}`, "_blank");
-                  else showToast("Select a customer to send WhatsApp", "info");
+                  else showToast("Select a customer with a phone number to send WhatsApp", "info");
                 }}
                 className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-[#25D366] text-white rounded-2xl text-sm font-medium hover:bg-[#20bd5a] transition-colors">
                 <MessageCircle className="w-4 h-4" /> Send on WhatsApp
@@ -725,18 +699,72 @@ export function POSClient({
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2 space-y-4">
           <div className="glass-card p-4">
-            <div className="relative mb-4">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <input
-                type="text"
-                placeholder="Search by name, brand, model or scan barcode..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                onKeyDown={handleSearchKey}
-                autoFocus
-                className="w-full pl-10 pr-4 py-2.5 glass-input text-sm"
-              />
+            <div className="flex flex-col sm:flex-row gap-2 mb-4">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                <input
+                  type="text"
+                  placeholder="Search by name, brand, model or scan barcode..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  onKeyDown={handleSearchKey}
+                  autoFocus
+                  className="w-full pl-10 pr-4 py-2.5 glass-input text-sm"
+                />
+              </div>
+              <button onClick={() => setShowManualItem((v) => !v)}
+                className={`flex items-center justify-center gap-1.5 px-3.5 py-2.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
+                  showManualItem ? "bg-primary text-white" : "bg-primary/10 text-primary hover:bg-primary/15"
+                }`}>
+                <PenLine className="w-3.5 h-3.5" /> Item not in list
+              </button>
             </div>
+
+            {showManualItem && (
+              <div className="mb-4 p-3 rounded-xl border border-primary/30 bg-primary/5 animate-fade-in">
+                <p className="text-xs font-semibold mb-0.5">Enter an item that isn&apos;t in the inventory</p>
+                <p className="text-[10px] text-muted-foreground mb-2">It&apos;s billed by name and price only — no stock is deducted.</p>
+                <div className="grid grid-cols-2 sm:grid-cols-12 gap-2">
+                  <input type="text" value={manualItem.name} autoFocus
+                    onChange={(e) => setManualItem({ ...manualItem, name: e.target.value })}
+                    onKeyDown={(e) => { if (e.key === "Enter") addManualItem(); }}
+                    placeholder="Item name *" className="col-span-2 sm:col-span-4 px-3 py-2 glass-input text-xs" />
+                  <input type="text" value={manualItem.description}
+                    onChange={(e) => setManualItem({ ...manualItem, description: e.target.value })}
+                    onKeyDown={(e) => { if (e.key === "Enter") addManualItem(); }}
+                    placeholder="Details, e.g. lens colour" className="col-span-2 sm:col-span-4 px-3 py-2 glass-input text-xs" />
+                  <input type="number" min={0} value={manualItem.price}
+                    onChange={(e) => setManualItem({ ...manualItem, price: e.target.value })}
+                    onKeyDown={(e) => { if (e.key === "Enter") addManualItem(); }}
+                    placeholder="Price *" className="sm:col-span-2 px-3 py-2 glass-input text-xs" />
+                  <input type="number" min={1} value={manualItem.quantity}
+                    onChange={(e) => setManualItem({ ...manualItem, quantity: e.target.value })}
+                    onKeyDown={(e) => { if (e.key === "Enter") addManualItem(); }}
+                    placeholder="Qty" title="Quantity" className="sm:col-span-2 px-3 py-2 glass-input text-xs" />
+                </div>
+                <div className="flex gap-2 mt-2">
+                  <button onClick={addManualItem}
+                    className="flex items-center gap-1.5 px-4 py-2 bg-primary text-white rounded-lg text-xs font-semibold hover:bg-primary-hover transition-colors cursor-pointer">
+                    <Plus className="w-3.5 h-3.5" /> Add to cart
+                  </button>
+                  <button onClick={() => { setShowManualItem(false); setManualItem({ ...EMPTY_MANUAL_ITEM }); }}
+                    className="px-3 py-2 text-xs text-muted-foreground hover:text-foreground cursor-pointer">
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {search && filteredProducts.length === 0 && !showManualItem && (
+              <div className="mb-3 p-3 rounded-xl bg-surface text-xs flex items-center justify-between gap-3">
+                <span className="text-muted-foreground">Nothing in the inventory matches &ldquo;{search}&rdquo;.</span>
+                <button onClick={() => { setManualItem({ ...EMPTY_MANUAL_ITEM, name: search }); setShowManualItem(true); }}
+                  className="text-primary font-semibold whitespace-nowrap cursor-pointer">
+                  Enter it manually →
+                </button>
+              </div>
+            )}
+
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
               {filteredProducts.slice(0, 12).map((product) => (
                 <button
@@ -768,20 +796,31 @@ export function POSClient({
         <div className="glass-card p-4 flex flex-col h-fit lg:sticky lg:top-20">
           <h3 className="text-sm font-semibold mb-3">Cart</h3>
           <div className="mb-3">
-            <div className="relative">
-              <User className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-              <input
-                type="text"
-                placeholder="Search customer by name or phone..."
-                value={customerSearch}
-                onChange={(e) => setCustomerSearch(e.target.value)}
-                className="w-full pl-9 pr-4 py-2 glass-input text-xs"
-              />
+            <div className="flex gap-1.5">
+              <div className="relative flex-1">
+                <User className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+                <input
+                  type="text"
+                  placeholder="Search customer by name, phone or serial..."
+                  value={customerSearch}
+                  onChange={(e) => setCustomerSearch(e.target.value)}
+                  className="w-full pl-9 pr-4 py-2 glass-input text-xs"
+                />
+              </div>
+              <button onClick={openNewCustomer} title="Add a new customer"
+                className={`flex items-center gap-1 px-2.5 rounded-xl text-[11px] font-semibold transition-colors cursor-pointer ${
+                  showNewCustomer ? "bg-primary text-white" : "bg-primary/10 text-primary hover:bg-primary/15"
+                }`}>
+                <UserPlus className="w-3.5 h-3.5" /> New
+              </button>
             </div>
-            {customerSearch && (
+            {customerSearch && !showNewCustomer && (
               <div className="mt-1 glass rounded-lg p-1 max-h-32 overflow-y-auto">
                 {filteredCustomers.length === 0 && (
-                  <p className="px-3 py-1.5 text-xs text-muted-foreground">No customers found</p>
+                  <button onClick={openNewCustomer}
+                    className="w-full text-left px-3 py-1.5 rounded-lg hover:bg-surface-hover text-xs text-primary font-medium flex items-center gap-1.5">
+                    <UserPlus className="w-3.5 h-3.5" /> Not found — add &ldquo;{customerSearch}&rdquo; as a new customer
+                  </button>
                 )}
                 {filteredCustomers.map((c) => (
                   <button
@@ -789,14 +828,40 @@ export function POSClient({
                     onClick={() => { setSelectedCustomer(c.id); setCustomerSearch(""); }}
                     className="w-full text-left px-3 py-1.5 rounded-lg hover:bg-surface-hover text-xs"
                   >
-                    {c.name} · {c.phone}
+                    {c.name}{c.phone ? ` · ${c.phone}` : ""}
                   </button>
                 ))}
               </div>
             )}
-            {customer && (
+            {showNewCustomer && (
+              <div className="mt-2 p-3 rounded-xl border border-primary/30 bg-primary/5 space-y-2 animate-fade-in">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-semibold flex items-center gap-1.5"><UserPlus className="w-3.5 h-3.5 text-primary" /> New customer</p>
+                  <button onClick={() => setShowNewCustomer(false)} className="cursor-pointer"><X className="w-3.5 h-3.5" /></button>
+                </div>
+                <input type="text" value={newCustomer.name} autoFocus
+                  onChange={(e) => setNewCustomer({ ...newCustomer, name: e.target.value })}
+                  onKeyDown={(e) => { if (e.key === "Enter") saveNewCustomer(); }}
+                  placeholder="Name *" className="w-full px-3 py-2 glass-input text-xs" />
+                <div className="grid grid-cols-2 gap-2">
+                  <input type="text" value={newCustomer.phone}
+                    onChange={(e) => setNewCustomer({ ...newCustomer, phone: e.target.value })}
+                    onKeyDown={(e) => { if (e.key === "Enter") saveNewCustomer(); }}
+                    placeholder="Phone (optional)" className="w-full px-3 py-2 glass-input text-xs" />
+                  <input type="text" value={newCustomer.serialNumber}
+                    onChange={(e) => setNewCustomer({ ...newCustomer, serialNumber: e.target.value })}
+                    onKeyDown={(e) => { if (e.key === "Enter") saveNewCustomer(); }}
+                    placeholder="Serial no. (optional)" className="w-full px-3 py-2 glass-input text-xs" />
+                </div>
+                <button onClick={saveNewCustomer} disabled={savingCustomer}
+                  className="w-full py-2 bg-primary text-white rounded-lg text-xs font-semibold hover:bg-primary-hover transition-colors disabled:opacity-60 flex items-center justify-center gap-1.5 cursor-pointer">
+                  {savingCustomer && <LensLoader light />} Save &amp; select customer
+                </button>
+              </div>
+            )}
+            {customer && !showNewCustomer && (
               <div className="flex items-center justify-between mt-2 px-2 py-1.5 bg-primary/5 rounded-lg">
-                <span className="text-xs font-medium">{customer.name}</span>
+                <span className="text-xs font-medium">{customer.name}{customer.phone ? ` · ${customer.phone}` : ""}</span>
                 <button onClick={() => setSelectedCustomer("")}><X className="w-3.5 h-3.5" /></button>
               </div>
             )}
@@ -945,35 +1010,59 @@ export function POSClient({
               <p className="text-xs">Click products to add to cart</p>
             </div>
           ) : (
-            <div className="space-y-2 mb-4 max-h-60 overflow-y-auto">
+            <div className="space-y-2 mb-4 max-h-72 overflow-y-auto">
               {cart.map((item) => (
-                <div key={item.productId} className={`flex items-center gap-2 py-2 px-1.5 -mx-1.5 border-b border-border ${poppedId === item.productId ? "animate-cart-pop" : ""}`}>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-medium truncate">{item.name}</p>
-                    <p className="text-[10px] text-muted-foreground">{item.brand} · {formatCurrency(item.price)}</p>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <button onClick={() => updateQuantity(item.productId, -1)} className="w-6 h-6 rounded-lg bg-surface flex items-center justify-center hover:bg-surface-hover">
-                      <Minus className="w-3 h-3" />
+                <div key={item.key} className={`py-2 px-1.5 -mx-1.5 border-b border-border ${poppedId === item.key ? "animate-cart-pop" : ""}`}>
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-medium truncate">{item.name}</p>
+                      <p className="text-[10px] text-muted-foreground">
+                        {item.productId ? item.brand : "Not in inventory"} · {formatCurrency(item.price)}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <button onClick={() => updateQuantity(item.key, -1)} className="w-6 h-6 rounded-lg bg-surface flex items-center justify-center hover:bg-surface-hover">
+                        <Minus className="w-3 h-3" />
+                      </button>
+                      <span className="w-6 text-center text-xs font-medium">{item.quantity}</span>
+                      <button onClick={() => updateQuantity(item.key, 1)} className="w-6 h-6 rounded-lg bg-surface flex items-center justify-center hover:bg-surface-hover">
+                        <Plus className="w-3 h-3" />
+                      </button>
+                    </div>
+                    <div className="w-14 text-right">
+                      <input
+                        type="number"
+                        value={item.discount || ""}
+                        onChange={(e) => updateItemDiscount(item.key, Number(e.target.value))}
+                        placeholder="Disc"
+                        className="w-full text-right text-[10px] px-1 py-0.5 glass-input"
+                      />
+                    </div>
+                    <p className="w-16 text-right text-xs font-semibold">{formatCurrency(item.price * item.quantity - item.discount)}</p>
+                    <button onClick={() => setCart((prev) => prev.filter((i) => i.key !== item.key))}>
+                      <Trash2 className="w-3.5 h-3.5 text-destructive" />
                     </button>
-                    <span className="w-6 text-center text-xs font-medium">{item.quantity}</span>
-                    <button onClick={() => updateQuantity(item.productId, 1)} className="w-6 h-6 rounded-lg bg-surface flex items-center justify-center hover:bg-surface-hover">
-                      <Plus className="w-3 h-3" />
+                  </div>
+                  {/* Details such as lens colour print under the item on the bill. */}
+                  {editingDetailsKey === item.key ? (
+                    <input type="text" autoFocus value={item.description}
+                      onChange={(e) => updateItemDescription(item.key, e.target.value)}
+                      onBlur={() => setEditingDetailsKey(null)}
+                      onKeyDown={(e) => { if (e.key === "Enter" || e.key === "Escape") setEditingDetailsKey(null); }}
+                      placeholder="Details for the bill, e.g. lens colour"
+                      className="mt-1.5 w-full px-2 py-1 glass-input text-[10px]" />
+                  ) : item.description ? (
+                    <button onClick={() => setEditingDetailsKey(item.key)} title="Edit details"
+                      className="mt-1 w-full text-left text-[10px] text-muted-foreground hover:text-foreground flex items-start gap-1 cursor-pointer">
+                      <PenLine className="w-2.5 h-2.5 mt-0.5 flex-shrink-0" />
+                      <span className="line-clamp-2">{item.description}</span>
                     </button>
-                  </div>
-                  <div className="w-14 text-right">
-                    <input
-                      type="number"
-                      value={item.discount || ""}
-                      onChange={(e) => updateItemDiscount(item.productId, Number(e.target.value))}
-                      placeholder="Disc"
-                      className="w-full text-right text-[10px] px-1 py-0.5 glass-input"
-                    />
-                  </div>
-                  <p className="w-16 text-right text-xs font-semibold">{formatCurrency(item.price * item.quantity - item.discount)}</p>
-                  <button onClick={() => setCart((prev) => prev.filter((i) => i.productId !== item.productId))}>
-                    <Trash2 className="w-3.5 h-3.5 text-destructive" />
-                  </button>
+                  ) : (
+                    <button onClick={() => setEditingDetailsKey(item.key)}
+                      className="mt-1 text-[10px] text-primary/80 hover:text-primary font-medium cursor-pointer">
+                      + Add details
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
@@ -1049,7 +1138,7 @@ export function POSClient({
                 </div>
 
                 <div>
-                  <p className="text-[10px] font-medium text-muted-foreground mb-1.5">Payment Type</p>
+                  <p className="text-[10px] font-medium text-muted-foreground mb-1.5">Payment Status</p>
                   <div className="grid grid-cols-3 gap-1.5">
                     {(["Full", "Advance", "Balance"] as const).map((pt) => (
                       <button
@@ -1059,10 +1148,11 @@ export function POSClient({
                           paymentType === pt ? "bg-primary text-white" : "bg-surface hover:bg-surface-hover"
                         }`}
                       >
-                        {pt}
+                        {PAYMENT_TYPE_LABEL[pt]}
                       </button>
                     ))}
                   </div>
+                  <p className="text-[10px] text-muted-foreground mt-1.5">{PAYMENT_TYPE_HINT[paymentType]}</p>
                 </div>
 
                 {paymentType === "Advance" && (
@@ -1075,6 +1165,11 @@ export function POSClient({
                       className="w-full px-3 py-2 glass-input text-sm"
                       placeholder="Enter advance amount"
                     />
+                    {advanceAmount > 0 && total - advanceAmount > 0 && (
+                      <p className="text-[10px] text-muted-foreground mt-1 text-right">
+                        Balance due on collection: <span className="font-semibold text-foreground">{formatCurrency(total - advanceAmount)}</span>
+                      </p>
+                    )}
                   </div>
                 )}
 

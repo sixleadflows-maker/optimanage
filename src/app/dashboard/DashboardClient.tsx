@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { DashboardData } from "@/lib/data";
 import { formatCurrency, formatDate } from "@/lib/utils/format";
+import { paymentStatusChipClass } from "@/lib/constants";
 import {
   DollarSign, FileText, AlertTriangle, TrendingUp,
   Clock, ArrowUpRight, ArrowDownRight,
@@ -154,7 +155,7 @@ export function DashboardClient({ data }: { data: DashboardData }) {
                 </div>
                 <div className="text-right">
                   <p className="text-sm font-semibold">{formatCurrency(sale.total)}</p>
-                  <span className={`chip chip-${sale.paymentStatus.toLowerCase()}`}>
+                  <span className={`chip ${paymentStatusChipClass(sale.paymentStatus)}`}>
                     {sale.paymentStatus}
                   </span>
                 </div>

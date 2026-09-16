@@ -1,14 +1,17 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import type { SaleView } from "@/lib/data";
 import { formatCurrency, formatDate } from "@/lib/utils/format";
-import { Search, Download, Receipt, RotateCcw, X, Loader2, Trash2 } from "lucide-react";
+import { Search, Download, Receipt, RotateCcw, X, Loader2, Trash2, Eye, Printer, MessageCircle, CalendarRange } from "lucide-react";
 import { useApp } from "@/lib/context";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { PrintPortal } from "@/components/ui/PrintPortal";
 import { createReturn } from "@/lib/actions/returns";
 import { updateOnlineOrderStatus, deleteSale, type OnlineOrderStatusValue } from "@/lib/actions/sales";
+import { PAYMENT_STATUS, paymentStatusChipClass } from "@/lib/constants";
+import { ThermalReceipt, A4Invoice, invoiceFromSale, type ShopDetails } from "@/components/invoice/InvoiceDocuments";
 
 const REFUND_METHODS = ["Cash", "Card", "Bank Transfer", "JazzCash"];
 const ONLINE_ORDER_STATUSES: { value: OnlineOrderStatusValue; label: string }[] = [
@@ -19,10 +22,19 @@ const ONLINE_ORDER_STATUSES: { value: OnlineOrderStatusValue; label: string }[] 
   { value: "CANCELLED", label: "Cancelled" },
 ];
 
-export function SalesClient({ sales, isOwner }: { sales: SaleView[]; isOwner: boolean }) {
+// The shop's own calendar day for a sale (not the UTC one), so a late-evening
+// sale falls on the day it was actually made.
+function localDay(isoDateTime: string) {
+  const d = new Date(isoDateTime);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+export function SalesClient({ sales, isOwner, shop }: { sales: SaleView[]; isOwner: boolean; shop: ShopDetails }) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("All");
   const [sourceFilter, setSourceFilter] = useState<string>("All");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
   const { showToast } = useApp();
   const router = useRouter();
 
@@ -35,16 +47,57 @@ export function SalesClient({ sales, isOwner }: { sales: SaleView[]; isOwner: bo
   const [deletingSale, setDeletingSale] = useState<SaleView | null>(null);
   const [deleting, setDeleting] = useState(false);
 
+  // Reopening a past invoice to look at or reprint it.
+  const [viewingSale, setViewingSale] = useState<SaleView | null>(null);
+  const [viewFormat, setViewFormat] = useState<"thermal" | "a4">("thermal");
+  const [printJob, setPrintJob] = useState<"thermal" | "a4" | null>(null);
+  const viewingInvoice = viewingSale ? invoiceFromSale(viewingSale) : null;
+
+  // Same two-step print as labels: render the bill into the body-level print
+  // container first, then print once it's painted. Printing it where it sits
+  // inside this long page would push blank pages out with it.
+  useEffect(() => {
+    if (!printJob) return;
+    const classes = ["printing-from-portal", `printing-${printJob}`];
+    let timer: ReturnType<typeof setTimeout>;
+    const cleanup = () => {
+      document.body.classList.remove(...classes);
+      window.removeEventListener("afterprint", cleanup);
+      setPrintJob(null);
+    };
+    document.body.classList.add(...classes);
+    window.addEventListener("afterprint", cleanup);
+    const raf = requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        window.print();
+        timer = setTimeout(cleanup, 1500);
+      });
+    });
+    return () => {
+      cancelAnimationFrame(raf);
+      clearTimeout(timer);
+    };
+  }, [printJob]);
+
   const confirmDeleteSale = async () => {
     if (!deletingSale) return;
     setDeleting(true);
     try {
-      await deleteSale(deletingSale.id);
-      showToast(`${deletingSale.invoiceNo} deleted`, "success");
+      const res = await deleteSale(deletingSale.id);
+      if (!res.ok) {
+        showToast(res.error, "error");
+        return;
+      }
+      showToast(
+        res.hadReturns
+          ? `${deletingSale.invoiceNo} and its return deleted — stock put back`
+          : `${deletingSale.invoiceNo} deleted — stock put back`,
+        "success"
+      );
       setDeletingSale(null);
       router.refresh();
-    } catch (e) {
-      showToast(e instanceof Error ? e.message : "Could not delete invoice", "error");
+    } catch {
+      showToast("Could not delete the invoice — check the connection and try again", "error");
     } finally {
       setDeleting(false);
     }
@@ -83,15 +136,30 @@ export function SalesClient({ sales, isOwner }: { sales: SaleView[]; isOwner: bo
   };
 
   const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
     return sales.filter((s) => {
       const matchesSearch =
-        s.customerName.toLowerCase().includes(search.toLowerCase()) ||
-        s.invoiceNo.toLowerCase().includes(search.toLowerCase());
+        !q ||
+        s.customerName.toLowerCase().includes(q) ||
+        s.invoiceNo.toLowerCase().includes(q) ||
+        s.customerPhone.includes(q) ||
+        s.items.some((i) => i.productName.toLowerCase().includes(q) || i.description.toLowerCase().includes(q));
       const matchesStatus = statusFilter === "All" || s.paymentStatus === statusFilter;
       const matchesSource = sourceFilter === "All" || s.source === sourceFilter;
-      return matchesSearch && matchesStatus && matchesSource;
+      const day = localDay(s.dateTime);
+      const matchesDates = (!fromDate || day >= fromDate) && (!toDate || day <= toDate);
+      return matchesSearch && matchesStatus && matchesSource && matchesDates;
     });
-  }, [sales, search, statusFilter, sourceFilter]);
+  }, [sales, search, statusFilter, sourceFilter, fromDate, toDate]);
+
+  const setRange = (range: "today" | "month" | "all") => {
+    const today = localDay(new Date().toISOString());
+    if (range === "all") { setFromDate(""); setToDate(""); }
+    else if (range === "today") { setFromDate(today); setToDate(today); }
+    else { setFromDate(`${today.slice(0, 8)}01`); setToDate(today); }
+  };
+
+  const oldestSale = sales.length > 0 ? sales[sales.length - 1] : null;
 
   const handleStatusChange = async (saleId: string, status: OnlineOrderStatusValue) => {
     try {
@@ -110,7 +178,7 @@ export function SalesClient({ sales, isOwner }: { sales: SaleView[]; isOwner: bo
     if (filtered.length === 0) { showToast("Nothing to export", "info"); return; }
     const header = ["Invoice", "Date", "Customer", "Items", "Total", "Paid", "Balance", "Status", "Payment", "Profit"];
     const rows = filtered.map((s) => [
-      s.invoiceNo, s.date, s.customerName, s.items.length, s.total, s.paid, s.balance, s.paymentStatus, s.paymentMethod, s.profit,
+      s.invoiceNo, localDay(s.dateTime), s.customerName, s.items.map((i) => i.productName).join("; "), s.total, s.paid, s.balance, s.paymentStatus, s.paymentMethod, s.profit,
     ]);
     const csv = [header, ...rows].map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
@@ -128,7 +196,10 @@ export function SalesClient({ sales, isOwner }: { sales: SaleView[]; isOwner: bo
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">Sales & Invoices</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">{filtered.length} invoices found</p>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            {filtered.length} of {sales.length} invoices
+            {oldestSale && ` · complete history since ${formatDate(oldestSale.dateTime)}`}
+          </p>
         </div>
         <button onClick={exportCsv}
           className="flex items-center gap-2 px-4 py-2 glass-card text-sm font-medium cursor-pointer">
@@ -152,23 +223,23 @@ export function SalesClient({ sales, isOwner }: { sales: SaleView[]; isOwner: bo
       </div>
 
       <div className="glass-card p-4">
-        <div className="flex flex-col sm:flex-row gap-3 mb-4">
+        <div className="flex flex-col sm:flex-row gap-3 mb-3">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <input
               type="text"
-              placeholder="Search invoices or customers..."
+              placeholder="Search invoice no., customer, phone or item..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="w-full pl-10 pr-4 py-2 glass-input text-sm"
             />
           </div>
-          <div className="flex gap-1.5">
-            {["All", "Paid", "Advance", "Balance"].map((status) => (
+          <div className="flex gap-1.5 flex-wrap">
+            {["All", ...PAYMENT_STATUS].map((status) => (
               <button
                 key={status}
                 onClick={() => setStatusFilter(status)}
-                className={`px-3 py-2 rounded-xl text-xs font-medium transition-all ${
+                className={`px-3 py-2 rounded-xl text-xs font-medium transition-all whitespace-nowrap ${
                   statusFilter === status ? "bg-primary text-white" : "bg-surface hover:bg-surface-hover"
                 }`}
               >
@@ -186,6 +257,24 @@ export function SalesClient({ sales, isOwner }: { sales: SaleView[]; isOwner: bo
                 }`}
               >
                 {source}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 flex-wrap mb-4">
+          <CalendarRange className="w-4 h-4 text-muted-foreground" />
+          <label className="text-xs text-muted-foreground">From</label>
+          <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} className="px-2.5 py-1.5 glass-input text-xs" />
+          <label className="text-xs text-muted-foreground">To</label>
+          <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} className="px-2.5 py-1.5 glass-input text-xs" />
+          <div className="flex gap-1">
+            {([["today", "Today"], ["month", "This month"], ["all", "All time"]] as const).map(([key, label]) => (
+              <button key={key} onClick={() => setRange(key)}
+                className={`px-2.5 py-1.5 rounded-lg text-[11px] font-medium bg-surface hover:bg-surface-hover transition-colors ${
+                  key === "all" && !fromDate && !toDate ? "ring-1 ring-primary/40 text-primary" : ""
+                }`}>
+                {label}
               </button>
             ))}
           </div>
@@ -212,20 +301,29 @@ export function SalesClient({ sales, isOwner }: { sales: SaleView[]; isOwner: bo
             <tbody>
               {filtered.length === 0 && (
                 <tr><td colSpan={12}>
-                  <EmptyState icon={Receipt} title="No invoices yet" hint="Sales you ring up in the POS will appear here with payment status and profit." />
+                  <EmptyState icon={Receipt}
+                    title={sales.length === 0 ? "No invoices yet" : "No invoices match"}
+                    hint={sales.length === 0
+                      ? "Sales you ring up in the POS will appear here with payment status and profit."
+                      : "Try a different search, status or date range — or pick “All time”."} />
                 </td></tr>
               )}
               {filtered.map((sale) => (
                 <tr key={sale.id} className="border-b border-border hover:bg-surface-hover/50 transition-colors">
-                  <td className="py-3 px-3 font-medium text-primary">{sale.invoiceNo}</td>
-                  <td className="py-3 px-3 text-muted-foreground">{formatDate(sale.date)}</td>
+                  <td className="py-3 px-3">
+                    <button onClick={() => { setViewFormat("thermal"); setViewingSale(sale); }}
+                      className="font-medium text-primary hover:underline cursor-pointer">
+                      {sale.invoiceNo}
+                    </button>
+                  </td>
+                  <td className="py-3 px-3 text-muted-foreground whitespace-nowrap">{formatDate(sale.dateTime)}</td>
                   <td className="py-3 px-3">{sale.customerName}</td>
-                  <td className="py-3 px-3 text-muted-foreground">{sale.items.length} item{sale.items.length > 1 ? "s" : ""}</td>
+                  <td className="py-3 px-3 text-muted-foreground">{sale.items.length} item{sale.items.length === 1 ? "" : "s"}</td>
                   <td className="py-3 px-3 text-right font-medium">{formatCurrency(sale.total)}</td>
                   <td className="py-3 px-3 text-right text-success">{formatCurrency(sale.paid)}</td>
                   <td className="py-3 px-3 text-right">{sale.balance > 0 ? <span className="text-destructive">{formatCurrency(sale.balance)}</span> : "—"}</td>
                   <td className="py-3 px-3 text-center">
-                    <span className={`chip chip-${sale.paymentStatus.toLowerCase()}`}>{sale.paymentStatus}</span>
+                    <span className={`chip whitespace-nowrap ${paymentStatusChipClass(sale.paymentStatus)}`}>{sale.paymentStatus}</span>
                   </td>
                   <td className="py-3 px-3 text-center text-xs text-muted-foreground">{sale.paymentMethod}</td>
                   <td className="py-3 px-3 text-center">
@@ -250,6 +348,10 @@ export function SalesClient({ sales, isOwner }: { sales: SaleView[]; isOwner: bo
                   </td>
                   <td className="py-3 px-3">
                     <div className="flex items-center justify-center gap-1.5">
+                      <button onClick={() => { setViewFormat("thermal"); setViewingSale(sale); }} title="View / reprint invoice"
+                        className="p-1.5 rounded-lg hover:bg-surface-hover cursor-pointer">
+                        <Eye className="w-3.5 h-3.5 text-primary" />
+                      </button>
                       {returnableItems(sale).length > 0 && (
                         <button onClick={() => openReturn(sale)} title="Return / Refund"
                           className="p-1.5 rounded-lg hover:bg-surface-hover cursor-pointer">
@@ -270,6 +372,58 @@ export function SalesClient({ sales, isOwner }: { sales: SaleView[]; isOwner: bo
           </table>
         </div>
       </div>
+
+      {viewingSale && viewingInvoice && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setViewingSale(null)}>
+          <div className="glass-modal p-6 w-full max-w-3xl animate-rise max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-start justify-between gap-3 mb-4">
+              <div>
+                <h3 className="text-lg font-semibold">{viewingSale.invoiceNo}</h3>
+                <p className="text-xs text-muted-foreground">
+                  {viewingInvoice.date} · {viewingSale.customerName} · {formatCurrency(viewingSale.total)}
+                </p>
+              </div>
+              <button onClick={() => setViewingSale(null)} className="cursor-pointer"><X className="w-5 h-5" /></button>
+            </div>
+
+            <div className="flex gap-1.5 mb-4">
+              {([["thermal", "Receipt (80mm)"], ["a4", "A4 Invoice"]] as const).map(([key, label]) => (
+                <button key={key} onClick={() => setViewFormat(key)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-all ${viewFormat === key ? "bg-primary text-white" : "bg-surface hover:bg-surface-hover"}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            <div className="bg-surface/50 rounded-xl p-4 overflow-x-auto">
+              {viewFormat === "thermal"
+                ? <ThermalReceipt invoice={viewingInvoice} shop={shop} />
+                : <A4Invoice invoice={viewingInvoice} shop={shop} />}
+            </div>
+
+            <div className="flex gap-2 mt-4 flex-wrap">
+              <button onClick={() => setPrintJob("thermal")} disabled={printJob !== null}
+                className="flex-1 min-w-[140px] flex items-center justify-center gap-2 py-2.5 glass-card text-sm font-medium cursor-pointer disabled:opacity-60">
+                <Printer className="w-4 h-4" /> Print Receipt
+              </button>
+              <button onClick={() => setPrintJob("a4")} disabled={printJob !== null}
+                className="flex-1 min-w-[140px] flex items-center justify-center gap-2 py-2.5 glass-card text-sm font-medium cursor-pointer disabled:opacity-60">
+                <Printer className="w-4 h-4" /> Print A4
+              </button>
+              {viewingSale.customerPhone && (
+                <button onClick={() => {
+                    const phone = viewingSale.customerPhone.replace(/[^0-9]/g, "");
+                    const msg = encodeURIComponent(`Thank you for shopping at ${shop.name}! Your invoice ${viewingSale.invoiceNo} total is ${formatCurrency(viewingSale.total)}.`);
+                    window.open(`https://wa.me/${phone}?text=${msg}`, "_blank");
+                  }}
+                  className="flex-1 min-w-[140px] flex items-center justify-center gap-2 py-2.5 bg-[#25D366] text-white rounded-2xl text-sm font-medium hover:bg-[#20bd5a] transition-colors">
+                  <MessageCircle className="w-4 h-4" /> WhatsApp
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {returningSale && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setReturningSale(null)}>
@@ -329,8 +483,13 @@ export function SalesClient({ sales, isOwner }: { sales: SaleView[]; isOwner: bo
             </div>
             <p className="text-sm text-muted-foreground">
               Delete <span className="font-semibold text-foreground">{deletingSale.invoiceNo}</span> ({formatCurrency(deletingSale.total)})?
-              This restores stock and can&apos;t be undone.
+              Items still out with the customer go back into stock. This can&apos;t be undone.
             </p>
+            {deletingSale.items.some((i) => i.returnedQuantity > 0) && (
+              <p className="text-xs text-warning mt-2">
+                This invoice has a return on it — the return record is deleted too. Items already returned were put back in stock at the time, so they aren&apos;t added again.
+              </p>
+            )}
             <div className="flex gap-2 mt-5">
               <button onClick={() => setDeletingSale(null)}
                 className="flex-1 py-2.5 glass-card text-sm font-medium cursor-pointer">
@@ -344,6 +503,15 @@ export function SalesClient({ sales, isOwner }: { sales: SaleView[]; isOwner: bo
           </div>
         </div>
       )}
+
+      {/* Always mounted so the container exists before a print is requested. */}
+      <PrintPortal>
+        {printJob && viewingInvoice && (
+          printJob === "thermal"
+            ? <ThermalReceipt invoice={viewingInvoice} shop={shop} />
+            : <A4Invoice invoice={viewingInvoice} shop={shop} />
+        )}
+      </PrintPortal>
     </div>
   );
 }

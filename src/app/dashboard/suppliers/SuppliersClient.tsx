@@ -6,12 +6,155 @@ import type { Supplier, PurchaseOrder } from "@/lib/mock/types";
 import type { Product } from "@/lib/mock/types";
 import { formatCurrency, formatDate } from "@/lib/utils/format";
 import { useApp } from "@/lib/context";
-import { createSupplier, updateSupplier, createPurchaseOrder, receiveStock } from "@/lib/actions/suppliers";
-import { Truck, CheckCircle, FileText, Plus, X, Loader2, Search, Trash2, Pencil } from "lucide-react";
+import { PURCHASE_TYPES, PURCHASE_PAYMENT_METHODS } from "@/lib/constants";
+import {
+  createSupplier, updateSupplier, createPurchaseOrder, updatePurchaseOrderDetails, receiveStock,
+  type PODetailsInput,
+} from "@/lib/actions/suppliers";
+import { Truck, CheckCircle, FileText, Plus, X, Loader2, Search, Trash2, Pencil, PenLine, Wallet, ClipboardList, Building2 } from "lucide-react";
 
 const EMPTY_SUPPLIER = { name: "", contact: "", phone: "", email: "", address: "", ntn: "" };
 
-interface DraftPOItem { productId: string; productName: string; quantity: number; unitCost: number; }
+const todayStr = () => new Date().toISOString().slice(0, 10);
+
+const emptyDetails = (): PODetailsInput => ({
+  supplierInvoiceNo: "", date: todayStr(), expectedDate: "", notes: "",
+  purchaseType: "Cash", purchaseTypeNote: "",
+  paymentMethod: "Cash", paymentReference: "", bankName: "", paymentDate: "", amountPaid: 0,
+});
+
+const detailsFromPO = (po: PurchaseOrder): PODetailsInput => ({
+  supplierInvoiceNo: po.supplierInvoiceNo, date: po.date, expectedDate: po.expectedDate, notes: po.notes,
+  purchaseType: po.purchaseType || "Cash", purchaseTypeNote: po.purchaseTypeNote,
+  paymentMethod: po.paymentMethod, paymentReference: po.paymentReference, bankName: po.bankName,
+  paymentDate: po.paymentDate, amountPaid: po.amountPaid,
+});
+
+interface DraftPOItem {
+  key: string;
+  productId: string | null;
+  productName: string;
+  description: string;
+  quantity: number;
+  unitCost: number;
+}
+
+const EMPTY_MANUAL_PO_ITEM = { name: "", description: "", quantity: "1", unitCost: "" };
+
+function referenceLabel(method: string) {
+  if (method === "Cheque") return "Cheque No.";
+  if (method === "Bank Transfer" || method === "JazzCash" || method === "EasyPaisa") return "Transaction ID";
+  return "Reference No.";
+}
+
+const needsBank = (d: PODetailsInput) => d.paymentMethod === "Cheque" || d.paymentMethod === "Bank Transfer" || d.purchaseType === "Cheque";
+
+/** Order details and payment details — shared by "Create" and "Edit details". */
+function PODetailsFields({ details, onChange, total }: {
+  details: PODetailsInput;
+  onChange: React.Dispatch<React.SetStateAction<PODetailsInput>>;
+  total: number;
+}) {
+  // Functional updates, so two quick changes in a row can't overwrite each other.
+  const set = <K extends keyof PODetailsInput>(key: K, value: PODetailsInput[K]) =>
+    onChange((prev) => ({ ...prev, [key]: value }));
+  const balance = Math.max(0, total - (details.amountPaid || 0));
+
+  return (
+    <>
+      <div className="p-3.5 rounded-xl border border-border space-y-3">
+        <p className="text-xs font-semibold flex items-center gap-1.5"><ClipboardList className="w-3.5 h-3.5 text-primary" /> Order Details</p>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div>
+            <label className="text-[11px] font-medium text-muted-foreground mb-1 block">Order Date</label>
+            <input type="date" value={details.date} onChange={(e) => set("date", e.target.value)} className="w-full px-3 py-2 glass-input text-sm" />
+          </div>
+          <div>
+            <label className="text-[11px] font-medium text-muted-foreground mb-1 block">Expected Delivery</label>
+            <input type="date" value={details.expectedDate} onChange={(e) => set("expectedDate", e.target.value)} className="w-full px-3 py-2 glass-input text-sm" />
+          </div>
+          <div>
+            <label className="text-[11px] font-medium text-muted-foreground mb-1 block">Supplier Bill / Invoice No.</label>
+            <input type="text" value={details.supplierInvoiceNo} onChange={(e) => set("supplierInvoiceNo", e.target.value)} className="w-full px-3 py-2 glass-input text-sm" placeholder="e.g. 4471" />
+          </div>
+        </div>
+        <div>
+          <label className="text-[11px] font-medium text-muted-foreground mb-1 block">Notes</label>
+          <textarea value={details.notes} onChange={(e) => set("notes", e.target.value)} rows={2}
+            className="w-full px-3 py-2 glass-input text-sm resize-y" placeholder="Delivery terms, what was agreed, anything to remember..." />
+        </div>
+      </div>
+
+      <div className="p-3.5 rounded-xl border border-border space-y-3">
+        <p className="text-xs font-semibold flex items-center gap-1.5"><Wallet className="w-3.5 h-3.5 text-primary" /> Payment</p>
+        <div>
+          <label className="text-[11px] font-medium text-muted-foreground mb-1 block">Purchase Type</label>
+          <div className="grid grid-cols-3 gap-1.5">
+            {PURCHASE_TYPES.map((t) => (
+              <button key={t} type="button"
+                onClick={() => onChange((prev) => ({
+                  ...prev,
+                  purchaseType: t,
+                  // Cash and cheque purchases are paid that way; keep the method in step.
+                  paymentMethod: t === "Cash" ? "Cash" : t === "Cheque" ? "Cheque" : prev.paymentMethod,
+                }))}
+                className={`py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${details.purchaseType === t ? "bg-primary text-white" : "bg-surface hover:bg-surface-hover"}`}>
+                {t}
+              </button>
+            ))}
+          </div>
+          {details.purchaseType === "Other" && (
+            <input type="text" value={details.purchaseTypeNote} onChange={(e) => set("purchaseTypeNote", e.target.value)}
+              className="w-full mt-2 px-3 py-2 glass-input text-sm" placeholder="Specify, e.g. credit, exchange, consignment" />
+          )}
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label className="text-[11px] font-medium text-muted-foreground mb-1 block">Payment Method</label>
+            <select value={details.paymentMethod} onChange={(e) => set("paymentMethod", e.target.value)} className="w-full px-3 py-2 glass-input text-sm">
+              <option value="">Not paid yet</option>
+              {PURCHASE_PAYMENT_METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="text-[11px] font-medium text-muted-foreground mb-1 block">{referenceLabel(details.paymentMethod)}</label>
+            <input type="text" value={details.paymentReference} onChange={(e) => set("paymentReference", e.target.value)} className="w-full px-3 py-2 glass-input text-sm" />
+          </div>
+          {needsBank(details) && (
+            <div>
+              <label className="text-[11px] font-medium text-muted-foreground mb-1 block">Bank Name</label>
+              <input type="text" value={details.bankName} onChange={(e) => set("bankName", e.target.value)} className="w-full px-3 py-2 glass-input text-sm" placeholder="e.g. Meezan Bank" />
+            </div>
+          )}
+          <div>
+            <label className="text-[11px] font-medium text-muted-foreground mb-1 block">
+              {details.paymentMethod === "Cheque" ? "Cheque Date" : "Payment Date"}
+            </label>
+            <input type="date" value={details.paymentDate} onChange={(e) => set("paymentDate", e.target.value)} className="w-full px-3 py-2 glass-input text-sm" />
+          </div>
+          <div>
+            <label className="text-[11px] font-medium text-muted-foreground mb-1 flex items-center justify-between">
+              Amount Paid
+              {total > 0 && (
+                <button type="button" onClick={() => set("amountPaid", total)} className="text-primary font-semibold cursor-pointer">Paid in full</button>
+              )}
+            </label>
+            <input type="number" min={0} value={details.amountPaid || ""} onChange={(e) => set("amountPaid", Number(e.target.value))}
+              className="w-full px-3 py-2 glass-input text-sm" placeholder="0" />
+          </div>
+        </div>
+        {total > 0 && (
+          <div className="flex justify-between text-xs pt-2 border-t border-border">
+            <span className="text-muted-foreground">Order total {formatCurrency(total)} · Paid {formatCurrency(details.amountPaid || 0)}</span>
+            <span className={`font-semibold ${balance > 0 ? "text-destructive" : "text-success"}`}>
+              {balance > 0 ? `Balance due ${formatCurrency(balance)}` : "Fully paid"}
+            </span>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
 
 export function SuppliersClient({ suppliers, purchaseOrders, products }: { suppliers: Supplier[]; purchaseOrders: PurchaseOrder[]; products: Product[] }) {
   const { showToast } = useApp();
@@ -54,33 +197,56 @@ export function SuppliersClient({ suppliers, purchaseOrders, products }: { suppl
   const [poSupplierId, setPoSupplierId] = useState("");
   const [poItems, setPoItems] = useState<DraftPOItem[]>([]);
   const [poProductSearch, setPoProductSearch] = useState("");
+  const [poDetails, setPoDetails] = useState<PODetailsInput>(emptyDetails);
+  const [showManualPOItem, setShowManualPOItem] = useState(false);
+  const [manualPOItem, setManualPOItem] = useState({ ...EMPTY_MANUAL_PO_ITEM });
   const [savingPO, setSavingPO] = useState(false);
+
+  const supplierById = useMemo(() => new Map(suppliers.map((s) => [s.id, s])), [suppliers]);
+  const poSupplier = supplierById.get(poSupplierId);
 
   const filteredPOProducts = useMemo(() => {
     if (!poProductSearch) return [];
     const q = poProductSearch.toLowerCase();
-    return products.filter((p) => p.name.toLowerCase().includes(q) || p.brand.toLowerCase().includes(q)).slice(0, 6);
+    return products.filter((p) => p.name.toLowerCase().includes(q) || p.brand.toLowerCase().includes(q) || p.model.toLowerCase().includes(q)).slice(0, 6);
   }, [products, poProductSearch]);
 
   const openCreatePO = () => {
     setPoSupplierId("");
     setPoItems([]);
     setPoProductSearch("");
+    setPoDetails(emptyDetails());
+    setShowManualPOItem(false);
+    setManualPOItem({ ...EMPTY_MANUAL_PO_ITEM });
     setShowCreatePO(true);
   };
 
   const addPOItem = (p: Product) => {
     if (poItems.some((i) => i.productId === p.id)) { showToast("Already added", "info"); return; }
-    setPoItems((prev) => [...prev, { productId: p.id, productName: `${p.brand} ${p.name}`, quantity: 1, unitCost: p.costPrice }]);
+    setPoItems((prev) => [...prev, {
+      key: p.id, productId: p.id, productName: `${p.brand} ${p.name}`.trim(),
+      description: [p.model, p.colour].filter(Boolean).join(" · "), quantity: 1, unitCost: p.costPrice,
+    }]);
     setPoProductSearch("");
   };
 
-  const updatePOItem = (productId: string, field: "quantity" | "unitCost", value: number) => {
-    setPoItems((prev) => prev.map((i) => (i.productId === productId ? { ...i, [field]: value } : i)));
+  const addManualPOItem = () => {
+    const name = manualPOItem.name.trim();
+    if (!name) { showToast("Enter the item's name", "error"); return; }
+    setPoItems((prev) => [...prev, {
+      key: `manual-${Date.now()}`, productId: null, productName: name, description: manualPOItem.description.trim(),
+      quantity: Math.max(1, Math.floor(Number(manualPOItem.quantity) || 1)), unitCost: Math.max(0, Number(manualPOItem.unitCost) || 0),
+    }]);
+    setManualPOItem({ ...EMPTY_MANUAL_PO_ITEM });
+    setShowManualPOItem(false);
   };
 
-  const removePOItem = (productId: string) => {
-    setPoItems((prev) => prev.filter((i) => i.productId !== productId));
+  const updatePOItem = <K extends "quantity" | "unitCost" | "description">(key: string, field: K, value: DraftPOItem[K]) => {
+    setPoItems((prev) => prev.map((i) => (i.key === key ? { ...i, [field]: value } : i)));
+  };
+
+  const removePOItem = (key: string) => {
+    setPoItems((prev) => prev.filter((i) => i.key !== key));
   };
 
   const poTotal = poItems.reduce((sum, i) => sum + i.quantity * i.unitCost, 0);
@@ -91,17 +257,47 @@ export function SuppliersClient({ suppliers, purchaseOrders, products }: { suppl
     setSavingPO(true);
     try {
       const res = await createPurchaseOrder({
+        ...poDetails,
         supplierId: poSupplierId,
-        items: poItems.map((i) => ({ productId: i.productId, quantity: i.quantity, unitCost: i.unitCost })),
+        items: poItems.map((i) => (i.productId
+          ? { productId: i.productId, description: i.description, quantity: i.quantity, unitCost: i.unitCost }
+          : { name: i.productName, description: i.description, quantity: i.quantity, unitCost: i.unitCost })),
       });
+      if (!res.ok) { showToast(res.error, "error"); return; }
       showToast(`Purchase order ${res.poNumber} created`, "success");
       setShowCreatePO(false);
       setActiveTab("orders");
       router.refresh();
-    } catch (e) {
-      showToast(e instanceof Error ? e.message : "Could not create purchase order", "error");
+    } catch {
+      showToast("Could not create the purchase order — check the connection and try again", "error");
     } finally {
       setSavingPO(false);
+    }
+  };
+
+  // Edit order / payment details after the order was placed
+  const [editingPO, setEditingPO] = useState<PurchaseOrder | null>(null);
+  const [editDetails, setEditDetails] = useState<PODetailsInput>(emptyDetails);
+  const [savingDetails, setSavingDetails] = useState(false);
+
+  const openEditDetails = (po: PurchaseOrder) => {
+    setEditDetails(detailsFromPO(po));
+    setEditingPO(po);
+  };
+
+  const saveDetails = async () => {
+    if (!editingPO) return;
+    setSavingDetails(true);
+    try {
+      const res = await updatePurchaseOrderDetails(editingPO.id, editDetails);
+      if (!res.ok) { showToast(res.error, "error"); return; }
+      showToast(`${editingPO.poNumber} updated`, "success");
+      setEditingPO(null);
+      router.refresh();
+    } catch {
+      showToast("Could not save — check the connection and try again", "error");
+    } finally {
+      setSavingDetails(false);
     }
   };
 
@@ -202,21 +398,53 @@ export function SuppliersClient({ suppliers, purchaseOrders, products }: { suppl
           <div className="glass-card p-12 text-center text-muted-foreground text-sm">No purchase orders yet</div>
         ) : (
         <div className="space-y-4">
-          {purchaseOrders.map((po) => (
+          {purchaseOrders.map((po) => {
+            const supplier = supplierById.get(po.supplierId);
+            const balance = Math.max(0, po.total - po.amountPaid);
+            const purchaseType = po.purchaseType === "Other" && po.purchaseTypeNote ? `Other — ${po.purchaseTypeNote}` : po.purchaseType;
+            return (
             <div key={po.id} className="glass-card p-5">
-              <div className="flex items-start justify-between mb-4">
+              <div className="flex items-start justify-between gap-3 mb-3">
                 <div>
-                  <h3 className="font-semibold text-sm flex items-center gap-2">
+                  <h3 className="font-semibold text-sm flex items-center gap-2 flex-wrap">
                     {po.poNumber}
                     <span className={`chip ${
                       po.status === "Received" ? "chip-paid" :
                       po.status === "Ordered" ? "chip-advance" :
                       po.status === "Partial" ? "chip-balance" : "bg-surface text-muted-foreground"
                     }`}>{po.status}</span>
+                    {purchaseType && <span className="chip bg-primary/10 text-primary">{purchaseType}</span>}
                   </h3>
                   <p className="text-xs text-muted-foreground mt-0.5">{po.supplierName} · {formatDate(po.date)}</p>
+                  {supplier && (supplier.contact || supplier.phone) && (
+                    <p className="text-[11px] text-muted-foreground">{[supplier.contact, supplier.phone].filter(Boolean).join(" · ")}</p>
+                  )}
                 </div>
-                <p className="text-lg font-bold text-primary">{formatCurrency(po.total)}</p>
+                <div className="text-right">
+                  <p className="text-lg font-bold text-primary">{formatCurrency(po.total)}</p>
+                  <p className={`text-[11px] font-medium ${balance > 0 ? "text-destructive" : "text-success"}`}>
+                    {balance > 0 ? `Balance due ${formatCurrency(balance)}` : "Fully paid"}
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-2 text-[11px] mb-4 p-3 rounded-xl bg-surface">
+                <div><p className="text-muted-foreground">Supplier bill no.</p><p className="font-medium">{po.supplierInvoiceNo || "—"}</p></div>
+                <div><p className="text-muted-foreground">Expected delivery</p><p className="font-medium">{po.expectedDate ? formatDate(po.expectedDate) : "—"}</p></div>
+                <div><p className="text-muted-foreground">Payment</p><p className="font-medium">{po.paymentMethod || "Not paid yet"}</p></div>
+                <div><p className="text-muted-foreground">Paid</p><p className="font-medium">{formatCurrency(po.amountPaid)}{po.paymentDate ? ` · ${formatDate(po.paymentDate)}` : ""}</p></div>
+                {(po.paymentReference || po.bankName) && (
+                  <div className="col-span-2 sm:col-span-4">
+                    <p className="text-muted-foreground">{referenceLabel(po.paymentMethod)}</p>
+                    <p className="font-medium">{[po.paymentReference, po.bankName].filter(Boolean).join(" · ")}</p>
+                  </div>
+                )}
+                {po.notes && (
+                  <div className="col-span-2 sm:col-span-4">
+                    <p className="text-muted-foreground">Notes</p>
+                    <p className="font-medium whitespace-pre-wrap">{po.notes}</p>
+                  </div>
+                )}
               </div>
 
               <table className="w-full text-xs mb-4">
@@ -230,9 +458,15 @@ export function SuppliersClient({ suppliers, purchaseOrders, products }: { suppl
                   </tr>
                 </thead>
                 <tbody>
-                  {po.items.map((item, i) => (
-                    <tr key={i} className="border-b border-border">
-                      <td className="py-2">{item.productName}</td>
+                  {po.items.map((item) => (
+                    <tr key={item.id} className="border-b border-border align-top">
+                      <td className="py-2">
+                        <p>
+                          {item.productName}
+                          {!item.productId && <span className="ml-1.5 text-[9px] px-1.5 py-0.5 rounded-md bg-warning/10 text-warning font-medium">Not in inventory</span>}
+                        </p>
+                        {item.description && <p className="text-[10px] text-muted-foreground">{item.description}</p>}
+                      </td>
                       <td className="py-2 text-center">{item.quantity}</td>
                       <td className="py-2 text-center">
                         <span className={item.received >= item.quantity ? "text-success" : item.received > 0 ? "text-warning" : "text-muted-foreground"}>
@@ -246,14 +480,21 @@ export function SuppliersClient({ suppliers, purchaseOrders, products }: { suppl
                 </tbody>
               </table>
 
-              {po.status !== "Received" && (
-                <button onClick={() => openReceive(po)}
-                  className="flex items-center gap-2 px-4 py-2 bg-success/10 text-success rounded-xl text-xs font-medium hover:bg-success/20 transition-colors cursor-pointer">
-                  <CheckCircle className="w-3.5 h-3.5" /> Receive Stock
+              <div className="flex gap-2 flex-wrap">
+                {po.status !== "Received" && (
+                  <button onClick={() => openReceive(po)}
+                    className="flex items-center gap-2 px-4 py-2 bg-success/10 text-success rounded-xl text-xs font-medium hover:bg-success/20 transition-colors cursor-pointer">
+                    <CheckCircle className="w-3.5 h-3.5" /> Receive Stock
+                  </button>
+                )}
+                <button onClick={() => openEditDetails(po)}
+                  className="flex items-center gap-2 px-4 py-2 glass-card text-xs font-medium cursor-pointer">
+                  <Pencil className="w-3.5 h-3.5" /> Edit Details &amp; Payment
                 </button>
-              )}
+              </div>
             </div>
-          ))}
+            );
+          })}
         </div>
         )
       )}
@@ -303,66 +544,135 @@ export function SuppliersClient({ suppliers, purchaseOrders, products }: { suppl
 
       {showCreatePO && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowCreatePO(false)}>
-          <div className="glass-modal p-6 w-full max-w-lg animate-rise max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+          <div className="glass-modal p-6 w-full max-w-2xl animate-rise max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold">Create Purchase Order</h3>
               <button onClick={() => setShowCreatePO(false)} className="cursor-pointer"><X className="w-5 h-5" /></button>
             </div>
             <div className="space-y-3">
-              <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Supplier *</label>
+              <div className="p-3.5 rounded-xl border border-border space-y-2">
+                <p className="text-xs font-semibold flex items-center gap-1.5"><Building2 className="w-3.5 h-3.5 text-primary" /> Supplier Information</p>
                 <select value={poSupplierId} onChange={(e) => setPoSupplierId(e.target.value)} className="w-full px-4 py-2.5 glass-input text-sm">
                   <option value="">Select a supplier...</option>
                   {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                 </select>
+                {poSupplier && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-[11px] text-muted-foreground px-1">
+                    <p>Contact: <span className="text-foreground font-medium">{poSupplier.contact || "—"}</span></p>
+                    <p>Phone: <span className="text-foreground font-medium">{poSupplier.phone || "—"}</span></p>
+                    <p>Email: <span className="text-foreground font-medium">{poSupplier.email || "—"}</span></p>
+                    <p>NTN: <span className="text-foreground font-medium">{poSupplier.gst || "—"}</span></p>
+                    <p className="sm:col-span-2">Address: <span className="text-foreground font-medium">{poSupplier.address || "—"}</span></p>
+                  </div>
+                )}
+                {suppliers.length === 0 && (
+                  <p className="text-[11px] text-warning">No suppliers yet — add one first with &ldquo;Add Supplier&rdquo;.</p>
+                )}
               </div>
 
-              <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Add Items</label>
+              <div className="p-3.5 rounded-xl border border-border space-y-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-semibold">Items</p>
+                  <button type="button" onClick={() => setShowManualPOItem((v) => !v)}
+                    className="flex items-center gap-1 text-[11px] text-primary font-semibold cursor-pointer">
+                    <PenLine className="w-3 h-3" /> Item not in inventory
+                  </button>
+                </div>
                 <div className="relative">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-                  <input type="text" placeholder="Search products..." value={poProductSearch}
+                  <input type="text" placeholder="Search products by name, brand or model..." value={poProductSearch}
                     onChange={(e) => setPoProductSearch(e.target.value)} className="w-full pl-9 pr-4 py-2 glass-input text-sm" />
                 </div>
                 {filteredPOProducts.length > 0 && (
-                  <div className="mt-1 glass rounded-xl p-1.5 max-h-36 overflow-y-auto">
+                  <div className="glass rounded-xl p-1.5 max-h-36 overflow-y-auto">
                     {filteredPOProducts.map((p) => (
                       <button key={p.id} onClick={() => addPOItem(p)}
                         className="w-full text-left px-3 py-1.5 rounded-lg hover:bg-surface-hover text-xs cursor-pointer">
-                        {p.brand} {p.name} · Cost {formatCurrency(p.costPrice)}
+                        {p.brand} {p.name} {p.model && <span className="text-muted-foreground">· {p.model}</span>} · Cost {formatCurrency(p.costPrice)}
                       </button>
                     ))}
                   </div>
                 )}
+
+                {showManualPOItem && (
+                  <div className="p-2.5 rounded-xl bg-primary/5 border border-primary/30 space-y-2">
+                    <div className="grid grid-cols-2 sm:grid-cols-12 gap-2">
+                      <input type="text" value={manualPOItem.name} autoFocus onChange={(e) => setManualPOItem({ ...manualPOItem, name: e.target.value })}
+                        placeholder="Item name *" className="col-span-2 sm:col-span-4 px-3 py-2 glass-input text-xs" />
+                      <input type="text" value={manualPOItem.description} onChange={(e) => setManualPOItem({ ...manualPOItem, description: e.target.value })}
+                        placeholder="Details (model, colour...)" className="col-span-2 sm:col-span-4 px-3 py-2 glass-input text-xs" />
+                      <input type="number" min={1} value={manualPOItem.quantity} onChange={(e) => setManualPOItem({ ...manualPOItem, quantity: e.target.value })}
+                        placeholder="Qty" title="Quantity" className="sm:col-span-2 px-3 py-2 glass-input text-xs" />
+                      <input type="number" min={0} value={manualPOItem.unitCost} onChange={(e) => setManualPOItem({ ...manualPOItem, unitCost: e.target.value })}
+                        placeholder="Unit cost" className="sm:col-span-2 px-3 py-2 glass-input text-xs" />
+                    </div>
+                    <button type="button" onClick={addManualPOItem}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-white rounded-lg text-xs font-semibold cursor-pointer">
+                      <Plus className="w-3.5 h-3.5" /> Add item
+                    </button>
+                  </div>
+                )}
+
+                {poItems.length > 0 && (
+                  <div className="space-y-2">
+                    {poItems.map((item) => (
+                      <div key={item.key} className="p-2.5 bg-surface rounded-xl">
+                        <div className="flex items-center gap-2">
+                          <span className="flex-1 text-xs font-medium truncate">
+                            {item.productName}
+                            {!item.productId && <span className="ml-1.5 text-[9px] px-1.5 py-0.5 rounded-md bg-warning/10 text-warning">Not in inventory</span>}
+                          </span>
+                          <input type="number" min={1} value={item.quantity}
+                            onChange={(e) => updatePOItem(item.key, "quantity", Math.max(1, Number(e.target.value)))}
+                            className="w-16 px-2 py-1.5 glass-input text-xs text-center" placeholder="Qty" title="Quantity" />
+                          <input type="number" min={0} value={item.unitCost}
+                            onChange={(e) => updatePOItem(item.key, "unitCost", Number(e.target.value))}
+                            className="w-20 px-2 py-1.5 glass-input text-xs text-center" placeholder="Cost" title="Unit cost" />
+                          <span className="text-xs font-medium w-20 text-right">{formatCurrency(item.quantity * item.unitCost)}</span>
+                          <button onClick={() => removePOItem(item.key)} className="cursor-pointer">
+                            <Trash2 className="w-3.5 h-3.5 text-destructive" />
+                          </button>
+                        </div>
+                        <input type="text" value={item.description}
+                          onChange={(e) => updatePOItem(item.key, "description", e.target.value)}
+                          placeholder="Details for this line (model, colour, size...)"
+                          className="mt-1.5 w-full px-2 py-1 glass-input text-[11px]" />
+                      </div>
+                    ))}
+                    <div className="flex justify-between items-center pt-2 border-t border-border">
+                      <span className="text-sm font-semibold">Total</span>
+                      <span className="text-lg font-bold text-primary">{formatCurrency(poTotal)}</span>
+                    </div>
+                  </div>
+                )}
               </div>
 
-              {poItems.length > 0 && (
-                <div className="space-y-2">
-                  {poItems.map((item) => (
-                    <div key={item.productId} className="flex items-center gap-2 p-2.5 bg-surface rounded-xl">
-                      <span className="flex-1 text-xs font-medium truncate">{item.productName}</span>
-                      <input type="number" min={1} value={item.quantity}
-                        onChange={(e) => updatePOItem(item.productId, "quantity", Math.max(1, Number(e.target.value)))}
-                        className="w-16 px-2 py-1.5 glass-input text-xs text-center" placeholder="Qty" />
-                      <input type="number" min={0} value={item.unitCost}
-                        onChange={(e) => updatePOItem(item.productId, "unitCost", Number(e.target.value))}
-                        className="w-20 px-2 py-1.5 glass-input text-xs text-center" placeholder="Cost" />
-                      <span className="text-xs font-medium w-20 text-right">{formatCurrency(item.quantity * item.unitCost)}</span>
-                      <button onClick={() => removePOItem(item.productId)} className="cursor-pointer">
-                        <Trash2 className="w-3.5 h-3.5 text-destructive" />
-                      </button>
-                    </div>
-                  ))}
-                  <div className="flex justify-between items-center pt-2 border-t border-border">
-                    <span className="text-sm font-semibold">Total</span>
-                    <span className="text-lg font-bold text-primary">{formatCurrency(poTotal)}</span>
-                  </div>
-                </div>
-              )}
+              <PODetailsFields details={poDetails} onChange={setPoDetails} total={poTotal} />
 
               <button onClick={savePO} disabled={savingPO}
                 className="w-full py-2.5 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-primary-hover transition-colors disabled:opacity-60 flex items-center justify-center gap-2 cursor-pointer">
                 {savingPO && <Loader2 className="w-4 h-4 animate-spin" />} Create Purchase Order
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {editingPO && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setEditingPO(null)}>
+          <div className="glass-modal p-6 w-full max-w-2xl animate-rise max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-lg font-semibold">{editingPO.poNumber} — Details &amp; Payment</h3>
+                <p className="text-xs text-muted-foreground">{editingPO.supplierName} · {formatCurrency(editingPO.total)}</p>
+              </div>
+              <button onClick={() => setEditingPO(null)} className="cursor-pointer"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="space-y-3">
+              <PODetailsFields details={editDetails} onChange={setEditDetails} total={editingPO.total} />
+              <button onClick={saveDetails} disabled={savingDetails}
+                className="w-full py-2.5 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-primary-hover transition-colors disabled:opacity-60 flex items-center justify-center gap-2 cursor-pointer">
+                {savingDetails && <Loader2 className="w-4 h-4 animate-spin" />} Save Details
               </button>
             </div>
           </div>
@@ -384,6 +694,9 @@ export function SuppliersClient({ suppliers, purchaseOrders, products }: { suppl
                     <div className="flex-1">
                       <p className="text-xs font-medium">{item.productName}</p>
                       <p className="text-[10px] text-muted-foreground">Ordered {item.quantity} · Received {item.received} · Remaining {remaining}</p>
+                      {!item.productId && (
+                        <p className="text-[10px] text-warning">Not in inventory — marked received only; add it as a product to track its stock.</p>
+                      )}
                     </div>
                     <input type="number" min={0} max={remaining} value={receiveQtys[item.id] ?? 0}
                       disabled={remaining === 0}

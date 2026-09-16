@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { DashboardData, SaleView } from "@/lib/data";
 import type { Product } from "@/lib/mock/types";
 import { formatCurrency, formatDate, formatDateTime } from "@/lib/utils/format";
+import { paymentStatusChipClass } from "@/lib/constants";
 import {
   DollarSign, FileText, TrendingUp, AlertTriangle,
   ChevronDown, ChevronUp, PackageX, Receipt,
@@ -96,7 +97,7 @@ export function MonitorClient({
                       <p className="text-xs text-muted-foreground">{formatDate(sale.date)}</p>
                     </div>
                     <div className="flex items-center gap-3">
-                      <span className={`chip chip-${sale.paymentStatus.toLowerCase()}`}>{sale.paymentStatus}</span>
+                      <span className={`chip ${paymentStatusChipClass(sale.paymentStatus)}`}>{sale.paymentStatus}</span>
                       <span className="text-sm font-semibold">{formatCurrency(sale.total)}</span>
                       {isOpen ? <ChevronUp className="w-3.5 h-3.5 text-muted-foreground" /> : <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />}
                     </div>

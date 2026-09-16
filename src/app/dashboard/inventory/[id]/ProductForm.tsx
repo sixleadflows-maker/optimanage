@@ -5,10 +5,11 @@ import { useRouter } from "next/navigation";
 import type { Product } from "@/lib/mock/types";
 import { formatCurrency } from "@/lib/utils/format";
 import { useApp } from "@/lib/context";
-import { PRODUCT_CATEGORIES, PRODUCT_TYPES, BRAND_TAGS, DAMAGE_TYPES } from "@/lib/constants";
+import { PRODUCT_CATEGORIES, BRAND_TAGS, DAMAGE_TYPES, typesForCategory } from "@/lib/constants";
 import { createProduct, updateProduct, deleteProduct, generateBarcode, checkExistingProduct } from "@/lib/actions/products";
 import { uploadProductImage } from "@/lib/actions/upload";
-import { ArrowLeft, Save, Barcode, Shield, ShieldAlert, ShieldCheck, ShieldOff, Trash2, Loader2, Printer, Upload, X, Wand2, AlertTriangle, Boxes } from "lucide-react";
+import { ArrowLeft, Save, Barcode, Shield, ShieldAlert, ShieldCheck, ShieldOff, Trash2, Loader2, Printer, Upload, X, Wand2, AlertTriangle, Boxes, Images } from "lucide-react";
+import { ImageLibraryPicker } from "@/components/ui/ImageLibraryPicker";
 import Link from "next/link";
 import { ImageCarousel } from "@/components/ui/ImageCarousel";
 import { parseImages } from "@/lib/utils/images";
@@ -44,6 +45,7 @@ export function ProductForm({ product, isNew, isOwner = false, barcodeWidth = 2,
     type: product?.type || "Acetate",
     colour: product?.colour || "",
     size: product?.size || "",
+    description: product?.description || "",
     costPrice: product?.costPrice || 0,
     salePrice: product?.salePrice || 0,
     // A new frame is almost always one unit. Starting at 0 meant tabbing past
@@ -60,6 +62,24 @@ export function ProductForm({ product, isNew, isOwner = false, barcodeWidth = 2,
   });
 
   const update = (field: string, value: string | number | boolean) => setForm((p) => ({ ...p, [field]: value }));
+
+  // Type options follow the category (frame material, clear/coloured contact
+  // lens, lens-kit wear schedule). Switching category drops a type that no
+  // longer applies instead of saving, say, a contact lens as "Acetate".
+  const typeOptions = typesForCategory(form.category);
+  const changeCategory = (category: string) =>
+    setForm((p) => {
+      const options = typesForCategory(category);
+      return { ...p, category: category as typeof p.category, type: options.includes(p.type) ? p.type : options[0] ?? "" };
+    });
+
+  const [showLibrary, setShowLibrary] = useState(false);
+  const addLibraryImages = (urls: string[]) => {
+    const current = parseImages(form.image);
+    update("image", [...current, ...urls.filter((u) => !current.includes(u))].join(","));
+    setShowLibrary(false);
+    showToast(`${urls.length} photo${urls.length === 1 ? "" : "s"} added — Save to keep`, "success");
+  };
 
   // Every product carries a barcode automatically — for a brand-new product,
   // generate one as soon as the form opens so it's populated and printable
@@ -289,16 +309,24 @@ export function ProductForm({ product, isNew, isOwner = false, barcodeWidth = 2,
               </div>
               <div>
                 <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Category (Sunglass / Frame)</label>
-                <select value={form.category} onChange={(e) => update("category", e.target.value)} className="w-full px-4 py-2.5 glass-input text-sm">
+                <select value={form.category} onChange={(e) => changeCategory(e.target.value)} className="w-full px-4 py-2.5 glass-input text-sm">
                   {PRODUCT_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
                 </select>
               </div>
-              <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Type</label>
-                <select value={form.type} onChange={(e) => update("type", e.target.value)} className="w-full px-4 py-2.5 glass-input text-sm">
-                  {PRODUCT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-                </select>
-              </div>
+              {typeOptions.length > 0 && (
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
+                    {form.category === "Contact Lenses" ? "Lens Type" : form.category === "Lens Kit" ? "Wear Type" : "Type"}
+                  </label>
+                  <select value={form.type} onChange={(e) => update("type", e.target.value)} className="w-full px-4 py-2.5 glass-input text-sm">
+                    {/* Items saved before types depended on the category can
+                        hold a value that isn't in this list; keep it visible
+                        rather than silently showing (and saving) a different one. */}
+                    {!typeOptions.includes(form.type) && <option value={form.type}>{form.type || "Select…"}</option>}
+                    {typeOptions.map((t) => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                </div>
+              )}
               <div>
                 <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Colour</label>
                 <input type="text" value={form.colour} onChange={(e) => update("colour", e.target.value)} className="w-full px-4 py-2.5 glass-input text-sm" />
@@ -319,6 +347,12 @@ export function ProductForm({ product, isNew, isOwner = false, barcodeWidth = 2,
                     Auto-generate
                   </button>
                 </div>
+              </div>
+              <div className="sm:col-span-2">
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Description</label>
+                <textarea value={form.description} onChange={(e) => update("description", e.target.value)} rows={2}
+                  className="w-full px-4 py-2.5 glass-input text-sm resize-y"
+                  placeholder="e.g. lens colour, coating, power or other details — printed on the bill" />
               </div>
             </div>
           </div>
@@ -438,11 +472,15 @@ export function ProductForm({ product, isNew, isOwner = false, barcodeWidth = 2,
               </div>
             )}
 
+            <button type="button" onClick={() => setShowLibrary(true)}
+              className="w-full mt-3 flex items-center justify-center gap-2 py-2.5 bg-primary/10 text-primary rounded-2xl text-sm font-semibold hover:bg-primary/15 transition-colors cursor-pointer">
+              <Images className="w-4 h-4" /> Choose from Library
+            </button>
             <input ref={fileInputRef} type="file" accept="image/*" onChange={handleFileSelected} className="hidden" />
             <button type="button" onClick={() => fileInputRef.current?.click()} disabled={uploading}
-              className="w-full mt-3 flex items-center justify-center gap-2 py-2.5 glass-card text-sm font-medium cursor-pointer disabled:opacity-60">
+              className="w-full mt-2 flex items-center justify-center gap-2 py-2.5 glass-card text-sm font-medium cursor-pointer disabled:opacity-60">
               {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
-              {uploading ? "Uploading..." : "Upload Photo"}
+              {uploading ? "Uploading..." : "Upload New Photo"}
             </button>
 
             <div className="mt-3">
@@ -460,7 +498,7 @@ export function ProductForm({ product, isNew, isOwner = false, barcodeWidth = 2,
               </div>
               <div className="flex justify-between text-xs">
                 <span className="text-muted-foreground">Type</span>
-                <span className="font-medium">{form.type}</span>
+                <span className="font-medium">{form.type || "—"}</span>
               </div>
               <div className="flex justify-between text-xs">
                 <span className="text-muted-foreground">Brand Tag</span>
@@ -525,6 +563,11 @@ export function ProductForm({ product, isNew, isOwner = false, barcodeWidth = 2,
             barcodeWidth={barcodeWidth} barcodeHeight={barcodeHeight} />
         )}
       </PrintPortal>
+
+      {showLibrary && (
+        <ImageLibraryPicker current={parseImages(form.image)} matchText={`${form.brand} ${form.model}`}
+          onAdd={addLibraryImages} onClose={() => setShowLibrary(false)} />
+      )}
     </div>
   );
 }

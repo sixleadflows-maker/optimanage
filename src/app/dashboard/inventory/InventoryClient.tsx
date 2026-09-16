@@ -3,7 +3,7 @@
 import { useState, useMemo } from "react";
 import type { Product } from "@/lib/mock/types";
 import { formatCurrency } from "@/lib/utils/format";
-import { PRODUCT_CATEGORIES, BRAND_TAGS } from "@/lib/constants";
+import { PRODUCT_CATEGORIES, BRAND_TAGS, CATEGORIES_WITH_TYPE_FILTER, typesForCategory } from "@/lib/constants";
 import { Search, Grid3X3, List, Plus, AlertTriangle, PackageX, X } from "lucide-react";
 import Link from "next/link";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -21,23 +21,43 @@ function categoryIcon(category: string) {
 export function InventoryClient({ products, isOwner }: { products: Product[]; isOwner: boolean }) {
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<string>("All");
+  const [typeFilter, setTypeFilter] = useState<string>("All");
   const [tagFilter, setTagFilter] = useState<string>("All");
   const [stockFilter, setStockFilter] = useState<"all" | "out">("all");
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
 
+  const selectCategory = (cat: string) => {
+    setCategoryFilter(cat);
+    setTypeFilter("All");
+  };
+
   const filtered = useMemo(() => {
+    const q = search.toLowerCase();
     return products.filter((p) => {
       const matchesSearch =
-        p.name.toLowerCase().includes(search.toLowerCase()) ||
-        p.brand.toLowerCase().includes(search.toLowerCase()) ||
-        p.model.toLowerCase().includes(search.toLowerCase()) ||
+        p.name.toLowerCase().includes(q) ||
+        p.brand.toLowerCase().includes(q) ||
+        p.model.toLowerCase().includes(q) ||
+        p.description.toLowerCase().includes(q) ||
         p.barcode.includes(search);
       const matchesCategory = categoryFilter === "All" || p.category === categoryFilter;
+      const matchesType = typeFilter === "All" || p.type === typeFilter;
       const matchesTag = tagFilter === "All" || p.brandTag === tagFilter;
       const matchesStock = stockFilter === "all" || p.stock <= 0;
-      return matchesSearch && matchesCategory && matchesTag && matchesStock;
+      return matchesSearch && matchesCategory && matchesType && matchesTag && matchesStock;
     });
-  }, [products, search, categoryFilter, tagFilter, stockFilter]);
+  }, [products, search, categoryFilter, typeFilter, tagFilter, stockFilter]);
+
+  // Contact lenses (clear vs coloured) and lens kits (daily/monthly/extended
+  // wear) are split by type, so picking one of those categories offers the
+  // split as its own row of filters.
+  const subTypes = CATEGORIES_WITH_TYPE_FILTER.includes(categoryFilter) ? typesForCategory(categoryFilter) : [];
+  const subTypeCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const p of products) if (p.category === categoryFilter) counts[p.type] = (counts[p.type] ?? 0) + 1;
+    return counts;
+  }, [products, categoryFilter]);
+  const categoryTotal = Object.values(subTypeCounts).reduce((a, b) => a + b, 0);
 
   // Counts sit on the buttons so staff can see at a glance how many copies are
   // in stock without switching filters.
@@ -126,7 +146,7 @@ export function InventoryClient({ products, isOwner }: { products: Product[]; is
           </div>
           <div className="flex gap-1.5 flex-wrap">
             {["All", ...PRODUCT_CATEGORIES].map((cat) => (
-              <button key={cat} onClick={() => setCategoryFilter(cat)}
+              <button key={cat} onClick={() => selectCategory(cat)}
                 className={`px-3 py-2 rounded-xl text-xs font-medium transition-all whitespace-nowrap ${categoryFilter === cat ? "bg-primary text-white" : "bg-surface hover:bg-surface-hover"}`}>
                 {cat}
               </button>
@@ -141,6 +161,18 @@ export function InventoryClient({ products, isOwner }: { products: Product[]; is
             </button>
           </div>
         </div>
+
+        {subTypes.length > 0 && (
+          <div className="flex items-center gap-1.5 flex-wrap mb-4 -mt-1">
+            <span className="text-xs font-medium text-muted-foreground mr-1">{categoryFilter}:</span>
+            {["All", ...subTypes].map((t) => (
+              <button key={t} onClick={() => setTypeFilter(t)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-all whitespace-nowrap ${typeFilter === t ? "bg-secondary text-white" : "bg-surface hover:bg-surface-hover"}`}>
+                {t} ({t === "All" ? categoryTotal : subTypeCounts[t] ?? 0})
+              </button>
+            ))}
+          </div>
+        )}
 
         {filtered.length === 0 ? (
           <EmptyState title="No frames match" hint="Try another name, brand, or barcode — or add it as a new product." />
@@ -166,7 +198,7 @@ export function InventoryClient({ products, isOwner }: { products: Product[]; is
                 </div>
                 <div className="flex gap-1 mt-2 flex-wrap">
                   <span className={`text-[9px] px-1.5 py-0.5 rounded-md font-medium ${product.brandTag === "Original" ? "bg-success/10 text-success" : product.brandTag === "Copy" ? "bg-warning/10 text-warning" : product.brandTag === "Branded" ? "bg-primary/10 text-primary" : "bg-surface text-muted-foreground"}`}>{product.brandTag}</span>
-                  <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-surface text-muted-foreground">{product.type}</span>
+                  {product.type && <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-surface text-muted-foreground">{product.type}</span>}
                   {product.isDamaged && (
                     <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-destructive/10 text-destructive font-medium">⚠ Damaged</span>
                   )}

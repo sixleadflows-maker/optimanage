@@ -5,7 +5,16 @@ export const PRIMARY_COLOR = "#6d5ef0";
 export const PRIMARY_LIGHT = "#edeafd";
 
 export const PAYMENT_METHODS = ["Cash", "Card", "Bank Transfer", "JazzCash"] as const;
-export const PAYMENT_STATUS = ["Paid", "Advance", "Balance"] as const;
+export const PAYMENT_STATUS = ["Full Payment", "Advance", "Balance"] as const;
+export type PaymentStatusLabel = (typeof PAYMENT_STATUS)[number];
+
+// The till still sends "Full" | "Advance" | "Balance"; this is how each reads to staff.
+export const PAYMENT_TYPE_LABEL = { Full: "Full Payment", Advance: "Advance", Balance: "Balance" } as const;
+
+// Status chips are styled by class name; "Full Payment" has a space in it.
+export function paymentStatusChipClass(status: string) {
+  return `chip-${status.toLowerCase().replace(/\s+/g, "-")}`;
+}
 
 export const PRODUCT_TYPES = [
   "Acetate",
@@ -27,10 +36,33 @@ export const PRODUCT_CATEGORIES = [
   "Kids Frames",
   "Kids Sunglasses",
   "Contact Lenses",
+  "Lens Solution",
+  "Lens Kit",
   "Lens Stock",
 ] as const;
 
 export type ProductCategory = (typeof PRODUCT_CATEGORIES)[number];
+
+export const CONTACT_LENS_TYPES = ["Transparent", "Colored"] as const;
+export const LENS_KIT_TYPES = ["Daily Wear", "Monthly Wear", "Extended Wear"] as const;
+
+// "Type" means something different per category: frame material for eyewear,
+// clear vs coloured for contact lenses, wear schedule for lens kits. Lens
+// solution has no preset types, so an empty list hides the field.
+export function typesForCategory(category: string): readonly string[] {
+  if (category === "Contact Lenses") return CONTACT_LENS_TYPES;
+  if (category === "Lens Kit") return LENS_KIT_TYPES;
+  if (category === "Lens Solution") return [];
+  return PRODUCT_TYPES;
+}
+
+// Categories whose types are worth filtering by on the inventory screen.
+export const CATEGORIES_WITH_TYPE_FILTER: readonly string[] = ["Contact Lenses", "Lens Kit"];
+
+export const PURCHASE_TYPES = ["Cash", "Cheque", "Other"] as const;
+export const PURCHASE_PAYMENT_METHODS = [
+  "Cash", "Cheque", "Bank Transfer", "JazzCash", "EasyPaisa", "Card", "Pay Later (Credit)", "Other",
+] as const;
 
 export const BRAND_TAGS = ["Original", "Copy", "Branded", "Unbranded"] as const;
 
@@ -57,4 +89,4 @@ export const DISCOUNT_PERCENTAGES = [5, 10, 15, 20, 25, 30, 40, 50, 60, 70, 80, 
 // Server Actions bundle at build time.
 export const TRASH_RETENTION_DAYS = 30;
 
-export type TrashKind = "product" | "location" | "staff";
+export type TrashKind = "product" | "customer" | "location" | "staff";

@@ -57,7 +57,8 @@ export async function getMonthlyAnalytics(year: number, month: number): Promise<
     const day = s.date.toISOString().slice(0, 10);
     days[day] = (days[day] || 0) + s.total;
     s.items.forEach((it) => {
-      const p = productById.get(it.productId);
+      // Typed-in items (no productId) have no brand or cost to attribute.
+      const p = it.productId ? productById.get(it.productId) : undefined;
       if (p) {
         brands[p.brand] = (brands[p.brand] || 0) + it.total;
         totalCost += p.costPrice * it.quantity;
