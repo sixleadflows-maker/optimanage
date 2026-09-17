@@ -45,6 +45,9 @@ export interface InvoiceData {
   paymentStatus: string;
   paid: number;
   balance: number;
+  // Money taken after the sale (an advance settled later), printed on the
+  // reissued bill so the customer can see how the total was made up.
+  payments?: { date: string; amount: number; method: string }[];
   prescription: InvoicePrescription | null;
 }
 
@@ -96,11 +99,26 @@ export function ThermalReceipt({ invoice, shop }: { invoice: InvoiceData; shop: 
           <span>TOTAL</span><span>{formatCurrency(invoice.total)}</span>
         </div>
         <p className="text-[11px]">Payment: {invoice.paymentMethod} ({invoice.paymentStatus})</p>
-        {invoice.balance > 0 && (
-          <>
-            <p className="text-[11px]">Paid: {formatCurrency(invoice.paid)}</p>
-            <p className="text-[11px]">Balance: {formatCurrency(invoice.balance)}</p>
-          </>
+        {(invoice.payments?.length ?? 0) > 0 && (
+          <div className="text-[11px] border-t border-dashed border-gray-400 mt-1 pt-1">
+            <p className="font-medium">Payments received</p>
+            <div className="flex justify-between">
+              <span>Advance ({invoice.paymentMethod})</span>
+              <span>{formatCurrency(invoice.paid - invoice.payments!.reduce((s, p) => s + p.amount, 0))}</span>
+            </div>
+            {invoice.payments!.map((p, i) => (
+              <div key={i} className="flex justify-between">
+                <span>{new Date(p.date).toLocaleDateString("en-PK", { day: "2-digit", month: "short" })} ({p.method})</span>
+                <span>{formatCurrency(p.amount)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        <p className="text-[11px]">Paid: {formatCurrency(invoice.paid)}</p>
+        {invoice.balance > 0 ? (
+          <p className="text-[11px] font-bold">Balance: {formatCurrency(invoice.balance)}</p>
+        ) : (
+          <p className="text-[11px] font-bold">PAID IN FULL</p>
         )}
       </div>
       <p className="text-center text-[10px] mt-3 pt-2 border-t border-dashed border-gray-400">
@@ -210,10 +228,29 @@ export function A4Invoice({ invoice, shop }: { invoice: InvoiceData; shop: ShopD
           <div className="flex justify-between text-lg font-bold border-t-2 border-gray-800 pt-2 mt-2">
             <span>Total</span><span className="text-[#6d5ef0]">{formatCurrency(invoice.total)}</span>
           </div>
-          {invoice.balance > 0 && (
+          {(invoice.payments?.length ?? 0) > 0 && (
+            <div className="border-t border-gray-200 pt-1 mt-1 text-xs text-gray-600">
+              <div className="flex justify-between">
+                <span>Advance ({invoice.paymentMethod})</span>
+                <span>{formatCurrency(invoice.paid - invoice.payments!.reduce((s, p) => s + p.amount, 0))}</span>
+              </div>
+              {invoice.payments!.map((p, i) => (
+                <div key={i} className="flex justify-between">
+                  <span>{new Date(p.date).toLocaleDateString("en-PK", { day: "2-digit", month: "short", year: "numeric" })} ({p.method})</span>
+                  <span>{formatCurrency(p.amount)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {invoice.balance > 0 ? (
             <>
               <div className="flex justify-between"><span className="text-gray-600">Paid</span><span>{formatCurrency(invoice.paid)}</span></div>
               <div className="flex justify-between font-semibold"><span>Balance Due</span><span>{formatCurrency(invoice.balance)}</span></div>
+            </>
+          ) : (
+            <>
+              <div className="flex justify-between"><span className="text-gray-600">Paid</span><span>{formatCurrency(invoice.paid)}</span></div>
+              <div className="flex justify-between font-semibold text-[#16a34a]"><span>Paid in full</span><span>Rs.0 due</span></div>
             </>
           )}
         </div>
@@ -233,24 +270,42 @@ export function A4Invoice({ invoice, shop }: { invoice: InvoiceData; shop: ShopD
 }
 
 /** The bill for a sale reopened from history. */
+/** "Blue Cut · 1.56 index", the way the lens should read under its line. */
+export function lensNote(lensColor: string, lensDescription: string) {
+  return [lensColor, lensDescription].map((s) => s.trim()).filter(Boolean).join(" · ");
+}
+
+function withNote(description: string, note: string) {
+  return [description, note].map((s) => s.trim()).filter(Boolean).join(" · ");
+}
+
 export function invoiceFromSale(sale: {
   invoiceNo: string; dateTime: string; customerId: string; customerName: string; customerPhone: string;
   createdByName: string; receivedByName: string;
-  items: { id: string; productName: string; description: string; quantity: number; unitPrice: number; discount: number; total: number }[];
+  items: { id: string; productId: string; productName: string; description: string; quantity: number; unitPrice: number; discount: number; total: number }[];
   customLensName: string; customLensPrice: number;
+  lensProductId: string; lensColor: string; lensDescription: string;
   subtotal: number; discount: number; total: number; paid: number; balance: number;
   paymentMethod: string; paymentStatus: string;
+  payments: { date: string; amount: number; method: string }[];
   prescription: { rightEye: InvoicePrescription["right"]; leftEye: InvoicePrescription["left"]; isOwnPrescription: boolean } | null;
 }): InvoiceData {
+  // Colour and description belong to whichever lens was sold, so they print
+  // under that line rather than as a stray note at the bottom.
+  const note = lensNote(sale.lensColor, sale.lensDescription);
   const lines: InvoiceLine[] = sale.items.map((it) => ({
-    key: it.id, name: it.productName, description: it.description,
+    key: it.id, name: it.productName,
+    description: it.productId && it.productId === sale.lensProductId ? withNote(it.description, note) : it.description,
     quantity: it.quantity, unitPrice: it.unitPrice, discount: it.discount, total: it.total,
   }));
   if (sale.customLensPrice > 0) {
     lines.push({
-      key: "custom-lens", name: sale.customLensName, quantity: 1,
+      key: "custom-lens", name: sale.customLensName, description: note, quantity: 1,
       unitPrice: sale.customLensPrice, discount: 0, total: sale.customLensPrice,
     });
+  } else if (note && !sale.lensProductId) {
+    // A lens noted without a line of its own (colour recorded against the job).
+    lines.push({ key: "lens-note", name: "Lens", description: note, quantity: 1, unitPrice: 0, discount: 0, total: 0 });
   }
   return {
     invoiceNo: sale.invoiceNo,
@@ -267,6 +322,7 @@ export function invoiceFromSale(sale: {
     paymentStatus: sale.paymentStatus,
     paid: sale.paid,
     balance: sale.balance,
+    payments: sale.payments,
     prescription: sale.prescription
       ? { right: sale.prescription.rightEye, left: sale.prescription.leftEye, isOwn: sale.prescription.isOwnPrescription }
       : null,

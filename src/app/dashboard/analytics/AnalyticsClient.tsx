@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import type { AnalyticsData } from "@/lib/data";
 import { formatCurrency } from "@/lib/utils/format";
 import { verifyAnalyticsPin, getMonthlyAnalytics, type MonthlyAnalyticsData } from "@/lib/actions/analytics";
-import { Lock, Loader2, ChevronLeft, ChevronRight, ArrowUpRight, ArrowDownRight } from "lucide-react";
+import { Lock, Loader2, ChevronLeft, ChevronRight, ArrowUpRight, ArrowDownRight, Package, ChevronDown, ChevronUp } from "lucide-react";
 
 const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
@@ -191,6 +191,84 @@ function MonthlyPerformance() {
   );
 }
 
+function InventoryValue({ inventory }: { inventory: AnalyticsData["inventory"] }) {
+  const [showCategories, setShowCategories] = useState(false);
+  const markup = inventory.retailValue - inventory.costValue;
+
+  return (
+    <div className="glass-card p-5">
+      <div className="flex items-start justify-between gap-3 mb-4">
+        <div>
+          <h3 className="text-sm font-semibold flex items-center gap-2">
+            <Package className="w-4 h-4 text-primary" /> Stock on hand
+          </h3>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Everything on the shelves right now — {inventory.units.toLocaleString()} units across{" "}
+            {inventory.products.toLocaleString()} products
+          </p>
+        </div>
+        {inventory.byCategory.length > 0 && (
+          <button
+            onClick={() => setShowCategories((v) => !v)}
+            className="text-xs text-primary font-medium flex items-center gap-1 flex-shrink-0"
+          >
+            {showCategories ? "Hide" : "By category"}
+            {showCategories ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+          </button>
+        )}
+      </div>
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div>
+          <p className="text-xs text-muted-foreground">Cost value</p>
+          <p className="text-lg font-bold mt-1">{formatCurrency(inventory.costValue)}</p>
+          <p className="text-[10px] text-muted-foreground mt-0.5">What the stock cost to buy</p>
+        </div>
+        <div>
+          <p className="text-xs text-muted-foreground">Retail value</p>
+          <p className="text-lg font-bold mt-1">{formatCurrency(inventory.retailValue)}</p>
+          <p className="text-[10px] text-muted-foreground mt-0.5">If it all sold at marked price</p>
+        </div>
+        <div>
+          <p className="text-xs text-muted-foreground">Margin in stock</p>
+          <p className="text-lg font-bold mt-1 text-success">{formatCurrency(markup)}</p>
+          <p className="text-[10px] text-muted-foreground mt-0.5">Retail less cost</p>
+        </div>
+        <div>
+          <p className="text-xs text-muted-foreground">Out of stock</p>
+          <p className="text-lg font-bold mt-1">{inventory.outOfStock.toLocaleString()}</p>
+          <p className="text-[10px] text-muted-foreground mt-0.5">Products showing zero</p>
+        </div>
+      </div>
+
+      {showCategories && (
+        <div className="mt-4 overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-muted-foreground text-left">
+                <th className="font-medium py-2">Category</th>
+                <th className="font-medium py-2 text-right">Units</th>
+                <th className="font-medium py-2 text-right">Cost value</th>
+                <th className="font-medium py-2 text-right">Retail value</th>
+              </tr>
+            </thead>
+            <tbody>
+              {inventory.byCategory.map((c) => (
+                <tr key={c.name} className="border-t border-border">
+                  <td className="py-2 font-medium">{c.name}</td>
+                  <td className="py-2 text-right">{c.units.toLocaleString()}</td>
+                  <td className="py-2 text-right">{formatCurrency(c.costValue)}</td>
+                  <td className="py-2 text-right">{formatCurrency(c.retailValue)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function AnalyticsClient({ data }: { data: AnalyticsData }) {
   const [unlocked, setUnlocked] = useState(!data.requiresPin);
   const [pin, setPin] = useState("");
@@ -257,6 +335,8 @@ export function AnalyticsClient({ data }: { data: AnalyticsData }) {
           </div>
         ))}
       </div>
+
+      <InventoryValue inventory={data.inventory} />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="glass-card p-5">

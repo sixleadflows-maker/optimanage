@@ -27,6 +27,7 @@ model User {
   salesCreated     Sale[]            @relation("SaleCreatedBy")
   salesReceived    Sale[]            @relation("SaleReceivedBy")
   returnsProcessed Return[]          @relation("ReturnProcessedBy")
+  paymentsReceived SalePayment[]     @relation("PaymentReceivedBy")
   stockAdjustments StockAdjustment[]
 }
 
@@ -191,6 +192,8 @@ model Sale {
   lensCost        Float         @default(0)
   customLensName  String        @default("")
   customLensPrice Float         @default(0)
+  lensColor       String        @default("")
+  lensDescription String        @default("")
   labCharges      Float         @default(0)
   fittingCharges  Float         @default(0)
   totalCost       Float         @default(0)
@@ -211,6 +214,7 @@ model Sale {
 
   prescriptions   Prescription[]
   returns         Return[]
+  payments        SalePayment[]
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 
@@ -260,6 +264,26 @@ enum PaymentStatus {
   PAID
   ADVANCE
   BALANCE
+}
+
+/// Money taken against an invoice after the sale itself — the customer coming
+/// back to settle an advance. The sale's own `paid` stays the running total;
+/// these rows say when each part was taken and how, so the day's cash
+/// collection credits the day the money actually came in.
+model SalePayment {
+  id           String   @id @default(cuid())
+  saleId       String
+  sale         Sale     @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  amount       Float    @default(0)
+  method       String   @default("Cash")
+  note         String   @default("")
+  date         DateTime @default(now())
+  receivedById String?
+  receivedBy   User?    @relation("PaymentReceivedBy", fields: [receivedById], references: [id])
+  createdAt    DateTime @default(now())
+
+  @@index([saleId])
+  @@index([date])
 }
 
 // ─── Returns & Refunds ──────────────────────────────────────

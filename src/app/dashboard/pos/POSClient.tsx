@@ -4,7 +4,7 @@ import { useState, useMemo, useRef, useEffect } from "react";
 import type { Product } from "@/lib/mock/types";
 import { formatCurrency } from "@/lib/utils/format";
 import { useApp } from "@/lib/context";
-import { DISCOUNT_PERCENTAGES, PAYMENT_TYPE_LABEL } from "@/lib/constants";
+import { DISCOUNT_PERCENTAGES, LENS_COLORS, PAYMENT_TYPE_LABEL } from "@/lib/constants";
 import { createSale, type CreateSaleInput } from "@/lib/actions/sales";
 import { createCustomer } from "@/lib/actions/customers";
 import { getDrafts, addDraft, removeDraft, type OfflineDraft } from "@/lib/offlineDrafts";
@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { firstImage } from "@/lib/utils/images";
 import { LensLoader } from "@/components/ui/LensLoader";
-import { ThermalReceipt, A4Invoice, type InvoiceData, type ShopDetails } from "@/components/invoice/InvoiceDocuments";
+import { ThermalReceipt, A4Invoice, lensNote, type InvoiceData, type ShopDetails } from "@/components/invoice/InvoiceDocuments";
 
 interface CartItem {
   // productId for an inventory item; a generated key for a typed-in one.
@@ -104,6 +104,10 @@ export function POSClient({
   const [useCustomLens, setUseCustomLens] = useState(false);
   const [customLensName, setCustomLensName] = useState("");
   const [customLensPrice, setCustomLensPrice] = useState(0);
+  // Lens colour: pick from the usual ones, or "Other" and type it.
+  const [lensColorChoice, setLensColorChoice] = useState("");
+  const [lensColorOther, setLensColorOther] = useState("");
+  const [lensDescription, setLensDescription] = useState("");
   const [labCharges, setLabCharges] = useState(0);
   const [fittingCharges, setFittingCharges] = useState(0);
 
@@ -356,6 +360,7 @@ export function POSClient({
   };
 
   const cartSubtotal = cart.reduce((sum, i) => sum + i.price * i.quantity - i.discount, 0);
+  const lensColor = lensColorChoice === "Other" ? lensColorOther.trim() : lensColorChoice;
   const customLensAmount = useCustomLens ? customLensPrice : 0;
   const subtotal = cartSubtotal + customLensAmount;
   const total = subtotal - invoiceDiscount;
@@ -430,6 +435,9 @@ export function POSClient({
     setUseCustomLens(false);
     setCustomLensName("");
     setCustomLensPrice(0);
+    setLensColorChoice("");
+    setLensColorOther("");
+    setLensDescription("");
     setLabCharges(0);
     setFittingCharges(0);
     setRecordRx(false);
@@ -473,6 +481,8 @@ export function POSClient({
       lensProductId: lensProductId || undefined,
       customLensName: useCustomLens ? customLensName.trim() : undefined,
       customLensPrice: useCustomLens ? customLensPrice : undefined,
+      lensColor: lensColor || undefined,
+      lensDescription: lensDescription.trim() || undefined,
       labCharges,
       fittingCharges,
       createdById: orderTakenBy || currentUserId,
@@ -551,14 +561,20 @@ export function POSClient({
         ...cart.map((item) => ({
           key: item.key,
           name: `${item.brand} ${item.name}`.trim(),
-          description: item.description,
+          // Colour and description print under the lens they belong to.
+          description: item.productId && item.productId === lensProductId
+            ? [item.description, lensNote(lensColor, lensDescription)].filter(Boolean).join(" · ")
+            : item.description,
           quantity: item.quantity,
           unitPrice: item.price,
           discount: item.discount,
           total: item.price * item.quantity - item.discount,
         })),
         ...(useCustomLens && customLensAmount > 0
-          ? [{ key: "custom-lens", name: customLensName, quantity: 1, unitPrice: customLensAmount, discount: 0, total: customLensAmount }]
+          ? [{
+              key: "custom-lens", name: customLensName, description: lensNote(lensColor, lensDescription),
+              quantity: 1, unitPrice: customLensAmount, discount: 0, total: customLensAmount,
+            }]
           : []),
       ],
       subtotal,
@@ -948,6 +964,37 @@ export function POSClient({
                     </div>
                   )}
                 </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[10px] font-medium text-muted-foreground mb-1 block">Lens colour</label>
+                    <select
+                      value={lensColorChoice}
+                      onChange={(e) => setLensColorChoice(e.target.value)}
+                      className="w-full px-3 py-2 glass-input text-xs"
+                    >
+                      <option value="">Not specified</option>
+                      {LENS_COLORS.map((c) => <option key={c} value={c}>{c}</option>)}
+                      <option value="Other">Other — type it</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-medium text-muted-foreground mb-1 block">
+                      {lensColorChoice === "Other" ? "Colour" : "Lens description"}
+                    </label>
+                    {lensColorChoice === "Other" ? (
+                      <input type="text" value={lensColorOther} onChange={(e) => setLensColorOther(e.target.value)}
+                        placeholder="Type the colour" className="w-full px-3 py-2 glass-input text-xs" autoFocus />
+                    ) : (
+                      <input type="text" value={lensDescription} onChange={(e) => setLensDescription(e.target.value)}
+                        placeholder="Coating, index, brand..." className="w-full px-3 py-2 glass-input text-xs" />
+                    )}
+                  </div>
+                </div>
+                {lensColorChoice === "Other" && (
+                  <input type="text" value={lensDescription} onChange={(e) => setLensDescription(e.target.value)}
+                    placeholder="Lens description — coating, index, brand..." className="w-full px-3 py-2 glass-input text-xs" />
+                )}
 
                 <div className="p-2.5 rounded-lg bg-muted/50 border border-border">
                   <p className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1 mb-2">

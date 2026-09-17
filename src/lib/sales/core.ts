@@ -37,6 +37,9 @@ export interface PersistSaleInput {
   // Manually-entered lens (no catalog product) — name/price only, no stock impact
   customLensName?: string;
   customLensPrice?: number;
+  // Printed under the lens on the bill, whichever lens was chosen.
+  lensColor?: string;
+  lensDescription?: string;
   prescription?: SalePrescriptionInput;
 }
 
@@ -106,7 +109,21 @@ function isUniqueViolation(e: unknown) {
   return typeof e === "object" && e !== null && (e as { code?: string }).code === "P2002";
 }
 
-export async function persistSale(input: PersistSaleInput, meta: PersistSaleMeta) {
+/**
+ * Prices a cart the one way the shop's numbers are allowed to be worked out —
+ * used when a sale is first rung up and again whenever an invoice is edited,
+ * so a corrected bill can never be calculated differently from a fresh one.
+ */
+async function priceSale(input: {
+  items: SaleCoreItem[];
+  invoiceDiscount: number;
+  lensProductId?: string | null;
+  labCharges?: number;
+  fittingCharges?: number;
+  customLensName?: string;
+  customLensPrice?: number;
+  deliveryFee?: number;
+}) {
   const customLensPrice = Math.max(0, input.customLensPrice ?? 0);
   const customLensName = customLensPrice > 0 ? (input.customLensName ?? "").trim() : "";
   if (!input.items.length && customLensPrice <= 0) throw new SaleError("Cart is empty");
@@ -140,6 +157,10 @@ export async function persistSale(input: PersistSaleInput, meta: PersistSaleMeta
 
     const product = productMap.get(i.productId);
     if (!product) throw new SaleError(`Product not found: ${i.productId}`);
+    if (i.quantity <= 0 || i.unitPrice < 0) {
+      const label = [product.brand, product.name].map((s) => s.trim()).filter(Boolean).join(" ");
+      throw new SaleError(`Check the price and quantity for "${label}"`);
+    }
     subtotal += lineTotal;
     itemCost += product.costPrice * i.quantity;
     return {
@@ -156,7 +177,7 @@ export async function persistSale(input: PersistSaleInput, meta: PersistSaleMeta
   });
   subtotal += customLensPrice;
 
-  const deliveryFee = Math.max(0, meta.deliveryFee ?? 0);
+  const deliveryFee = Math.max(0, input.deliveryFee ?? 0);
   const total = Math.max(0, subtotal - input.invoiceDiscount) + deliveryFee;
   const labCharges = Math.max(0, input.labCharges ?? 0);
   const fittingCharges = Math.max(0, input.fittingCharges ?? 0);
@@ -169,7 +190,27 @@ export async function persistSale(input: PersistSaleInput, meta: PersistSaleMeta
     if (lens) lensCost = lens.costPrice;
   }
   const totalCost = itemCost + lensCost + customLensPrice + labCharges + fittingCharges;
-  const profit = total - totalCost;
+
+  return {
+    saleItems, productMap, subtotal, total, deliveryFee,
+    labCharges, fittingCharges, customLensName, customLensPrice,
+    lensCost, totalCost, profit: total - totalCost,
+  };
+}
+
+/** Where an invoice stands once its total or its payments change. */
+function settle(total: number, paid: number) {
+  const balance = Math.max(0, total - paid);
+  const status = balance <= 0 ? ("PAID" as const) : paid > 0 ? ("ADVANCE" as const) : ("BALANCE" as const);
+  return { balance, status };
+}
+
+export async function persistSale(input: PersistSaleInput, meta: PersistSaleMeta) {
+  const priced = await priceSale({ ...input, deliveryFee: meta.deliveryFee });
+  const {
+    saleItems, productMap, subtotal, total, deliveryFee,
+    labCharges, fittingCharges, customLensName, customLensPrice, lensCost, totalCost, profit,
+  } = priced;
 
   const paymentStatus = paymentStatusFor(input.paymentType);
   const paid = input.paymentType === "Full" ? total : input.paymentType === "Advance" ? input.advanceAmount : 0;
@@ -212,6 +253,8 @@ export async function persistSale(input: PersistSaleInput, meta: PersistSaleMeta
         lensCost,
         customLensName,
         customLensPrice,
+        lensColor: (input.lensColor ?? "").trim(),
+        lensDescription: (input.lensDescription ?? "").trim(),
         labCharges,
         fittingCharges,
         totalCost,
@@ -283,4 +326,151 @@ export async function persistSale(input: PersistSaleInput, meta: PersistSaleMeta
     paid,
     balance,
   };
+}
+
+export interface ReviseSaleInput {
+  items: SaleCoreItem[];
+  invoiceDiscount: number;
+  lensProductId?: string | null;
+  labCharges?: number;
+  fittingCharges?: number;
+  customLensName?: string;
+  customLensPrice?: number;
+  lensColor?: string;
+  lensDescription?: string;
+}
+
+/**
+ * Corrects an invoice that has already been rung up — the job changed after the
+ * customer ordered, or something was entered wrong. Stock moves by the
+ * difference only (a frame swapped for another puts the first one back), and
+ * money already taken stays taken: the balance is simply worked out again
+ * against the new total.
+ */
+export async function reviseSale(saleId: string, input: ReviseSaleInput) {
+  const sale = await db.sale.findUnique({
+    where: { id: saleId },
+    include: { items: true, returns: { select: { returnNo: true } } },
+  });
+  if (!sale) throw new SaleError("Invoice not found");
+  if (sale.returns.length > 0) {
+    throw new SaleError(
+      `This invoice has a return against it (${sale.returns[0].returnNo}). Undo that return before changing the invoice.`
+    );
+  }
+
+  const priced = await priceSale({ ...input, deliveryFee: sale.deliveryFee });
+  if (priced.total < sale.paid) {
+    throw new SaleError(
+      `The new total (Rs.${priced.total.toLocaleString()}) is less than the Rs.${sale.paid.toLocaleString()} already paid. Refund the difference through Return & Refund instead.`
+    );
+  }
+  const { balance, status } = settle(priced.total, sale.paid);
+
+  // Stock only moves by what actually changed — quantities that stayed the same
+  // are never put back and taken again.
+  const quantities = new Map<string, number>();
+  for (const i of sale.items) if (i.productId) quantities.set(i.productId, (quantities.get(i.productId) ?? 0) - i.quantity);
+  for (const i of input.items) if (i.productId) quantities.set(i.productId, (quantities.get(i.productId) ?? 0) + i.quantity);
+
+  await db.$transaction(async (tx) => {
+    for (const [productId, delta] of quantities) {
+      if (delta === 0) continue;
+      if (delta < 0) {
+        await tx.product.update({ where: { id: productId }, data: { stock: { increment: -delta } } });
+        continue;
+      }
+      const result = await tx.product.updateMany({
+        where: { id: productId, stock: { gte: delta } },
+        data: { stock: { decrement: delta } },
+      });
+      if (result.count === 0) {
+        const p = priced.productMap.get(productId);
+        const name = p ? [p.brand, p.name].map((s) => s.trim()).filter(Boolean).join(" ") : productId;
+        throw new SaleError(`Not enough stock for ${name} — refresh the page to see the current count`);
+      }
+    }
+
+    await tx.saleItem.deleteMany({ where: { saleId } });
+    await tx.sale.update({
+      where: { id: saleId },
+      data: {
+        subtotal: priced.subtotal,
+        discount: input.invoiceDiscount,
+        total: priced.total,
+        balance,
+        paymentStatus: status,
+        lensProductId: input.lensProductId || null,
+        lensCost: priced.lensCost,
+        customLensName: priced.customLensName,
+        customLensPrice: priced.customLensPrice,
+        lensColor: (input.lensColor ?? "").trim(),
+        lensDescription: (input.lensDescription ?? "").trim(),
+        labCharges: priced.labCharges,
+        fittingCharges: priced.fittingCharges,
+        totalCost: priced.totalCost,
+        profit: priced.profit,
+        items: { create: priced.saleItems },
+      },
+    });
+
+    // The customer's lifetime spend counted the old total; move it by the change.
+    if (sale.customerId && priced.total !== sale.total) {
+      await tx.customer.update({
+        where: { id: sale.customerId },
+        data: { totalSpend: { increment: priced.total - sale.total } },
+      });
+    }
+  }, { timeout: 20_000 });
+
+  revalidatePath("/dashboard");
+  revalidatePath("/dashboard/sales");
+  revalidatePath("/dashboard/inventory");
+  revalidatePath("/dashboard/customers");
+  revalidatePath("/dashboard/cash");
+
+  return { ok: true as const, invoiceNo: sale.invoiceNo, total: priced.total, paid: sale.paid, balance };
+}
+
+/**
+ * Takes money against an invoice after the sale — a customer settling an
+ * advance. Recorded as its own dated row so the day's cash collection credits
+ * the day the money came in, not the day the glasses were ordered.
+ */
+export async function recordSalePayment(
+  saleId: string,
+  payment: { amount: number; method: string; note?: string; receivedById?: string | null },
+) {
+  const sale = await db.sale.findUnique({ where: { id: saleId } });
+  if (!sale) throw new SaleError("Invoice not found");
+
+  const amount = Math.round(payment.amount * 100) / 100;
+  if (!(amount > 0)) throw new SaleError("Enter the amount received");
+  if (sale.balance <= 0) throw new SaleError("This invoice is already paid in full");
+  if (amount > sale.balance) {
+    throw new SaleError(`That's more than the Rs.${sale.balance.toLocaleString()} still owed on this invoice`);
+  }
+
+  const paid = sale.paid + amount;
+  const { balance, status } = settle(sale.total, paid);
+
+  await db.$transaction(async (tx) => {
+    await tx.salePayment.create({
+      data: {
+        saleId,
+        amount,
+        method: payment.method,
+        note: (payment.note ?? "").trim(),
+        receivedById: payment.receivedById || null,
+      },
+    });
+    await tx.sale.update({ where: { id: saleId }, data: { paid, balance, paymentStatus: status } });
+  });
+
+  revalidatePath("/dashboard");
+  revalidatePath("/dashboard/sales");
+  revalidatePath("/dashboard/customers");
+  revalidatePath("/dashboard/cash");
+
+  return { ok: true as const, invoiceNo: sale.invoiceNo, total: sale.total, paid, balance };
 }

@@ -4,7 +4,7 @@ import { useState, useMemo, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import type { SaleView } from "@/lib/data";
 import { formatCurrency, formatDate } from "@/lib/utils/format";
-import { Search, Download, Receipt, RotateCcw, X, Loader2, Trash2, Eye, Printer, MessageCircle, CalendarRange } from "lucide-react";
+import { Search, Download, Receipt, RotateCcw, X, Loader2, Trash2, Eye, Printer, MessageCircle, CalendarRange, Wallet, Pencil } from "lucide-react";
 import { useApp } from "@/lib/context";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { PrintPortal } from "@/components/ui/PrintPortal";
@@ -12,6 +12,7 @@ import { createReturn } from "@/lib/actions/returns";
 import { updateOnlineOrderStatus, deleteSale, type OnlineOrderStatusValue } from "@/lib/actions/sales";
 import { PAYMENT_STATUS, paymentStatusChipClass } from "@/lib/constants";
 import { ThermalReceipt, A4Invoice, invoiceFromSale, type ShopDetails } from "@/components/invoice/InvoiceDocuments";
+import { CollectPaymentModal, EditInvoiceModal } from "./InvoiceEditor";
 
 const REFUND_METHODS = ["Cash", "Card", "Bank Transfer", "JazzCash"];
 const ONLINE_ORDER_STATUSES: { value: OnlineOrderStatusValue; label: string }[] = [
@@ -29,7 +30,7 @@ function localDay(isoDateTime: string) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-export function SalesClient({ sales, isOwner, shop }: { sales: SaleView[]; isOwner: boolean; shop: ShopDetails }) {
+export function SalesClient({ sales, isOwner, canEdit, shop }: { sales: SaleView[]; isOwner: boolean; canEdit: boolean; shop: ShopDetails }) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("All");
   const [sourceFilter, setSourceFilter] = useState<string>("All");
@@ -48,6 +49,8 @@ export function SalesClient({ sales, isOwner, shop }: { sales: SaleView[]; isOwn
   const [deleting, setDeleting] = useState(false);
 
   // Reopening a past invoice to look at or reprint it.
+  const [payingSale, setPayingSale] = useState<SaleView | null>(null);
+  const [editingSale, setEditingSale] = useState<SaleView | null>(null);
   const [viewingSale, setViewingSale] = useState<SaleView | null>(null);
   const [viewFormat, setViewFormat] = useState<"thermal" | "a4">("thermal");
   const [printJob, setPrintJob] = useState<"thermal" | "a4" | null>(null);
@@ -352,6 +355,18 @@ export function SalesClient({ sales, isOwner, shop }: { sales: SaleView[]; isOwn
                         className="p-1.5 rounded-lg hover:bg-surface-hover cursor-pointer">
                         <Eye className="w-3.5 h-3.5 text-primary" />
                       </button>
+                      {sale.balance > 0 && (
+                        <button onClick={() => setPayingSale(sale)} title="Receive payment"
+                          className="p-1.5 rounded-lg hover:bg-surface-hover cursor-pointer">
+                          <Wallet className="w-3.5 h-3.5 text-success" />
+                        </button>
+                      )}
+                      {canEdit && sale.source === "POS" && !sale.hasReturn && (
+                        <button onClick={() => setEditingSale(sale)} title="Edit invoice"
+                          className="p-1.5 rounded-lg hover:bg-surface-hover cursor-pointer">
+                          <Pencil className="w-3.5 h-3.5 text-muted-foreground" />
+                        </button>
+                      )}
                       {returnableItems(sale).length > 0 && (
                         <button onClick={() => openReturn(sale)} title="Return / Refund"
                           className="p-1.5 rounded-lg hover:bg-surface-hover cursor-pointer">
@@ -410,6 +425,12 @@ export function SalesClient({ sales, isOwner, shop }: { sales: SaleView[]; isOwn
                 className="flex-1 min-w-[140px] flex items-center justify-center gap-2 py-2.5 glass-card text-sm font-medium cursor-pointer disabled:opacity-60">
                 <Printer className="w-4 h-4" /> Print A4
               </button>
+              {viewingSale.balance > 0 && (
+                <button onClick={() => { const sale = viewingSale; setViewingSale(null); setPayingSale(sale); }}
+                  className="flex-1 min-w-[140px] flex items-center justify-center gap-2 py-2.5 bg-primary text-white rounded-2xl text-sm font-medium hover:bg-primary-hover transition-colors cursor-pointer">
+                  <Wallet className="w-4 h-4" /> Receive {formatCurrency(viewingSale.balance)}
+                </button>
+              )}
               {viewingSale.customerPhone && (
                 <button onClick={() => {
                     const phone = viewingSale.customerPhone.replace(/[^0-9]/g, "");
@@ -423,6 +444,30 @@ export function SalesClient({ sales, isOwner, shop }: { sales: SaleView[]; isOwn
             </div>
           </div>
         </div>
+      )}
+
+      {payingSale && (
+        <CollectPaymentModal
+          sale={payingSale}
+          onClose={() => setPayingSale(null)}
+          onDone={(message) => {
+            setPayingSale(null);
+            showToast(message, "success");
+            router.refresh();
+          }}
+        />
+      )}
+
+      {editingSale && (
+        <EditInvoiceModal
+          sale={editingSale}
+          onClose={() => setEditingSale(null)}
+          onDone={(message) => {
+            setEditingSale(null);
+            showToast(message, "success");
+            router.refresh();
+          }}
+        />
       )}
 
       {returningSale && (

@@ -127,14 +127,36 @@ export type SaleView = Sale & {
   customerPhone: string;
   customLensName: string;
   customLensPrice: number;
+  lensProductId: string;
+  lensName: string;
+  lensPrice: number;
+  lensColor: string;
+  lensDescription: string;
+  labCharges: number;
+  fittingCharges: number;
+  // Money taken after the sale itself (an advance being settled), oldest first.
+  payments: SalePaymentView[];
+  hasReturn: boolean;
   prescription: Prescription | null;
 };
+
+export interface SalePaymentView {
+  id: string;
+  date: string;
+  amount: number;
+  method: string;
+  note: string;
+  receivedByName: string;
+}
 
 const saleInclude = {
   items: { include: { product: { select: { brand: true } } } },
   customer: true,
   createdBy: true,
   receivedBy: true,
+  lensProduct: { select: { brand: true, name: true, salePrice: true } },
+  payments: { orderBy: { date: "asc" }, include: { receivedBy: { select: { name: true } } } },
+  returns: { select: { id: true } },
   prescriptions: { orderBy: { date: "desc" }, take: 1 },
 } satisfies Prisma.SaleInclude;
 
@@ -169,6 +191,22 @@ function mapSale(s: SaleRow): SaleView {
     })),
     customLensName: s.customLensName,
     customLensPrice: s.customLensPrice,
+    lensProductId: s.lensProductId ?? "",
+    lensName: s.lensProduct ? [s.lensProduct.brand, s.lensProduct.name].map((t) => t.trim()).filter(Boolean).join(" ") : "",
+    lensPrice: s.lensProduct?.salePrice ?? 0,
+    lensColor: s.lensColor,
+    lensDescription: s.lensDescription,
+    labCharges: s.labCharges,
+    fittingCharges: s.fittingCharges,
+    payments: s.payments.map((p) => ({
+      id: p.id,
+      date: p.date.toISOString(),
+      amount: p.amount,
+      method: p.method,
+      note: p.note,
+      receivedByName: p.receivedBy?.name ?? "",
+    })),
+    hasReturn: s.returns.length > 0,
     prescription: s.prescriptions[0] ? mapPrescription(s.prescriptions[0]) : null,
     subtotal: s.subtotal,
     discount: s.discount,
@@ -625,6 +663,14 @@ export interface AnalyticsData {
   profitMargins: { label: string; value: number }[];
   fastMoving: { id: string; name: string; brand: string; model: string; sold: number; stock: number }[];
   deadStock: { id: string; name: string; brand: string; model: string; category: string; stock: number; value: number }[];
+  inventory: {
+    products: number;
+    units: number;
+    costValue: number;
+    retailValue: number;
+    outOfStock: number;
+    byCategory: { name: string; units: number; costValue: number; retailValue: number }[];
+  };
   requiresPin: boolean;
 }
 
@@ -687,9 +733,37 @@ export async function getAnalyticsData(): Promise<AnalyticsData> {
     .slice(0, 5)
     .map((p) => ({ id: p.id, name: p.name, brand: p.brand, model: p.model, category: p.category, stock: p.stock, value: p.salePrice * p.stock }));
 
+  // What the shelves are worth right now: what the stock cost to buy, and what
+  // it would bring in if it all sold at the marked price.
+  const stockByCategory = new Map<string, { name: string; units: number; costValue: number; retailValue: number }>();
+  let units = 0;
+  let inventoryCost = 0;
+  let inventoryRetail = 0;
+  let outOfStock = 0;
+  for (const p of products) {
+    const inStock = Math.max(0, p.stock);
+    if (inStock === 0) outOfStock++;
+    units += inStock;
+    inventoryCost += p.costPrice * inStock;
+    inventoryRetail += p.salePrice * inStock;
+    const row = stockByCategory.get(p.category) ?? { name: p.category, units: 0, costValue: 0, retailValue: 0 };
+    row.units += inStock;
+    row.costValue += p.costPrice * inStock;
+    row.retailValue += p.salePrice * inStock;
+    stockByCategory.set(p.category, row);
+  }
+
   return {
     totalRevenue, totalCost, grossProfit, totalExpenses, netProfit: grossProfit - totalExpenses,
     dailySales, brandRevenue, categoryRevenue, profitMargins, fastMoving, deadStock,
+    inventory: {
+      products: products.length,
+      units,
+      costValue: inventoryCost,
+      retailValue: inventoryRetail,
+      outOfStock,
+      byCategory: [...stockByCategory.values()].sort((a, b) => b.retailValue - a.retailValue),
+    },
     requiresPin: !!settings?.analyticsPin,
   };
 }
@@ -716,14 +790,28 @@ function dayRange(dateStr: string) {
 export async function getCashCollection(dateStr: string, branchId?: string): Promise<CashCollectionData> {
   const { start, end } = dayRange(dateStr);
   const saleWhere = { date: { gte: start, lt: end }, ...(branchId ? { branchId } : {}) };
-  const [sales, expenses, saved] = await Promise.all([
-    db.sale.findMany({ where: saleWhere }),
+  const [sales, laterPayments, expenses, saved] = await Promise.all([
+    db.sale.findMany({ where: saleWhere, include: { payments: { select: { amount: true } } } }),
+    // An advance settled today belongs to today's drawer, whatever day the
+    // glasses were ordered on.
+    db.salePayment.findMany({
+      where: { date: { gte: start, lt: end }, ...(branchId ? { sale: { branchId } } : {}) },
+      select: { amount: true, method: true },
+    }),
     db.expense.findMany({ where: { date: { gte: start, lt: end } } }),
     db.cashCollection.findFirst({ where: { date: { gte: start, lt: end }, ...(branchId ? { branchId } : {}) } }),
   ]);
 
-  const byMethod = (m: string) => sales.filter((s) => s.paymentMethod === m).reduce((sum, s) => sum + s.paid, 0);
-  const totalCollection = sales.reduce((sum, s) => sum + s.paid, 0);
+  // A sale's own `paid` is the running total including anything collected
+  // later, so take those back out here and count them on their own date.
+  const takenAtTill = sales.map((s) => ({
+    method: s.paymentMethod,
+    amount: s.paid - s.payments.reduce((sum, p) => sum + p.amount, 0),
+  }));
+  const collected = [...takenAtTill, ...laterPayments];
+
+  const byMethod = (m: string) => collected.filter((c) => c.method === m).reduce((sum, c) => sum + c.amount, 0);
+  const totalCollection = collected.reduce((sum, c) => sum + c.amount, 0);
 
   return {
     date: dateStr,

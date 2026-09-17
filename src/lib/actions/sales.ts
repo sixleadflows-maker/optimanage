@@ -3,7 +3,13 @@
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { auth } from "@/lib/auth";
-import { persistSale, SaleError, type SalePrescriptionInput } from "@/lib/sales/core";
+import {
+  persistSale,
+  reviseSale,
+  recordSalePayment,
+  SaleError,
+  type SalePrescriptionInput,
+} from "@/lib/sales/core";
 
 export interface CartItemInput {
   // Left out for an item typed in at the till that isn't in the inventory.
@@ -30,6 +36,8 @@ export interface CreateSaleInput {
   // Manually-entered lens (no catalog product) — name/price only, no stock impact
   customLensName?: string;
   customLensPrice?: number;
+  lensColor?: string;
+  lensDescription?: string;
   // Staff tracking: who took the order vs. who generated the bill
   createdById?: string;
   receivedById?: string;
@@ -68,6 +76,61 @@ export async function createSale(input: CreateSaleInput) {
       orderTakenByName: staffMap.get(createdById)!.name,
       billGeneratedByName: staffMap.get(receivedById)!.name,
     };
+  } catch (e) {
+    if (e instanceof SaleError) return { ok: false as const, error: e.message };
+    throw e;
+  }
+}
+
+export interface CollectPaymentInput {
+  saleId: string;
+  amount: number;
+  method: string;
+  note?: string;
+}
+
+/** Anyone on the till can take money owed on an invoice. */
+export async function collectSalePayment(input: CollectPaymentInput) {
+  const session = await auth();
+  if (!session?.user) return { ok: false as const, error: "You've been signed out — sign in again" };
+
+  try {
+    return await recordSalePayment(input.saleId, {
+      amount: input.amount,
+      method: input.method,
+      note: input.note,
+      receivedById: session.user.id,
+    });
+  } catch (e) {
+    if (e instanceof SaleError) return { ok: false as const, error: e.message };
+    throw e;
+  }
+}
+
+export interface UpdateSaleInput {
+  saleId: string;
+  items: CartItemInput[];
+  invoiceDiscount: number;
+  lensProductId?: string;
+  labCharges?: number;
+  fittingCharges?: number;
+  customLensName?: string;
+  customLensPrice?: number;
+  lensColor?: string;
+  lensDescription?: string;
+}
+
+// Changing what's on a finished invoice moves stock and rewrites the shop's
+// takings, so it sits above the till: owner or manager, not cashiers.
+export async function updateSale(input: UpdateSaleInput) {
+  const session = await auth();
+  if (!session?.user) return { ok: false as const, error: "You've been signed out — sign in again" };
+  if (session.user.role === "CASHIER") {
+    return { ok: false as const, error: "Ask a manager or the owner to change a finished invoice" };
+  }
+
+  try {
+    return await reviseSale(input.saleId, input);
   } catch (e) {
     if (e instanceof SaleError) return { ok: false as const, error: e.message };
     throw e;

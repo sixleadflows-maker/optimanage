@@ -6,9 +6,11 @@ import { auth } from "@/lib/auth";
 
 export async function verifyAnalyticsPin(pin: string): Promise<{ ok: boolean }> {
   const session = await auth();
-  if (!session?.user) return { ok: false };
+  // Profit, costs and stock value are the owner's alone — the PIN is the second
+  // lock, not the only one, so a manager who learns it still can't get in.
+  if (session?.user?.role !== "OWNER") return { ok: false };
   const settings = await db.shopSettings.findUnique({ where: { id: "default" } });
-  if (!settings?.analyticsPin) return { ok: true }; // no PIN configured → open
+  if (!settings?.analyticsPin) return { ok: true }; // no PIN configured → owner passes
   const valid = await compare(pin, settings.analyticsPin);
   return { ok: valid };
 }
@@ -32,7 +34,7 @@ export interface MonthlyAnalyticsData {
 
 export async function getMonthlyAnalytics(year: number, month: number): Promise<MonthlyAnalyticsData> {
   const session = await auth();
-  if (!session?.user) throw new Error("Unauthorized");
+  if (session?.user?.role !== "OWNER") throw new Error("Unauthorized");
 
   const start = new Date(Date.UTC(year, month - 1, 1));
   const end = new Date(Date.UTC(month === 12 ? year + 1 : year, month === 12 ? 0 : month, 1));

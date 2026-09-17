@@ -53,7 +53,7 @@ const navGroups = [
   {
     label: "Reports",
     items: [
-      { href: "/dashboard/analytics", label: "Analytics", icon: BarChart3 },
+      { href: "/dashboard/analytics", label: "Analytics", icon: BarChart3, ownerOnly: true },
     ],
   },
   {
@@ -106,12 +106,15 @@ export function Sidebar({ user }: { user: SidebarUser }) {
         </div>
 
         <nav className="flex-1 overflow-y-auto py-3 px-3">
-          {navGroups.map((group) => (
+          {navGroups.map((group) => {
+            const items = group.items.filter((item) => !("ownerOnly" in item && item.ownerOnly) || user.role === "OWNER");
+            if (items.length === 0) return null;
+            return (
             <div key={group.label} className="mb-4">
               <p className="text-[10px] uppercase tracking-widest text-muted-foreground px-3 mb-1.5 font-medium">
                 {group.label}
               </p>
-              {group.items.map((item) => {
+              {items.map((item) => {
                 const isActive =
                   item.href === "/dashboard"
                     ? pathname === "/dashboard"
@@ -134,7 +137,8 @@ export function Sidebar({ user }: { user: SidebarUser }) {
                 );
               })}
             </div>
-          ))}
+            );
+          })}
         </nav>
 
         <div className="p-4 border-t border-border">

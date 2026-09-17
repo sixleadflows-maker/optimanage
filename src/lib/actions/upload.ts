@@ -7,21 +7,28 @@ import { parseImages } from "@/lib/utils/images";
 
 const MAX_SIZE = 5 * 1024 * 1024;
 
-export async function uploadProductImage(formData: FormData): Promise<{ url: string }> {
+export type UploadResult = { ok: true; url: string } | { ok: false; error: string };
+
+// Returned, not thrown: production replaces a thrown message with a generic
+// one, so "Image must be under 5MB" would reach staff as "something went wrong".
+export async function uploadProductImage(formData: FormData): Promise<UploadResult> {
   const session = await auth();
-  if (!session?.user) throw new Error("Unauthorized");
+  if (!session?.user) return { ok: false, error: "You've been signed out — sign in again" };
 
   const file = formData.get("file");
-  if (!(file instanceof File)) throw new Error("No file provided");
-  if (!file.type.startsWith("image/")) throw new Error("Only image files are allowed");
-  if (file.size > MAX_SIZE) throw new Error("Image must be under 5MB");
+  if (!(file instanceof File)) return { ok: false, error: "No photo was selected" };
+  if (!file.type.startsWith("image/")) return { ok: false, error: "That file isn't an image" };
+  if (file.size > MAX_SIZE) return { ok: false, error: "Photo must be under 5MB" };
 
-  const blob = await put(`products/${Date.now()}-${file.name}`, file, {
-    access: "public",
-    addRandomSuffix: true,
-  });
-
-  return { url: blob.url };
+  try {
+    const blob = await put(`products/${Date.now()}-${file.name}`, file, {
+      access: "public",
+      addRandomSuffix: true,
+    });
+    return { ok: true, url: blob.url };
+  } catch {
+    return { ok: false, error: "Couldn't reach the photo store — check the connection and try again" };
+  }
 }
 
 export interface LibraryImage {

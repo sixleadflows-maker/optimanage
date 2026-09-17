@@ -272,3 +272,45 @@ export async function lookupProductByBarcode(barcode: string): Promise<BarcodeLo
     lowStockThreshold: product.lowStockThreshold,
   };
 }
+
+export interface ProductSearchHit {
+  id: string;
+  label: string;
+  model: string;
+  salePrice: number;
+  stock: number;
+}
+
+/**
+ * Type-to-search for screens that need the odd product without shipping the
+ * whole catalogue to the browser (editing a finished invoice, for instance).
+ */
+export async function searchProductsForSale(query: string): Promise<ProductSearchHit[]> {
+  const session = await auth();
+  if (!session?.user) return [];
+  const q = query.trim();
+  if (q.length < 2) return [];
+
+  const rows = await db.product.findMany({
+    where: {
+      active: true,
+      OR: [
+        { name: { contains: q, mode: "insensitive" } },
+        { brand: { contains: q, mode: "insensitive" } },
+        { model: { contains: q, mode: "insensitive" } },
+        { barcode: q },
+      ],
+    },
+    select: { id: true, brand: true, name: true, model: true, salePrice: true, stock: true },
+    orderBy: { name: "asc" },
+    take: 8,
+  });
+
+  return rows.map((p) => ({
+    id: p.id,
+    label: [p.brand, p.name].map((s) => s.trim()).filter(Boolean).join(" "),
+    model: p.model,
+    salePrice: p.salePrice,
+    stock: p.stock,
+  }));
+}

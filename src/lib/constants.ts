@@ -43,6 +43,20 @@ export const PRODUCT_CATEGORIES = [
 
 export type ProductCategory = (typeof PRODUCT_CATEGORIES)[number];
 
+// Offered at the till when a prescription lens is sold; staff can also type
+// anything that isn't on the list.
+export const LENS_COLORS = [
+  "Clear / White",
+  "Blue Cut",
+  "Photochromic Grey",
+  "Photochromic Brown",
+  "Tinted Grey",
+  "Tinted Brown",
+  "Tinted Green",
+  "Gradient",
+  "Mirror",
+] as const;
+
 export const CONTACT_LENS_TYPES = ["Transparent", "Colored"] as const;
 export const LENS_KIT_TYPES = ["Daily Wear", "Monthly Wear", "Extended Wear"] as const;
 

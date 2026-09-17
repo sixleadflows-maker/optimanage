@@ -8,8 +8,9 @@ import { useApp } from "@/lib/context";
 import { PRODUCT_CATEGORIES, BRAND_TAGS, DAMAGE_TYPES, typesForCategory } from "@/lib/constants";
 import { createProduct, updateProduct, deleteProduct, generateBarcode, checkExistingProduct } from "@/lib/actions/products";
 import { uploadProductImage } from "@/lib/actions/upload";
-import { ArrowLeft, Save, Barcode, Shield, ShieldAlert, ShieldCheck, ShieldOff, Trash2, Loader2, Printer, Upload, X, Wand2, AlertTriangle, Boxes, Images } from "lucide-react";
+import { ArrowLeft, Save, Barcode, Shield, ShieldAlert, ShieldCheck, ShieldOff, Trash2, Loader2, Printer, Upload, X, Wand2, AlertTriangle, Boxes, Images, Camera } from "lucide-react";
 import { ImageLibraryPicker } from "@/components/ui/ImageLibraryPicker";
+import { CameraCapture } from "@/components/ui/CameraCapture";
 import Link from "next/link";
 import { ImageCarousel } from "@/components/ui/ImageCarousel";
 import { parseImages } from "@/lib/utils/images";
@@ -74,6 +75,7 @@ export function ProductForm({ product, isNew, isOwner = false, barcodeWidth = 2,
     });
 
   const [showLibrary, setShowLibrary] = useState(false);
+  const [showCamera, setShowCamera] = useState(false);
   const addLibraryImages = (urls: string[]) => {
     const current = parseImages(form.image);
     update("image", [...current, ...urls.filter((u) => !current.includes(u))].join(","));
@@ -120,23 +122,31 @@ export function ProductForm({ product, isNew, isOwner = false, barcodeWidth = 2,
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
+  const uploadPhoto = async (file: File) => {
     setUploading(true);
     try {
       const fd = new FormData();
       fd.append("file", file);
       const res = await uploadProductImage(fd);
-      const current = parseImages(form.image);
-      update("image", [...current, res.url].join(","));
-      showToast("Photo uploaded", "success");
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : "Could not upload photo", "error");
+      if (!res.ok) {
+        showToast(res.error, "error");
+        return false;
+      }
+      update("image", [...parseImages(form.image), res.url].join(","));
+      showToast("Photo added", "success");
+      return true;
+    } catch {
+      showToast("Could not add the photo — check the connection and try again", "error");
+      return false;
     } finally {
       setUploading(false);
     }
+  };
+
+  const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (file) await uploadPhoto(file);
   };
 
   const removeImage = (url: string) => {
@@ -476,6 +486,10 @@ export function ProductForm({ product, isNew, isOwner = false, barcodeWidth = 2,
               className="w-full mt-3 flex items-center justify-center gap-2 py-2.5 bg-primary/10 text-primary rounded-2xl text-sm font-semibold hover:bg-primary/15 transition-colors cursor-pointer">
               <Images className="w-4 h-4" /> Choose from Library
             </button>
+            <button type="button" onClick={() => setShowCamera(true)} disabled={uploading}
+              className="w-full mt-2 flex items-center justify-center gap-2 py-2.5 glass-card text-sm font-medium cursor-pointer disabled:opacity-60">
+              <Camera className="w-4 h-4" /> Take Photo
+            </button>
             <input ref={fileInputRef} type="file" accept="image/*" onChange={handleFileSelected} className="hidden" />
             <button type="button" onClick={() => fileInputRef.current?.click()} disabled={uploading}
               className="w-full mt-2 flex items-center justify-center gap-2 py-2.5 glass-card text-sm font-medium cursor-pointer disabled:opacity-60">
@@ -567,6 +581,16 @@ export function ProductForm({ product, isNew, isOwner = false, barcodeWidth = 2,
       {showLibrary && (
         <ImageLibraryPicker current={parseImages(form.image)} matchText={`${form.brand} ${form.model}`}
           onAdd={addLibraryImages} onClose={() => setShowLibrary(false)} />
+      )}
+
+      {showCamera && (
+        <CameraCapture
+          busy={uploading}
+          onClose={() => setShowCamera(false)}
+          onCapture={async (file) => {
+            if (await uploadPhoto(file)) setShowCamera(false);
+          }}
+        />
       )}
     </div>
   );
