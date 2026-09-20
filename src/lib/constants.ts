@@ -102,5 +102,16 @@ export const DISCOUNT_PERCENTAGES = [5, 10, 15, 20, 25, 30, 40, 50, 60, 70, 80, 
 // only export async functions — exporting a const or type from one breaks the
 // Server Actions bundle at build time.
 export const TRASH_RETENTION_DAYS = 30;
+// A hidden row that has been deleted for good gets this as its deletedAt: it
+// drops out of the trash and can't be restored, but the invoices and orders
+// that mention it keep showing its name.
+export const TRASH_PURGED_AT = new Date(0);
 
-export type TrashKind = "product" | "customer" | "location" | "staff";
+// Records that are hidden when deleted and simply un-hidden on restore.
+export type SoftTrashKind = "product" | "customer" | "location" | "staff" | "supplier" | "lab";
+// Records copied into TrashEntry and really removed; restore rebuilds them.
+export type SnapshotTrashKind = "invoice" | "return" | "expense" | "prescription" | "labOrder" | "purchaseOrder";
+export type TrashKind = SoftTrashKind | SnapshotTrashKind;
+export const SNAPSHOT_TRASH_KINDS: readonly SnapshotTrashKind[] = [
+  "invoice", "return", "expense", "prescription", "labOrder", "purchaseOrder",
+];

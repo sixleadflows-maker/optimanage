@@ -127,6 +127,13 @@ export type SaleView = Sale & {
   customerPhone: string;
   customLensName: string;
   customLensPrice: number;
+  customLensQty: number;
+  // Temporary number printed on a bill made offline; searchable.
+  offlineRef: string;
+  // False for an old invoice entered without taking items out of stock.
+  stockDeducted: boolean;
+  // When it was keyed in, which differs from `dateTime` for an old invoice.
+  enteredAt: string;
   lensProductId: string;
   lensName: string;
   lensPrice: number;
@@ -137,6 +144,7 @@ export type SaleView = Sale & {
   // Money taken after the sale itself (an advance being settled), oldest first.
   payments: SalePaymentView[];
   hasReturn: boolean;
+  returns: { id: string; returnNo: string; date: string; totalRefund: number; reason: string }[];
   prescription: Prescription | null;
 };
 
@@ -156,7 +164,7 @@ const saleInclude = {
   receivedBy: true,
   lensProduct: { select: { brand: true, name: true, salePrice: true } },
   payments: { orderBy: { date: "asc" }, include: { receivedBy: { select: { name: true } } } },
-  returns: { select: { id: true } },
+  returns: { select: { id: true, returnNo: true, date: true, totalRefund: true, reason: true }, orderBy: { date: "asc" } },
   prescriptions: { orderBy: { date: "desc" }, take: 1 },
 } satisfies Prisma.SaleInclude;
 
@@ -191,6 +199,10 @@ function mapSale(s: SaleRow): SaleView {
     })),
     customLensName: s.customLensName,
     customLensPrice: s.customLensPrice,
+    customLensQty: s.customLensQty,
+    offlineRef: s.offlineRef,
+    stockDeducted: s.stockDeducted,
+    enteredAt: s.createdAt.toISOString(),
     lensProductId: s.lensProductId ?? "",
     lensName: s.lensProduct ? [s.lensProduct.brand, s.lensProduct.name].map((t) => t.trim()).filter(Boolean).join(" ") : "",
     lensPrice: s.lensProduct?.salePrice ?? 0,
@@ -207,6 +219,7 @@ function mapSale(s: SaleRow): SaleView {
       receivedByName: p.receivedBy?.name ?? "",
     })),
     hasReturn: s.returns.length > 0,
+    returns: s.returns.map((r) => ({ id: r.id, returnNo: r.returnNo, date: r.date.toISOString(), totalRefund: r.totalRefund, reason: r.reason })),
     prescription: s.prescriptions[0] ? mapPrescription(s.prescriptions[0]) : null,
     subtotal: s.subtotal,
     discount: s.discount,
@@ -566,7 +579,7 @@ export interface TrashItemView {
   expired: boolean;
 }
 
-import { TRASH_RETENTION_DAYS, type TrashKind } from "@/lib/constants";
+import { TRASH_PURGED_AT, TRASH_RETENTION_DAYS, type TrashKind } from "@/lib/constants";
 
 function trashTiming(deletedAt: Date | null) {
   // Rows deleted before the trash existed have no timestamp; treat them as
@@ -578,11 +591,16 @@ function trashTiming(deletedAt: Date | null) {
 }
 
 export async function getTrashItems(): Promise<TrashItemView[]> {
-  const [products, customers, branches, users] = await Promise.all([
-    db.product.findMany({ where: { active: false }, orderBy: { deletedAt: "desc" } }),
-    db.customer.findMany({ where: { active: false }, orderBy: { deletedAt: "desc" } }),
-    db.branch.findMany({ where: { active: false }, orderBy: { deletedAt: "desc" } }),
-    db.user.findMany({ where: { active: false }, orderBy: { deletedAt: "desc" } }),
+  // Deleted for good (TRASH_PURGED_AT) is gone from the trash too.
+  const inTrash = { active: false, OR: [{ deletedAt: null }, { deletedAt: { gt: TRASH_PURGED_AT } }] };
+  const [products, customers, branches, users, suppliers, labs, entries] = await Promise.all([
+    db.product.findMany({ where: inTrash, orderBy: { deletedAt: "desc" } }),
+    db.customer.findMany({ where: inTrash, orderBy: { deletedAt: "desc" } }),
+    db.branch.findMany({ where: inTrash, orderBy: { deletedAt: "desc" } }),
+    db.user.findMany({ where: inTrash, orderBy: { deletedAt: "desc" } }),
+    db.supplier.findMany({ where: inTrash, orderBy: { deletedAt: "desc" } }),
+    db.lab.findMany({ where: inTrash, orderBy: { deletedAt: "desc" } }),
+    db.trashEntry.findMany({ orderBy: { deletedAt: "desc" }, select: { id: true, kind: true, title: true, detail: true, deletedAt: true } }),
   ]);
 
   const items: TrashItemView[] = [
@@ -613,6 +631,27 @@ export async function getTrashItems(): Promise<TrashItemView[]> {
       title: u.name,
       detail: `${u.email} · ${u.role.charAt(0) + u.role.slice(1).toLowerCase()}`,
       ...trashTiming(u.deletedAt),
+    })),
+    ...suppliers.map((s) => ({
+      id: s.id,
+      kind: "supplier" as const,
+      title: s.name,
+      detail: [s.contact, s.phone].filter(Boolean).join(" · "),
+      ...trashTiming(s.deletedAt),
+    })),
+    ...labs.map((l) => ({
+      id: l.id,
+      kind: "lab" as const,
+      title: l.name,
+      detail: [l.contact, l.phone].filter(Boolean).join(" · "),
+      ...trashTiming(l.deletedAt),
+    })),
+    ...entries.map((e) => ({
+      id: e.id,
+      kind: e.kind as TrashKind,
+      title: e.title,
+      detail: e.detail,
+      ...trashTiming(e.deletedAt),
     })),
   ];
 

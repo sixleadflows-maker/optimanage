@@ -2,18 +2,19 @@
 
 import { useState, useMemo, useRef, useEffect } from "react";
 import type { Product } from "@/lib/mock/types";
-import { formatCurrency } from "@/lib/utils/format";
+import { formatCurrency, toLocalInput } from "@/lib/utils/format";
 import { useApp } from "@/lib/context";
 import { DISCOUNT_PERCENTAGES, LENS_COLORS, PAYMENT_TYPE_LABEL } from "@/lib/constants";
 import { createSale, type CreateSaleInput } from "@/lib/actions/sales";
 import { createCustomer } from "@/lib/actions/customers";
-import { getDrafts, addDraft, removeDraft, type OfflineDraft } from "@/lib/offlineDrafts";
+import { createPrescription } from "@/lib/actions/prescriptions";
+import { getDrafts, addDraft, removeDraft, markDraftFailed, makeOfflineRef, type OfflineDraft } from "@/lib/offlineDrafts";
 import { useRouter } from "next/navigation";
 import {
   Search, Plus, Minus, Trash2, X, User, CreditCard,
   Banknote, Building2, Smartphone, Printer, MessageCircle, Receipt,
   Glasses, ChevronDown, ChevronUp, Lock, Edit3,
-  WifiOff, UploadCloud, ScanLine, UserPlus, PenLine,
+  WifiOff, UploadCloud, ScanLine, UserPlus, PenLine, CalendarClock, Save, Check,
 } from "lucide-react";
 import { firstImage } from "@/lib/utils/images";
 import { LensLoader } from "@/components/ui/LensLoader";
@@ -31,11 +32,24 @@ interface CartItem {
   discount: number;
 }
 
+export interface POSRx {
+  id: string;
+  date: string;
+  rightSph: number; rightCyl: number; rightAxis: number; rightPd: number; rightAdd: number;
+  leftSph: number; leftCyl: number; leftAxis: number; leftPd: number; leftAdd: number;
+  notes: string;
+  isOwn: boolean;
+}
+
 interface POSCustomer {
   id: string;
   name: string;
   phone: string;
   serialNumber: string;
+  // Their most recent prescription, to start the Rx form from.
+  latestRx?: POSRx | null;
+  // Added at this till while offline: not on the server yet, created when the bill syncs.
+  local?: boolean;
 }
 
 interface StaffMember {
@@ -45,6 +59,8 @@ interface StaffMember {
 
 interface SaleResult {
   invoiceNo: string;
+  // Made offline: invoiceNo is the temporary OFF- number.
+  provisional?: boolean;
   orderTakenByName: string;
   billGeneratedByName: string;
   date: string;
@@ -61,23 +77,49 @@ const EMPTY_RX = {
 const EMPTY_MANUAL_ITEM = { name: "", description: "", price: "", quantity: "1" };
 const EMPTY_NEW_CUSTOMER = { name: "", phone: "", serialNumber: "" };
 
+const show = (n: number) => (n === 0 ? "" : String(n));
+
+// A bill dated this far back is an old invoice being entered from the records.
+const OLD_BILL_AFTER_MS = 10 * 60_000;
+
 const PAYMENT_TYPE_HINT = {
   Full: "Customer pays the whole amount now.",
   Advance: "Customer pays part now — the rest is due on collection.",
   Balance: "Nothing is paid now — the whole amount is due later.",
 } as const;
 
+/** Quantity for a lens: a pair is 2. */
+function LensQty({ value, onChange, max }: { value: number; onChange: (n: number) => void; max?: number }) {
+  return (
+    <div className="flex items-center gap-1" title="Number of lenses — a pair is 2">
+      <button type="button" onClick={() => onChange(Math.max(1, value - 1))} disabled={value <= 1}
+        className="w-6 h-6 rounded-md bg-surface hover:bg-surface-hover flex items-center justify-center disabled:opacity-40 cursor-pointer">
+        <Minus className="w-3 h-3" />
+      </button>
+      <span className="text-xs font-semibold w-5 text-center">{value}</span>
+      <button type="button" onClick={() => onChange(max !== undefined ? Math.min(max, value + 1) : value + 1)}
+        disabled={max !== undefined && value >= max}
+        className="w-6 h-6 rounded-md bg-surface hover:bg-surface-hover flex items-center justify-center disabled:opacity-40 cursor-pointer">
+        <Plus className="w-3 h-3" />
+      </button>
+    </div>
+  );
+}
+
 export function POSClient({
-  products, customers, staff, currentUserId, shop,
+  products, customers, staff, currentUserId, shop, canBackdate,
 }: {
   products: Product[];
   customers: POSCustomer[];
   staff: StaffMember[];
   currentUserId: string;
   shop: ShopDetails;
+  // Owners and managers can enter an old invoice with its original date.
+  canBackdate: boolean;
 }) {
   const { showToast } = useApp();
   const router = useRouter();
+  const num = (v: string) => (v === "" ? 0 : Number(v));
   const [entryMode, setEntryMode] = useState<"choose" | "manual" | "scan">("choose");
   const [search, setSearch] = useState("");
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -104,6 +146,15 @@ export function POSClient({
   const [useCustomLens, setUseCustomLens] = useState(false);
   const [customLensName, setCustomLensName] = useState("");
   const [customLensPrice, setCustomLensPrice] = useState(0);
+  const [customLensQty, setCustomLensQty] = useState(1);
+  // An old invoice: the date it really happened ("" = now), and whether it
+  // should take items out of stock (off -- see createSale).
+  const [billDate, setBillDate] = useState("");
+  const [deductOldStock, setDeductOldStock] = useState(false);
+  // Every attempt at this sale carries the same key, so however many times it's
+  // retried -- or synced after being made offline -- it's recorded once.
+  const clientRef = useRef<string | null>(null);
+  const syncingRef = useRef(false);
   // Lens colour: pick from the usual ones, or "Other" and type it.
   const [lensColorChoice, setLensColorChoice] = useState("");
   const [lensColorOther, setLensColorOther] = useState("");
@@ -114,6 +165,12 @@ export function POSClient({
   const [recordRx, setRecordRx] = useState(false);
   const [rxIsOwn, setRxIsOwn] = useState(false);
   const [rx, setRx] = useState({ ...EMPTY_RX });
+  // Whether staff have typed into the Rx form (so switching customer doesn't wipe it).
+  const [rxTouched, setRxTouched] = useState(false);
+  const [rxPrefilledFrom, setRxPrefilledFrom] = useState<string | null>(null);
+  // Saved to the customer's record from here before the sale was finished.
+  const [savedRx, setSavedRx] = useState<{ id: string; key: string } | null>(null);
+  const [savingRx, setSavingRx] = useState(false);
   const [poppedId, setPoppedId] = useState<string | null>(null);
   const popTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -185,35 +242,65 @@ export function POSClient({
     };
   }, [router]);
 
-  const syncDrafts = async () => {
-    if (drafts.length === 0 || syncing) return;
+  // Bills made offline go through by themselves: when the page opens, when the
+  // browser says the connection is back, and every 30 seconds while any wait.
+  // A bill the server refuses (not a connection problem) is set aside with its
+  // reason rather than retried forever; "Sync now" tries those again.
+  const syncDrafts = async (includeFailed = false) => {
+    if (syncingRef.current) return;
+    const pending = getDrafts().filter((d) => includeFailed || !d.lastError);
+    if (pending.length === 0) return;
+    syncingRef.current = true;
     setSyncing(true);
-    let succeeded = 0;
+    const synced: string[] = [];
+    const oversold = new Set<string>();
     let failed = 0;
     let lastError = "";
-    for (const draft of drafts) {
+    let unreachable = false;
+    for (const draft of pending) {
       try {
         const res = await createSale(draft.input);
         if (res.ok) {
           removeDraft(draft.id);
-          succeeded++;
+          synced.push(draft.offlineRef ? `${draft.offlineRef} is ${res.invoiceNo}` : res.invoiceNo);
+          for (const name of res.oversold ?? []) oversold.add(name);
         } else {
+          markDraftFailed(draft.id, res.error);
           failed++;
           lastError = res.error;
         }
       } catch {
-        failed++;
+        unreachable = true;
+        break;
       }
     }
     setDrafts(getDrafts());
     setSyncing(false);
-    if (failed === 0) {
-      showToast(`Synced ${succeeded} offline sale${succeeded === 1 ? "" : "s"}`, "success");
-    } else {
-      showToast(`Synced ${succeeded}, ${failed} still pending${lastError ? ` — ${lastError}` : " — will retry next time"}`, "error");
+    syncingRef.current = false;
+    if (synced.length) {
+      showToast(`Offline bill${synced.length === 1 ? "" : "s"} recorded: ${synced.join(", ")}`, "success");
+      router.refresh();
     }
-    router.refresh();
+    if (oversold.size) {
+      showToast(`Recount ${[...oversold].join(", ")} — offline bills took the count below zero`, "info");
+    }
+    if (failed) showToast(`${failed} offline bill${failed === 1 ? "" : "s"} couldn't be recorded — ${lastError}`, "error");
+    if (includeFailed && unreachable) showToast("Still no connection — offline bills will go through by themselves", "info");
   };
+
+  useEffect(() => {
+    syncDrafts();
+    const onOnline = () => syncDrafts();
+    window.addEventListener("online", onOnline);
+    const timer = setInterval(() => {
+      if (getDrafts().some((d) => !d.lastError)) syncDrafts();
+    }, 30_000);
+    return () => {
+      window.removeEventListener("online", onOnline);
+      clearInterval(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Customers added from this screen show up straight away, before the page's
   // own customer list has been refreshed.
@@ -353,7 +440,17 @@ export function POSClient({
       setNewCustomer({ ...EMPTY_NEW_CUSTOMER });
       setCustomerSearch("");
     } catch {
-      showToast("Could not add the customer — check the connection and try again", "error");
+      // No connection: keep them on this till and add them to the system when
+      // the bill syncs (matched on phone, so no duplicate if they exist already).
+      const id = `local-${crypto.randomUUID()}`;
+      setAddedCustomers((prev) => [...prev, {
+        id, name, phone: newCustomer.phone.trim(), serialNumber: newCustomer.serialNumber.trim(), local: true,
+      }]);
+      setSelectedCustomer(id);
+      setShowNewCustomer(false);
+      setNewCustomer({ ...EMPTY_NEW_CUSTOMER });
+      setCustomerSearch("");
+      showToast(`No connection — ${name} will be added when this bill syncs`, "info");
     } finally {
       setSavingCustomer(false);
     }
@@ -361,10 +458,69 @@ export function POSClient({
 
   const cartSubtotal = cart.reduce((sum, i) => sum + i.price * i.quantity - i.discount, 0);
   const lensColor = lensColorChoice === "Other" ? lensColorOther.trim() : lensColorChoice;
-  const customLensAmount = useCustomLens ? customLensPrice : 0;
+  const customLensAmount = useCustomLens ? customLensPrice * customLensQty : 0;
   const subtotal = cartSubtotal + customLensAmount;
   const total = subtotal - invoiceDiscount;
   const customer = allCustomers.find((c) => c.id === selectedCustomer);
+  const lensLine = lensProductId ? cart.find((i) => i.key === lensProductId) : undefined;
+  const billDateValue = billDate ? new Date(billDate) : null;
+  const isOldBill = !!billDateValue && Date.now() - billDateValue.getTime() > OLD_BILL_AFTER_MS;
+
+  const rxValues = () => ({
+    rightSph: num(rx.rightSph), rightCyl: num(rx.rightCyl), rightAxis: num(rx.rightAxis), rightPd: num(rx.rightPd), rightAdd: num(rx.rightAdd),
+    leftSph: num(rx.leftSph), leftCyl: num(rx.leftCyl), leftAxis: num(rx.leftAxis), leftPd: num(rx.leftPd), leftAdd: num(rx.leftAdd),
+    notes: rx.notes,
+    isOwnPrescription: rxIsOwn,
+  });
+  const rxKey = () => JSON.stringify(rxValues());
+
+  // Start the Rx form from the customer's last prescription -- most visits
+  // are a small change to it, not a new one -- unless staff already typed.
+  const fillRxFrom = (c?: POSCustomer) => {
+    const last = c?.latestRx;
+    if (last) {
+      setRx({
+        rightSph: show(last.rightSph), rightCyl: show(last.rightCyl), rightAxis: show(last.rightAxis),
+        rightPd: show(last.rightPd), rightAdd: show(last.rightAdd),
+        leftSph: show(last.leftSph), leftCyl: show(last.leftCyl), leftAxis: show(last.leftAxis),
+        leftPd: show(last.leftPd), leftAdd: show(last.leftAdd),
+        notes: last.notes,
+      });
+      setRxIsOwn(last.isOwn);
+      setRxPrefilledFrom(last.date);
+    } else {
+      setRx({ ...EMPTY_RX });
+      setRxIsOwn(false);
+      setRxPrefilledFrom(null);
+    }
+    setRxTouched(false);
+  };
+
+  useEffect(() => {
+    setSavedRx(null);
+    if (recordRx && !rxTouched) fillRxFrom(customer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCustomer, recordRx]);
+
+  const editRx = (patch: Partial<typeof EMPTY_RX>) => {
+    setRx((p) => ({ ...p, ...patch }));
+    setRxTouched(true);
+  };
+
+  const saveRxNow = async () => {
+    if (!customer) { showToast("Select the customer first", "error"); return; }
+    if (customer.local) { showToast(`${customer.name} isn't on the system yet — the prescription is saved with the bill`, "info"); return; }
+    setSavingRx(true);
+    try {
+      const res = await createPrescription({ customerId: customer.id, ...rxValues() });
+      setSavedRx({ id: res.id, key: rxKey() });
+      showToast(`Saved to ${customer.name}'s prescription record`, "success");
+    } catch {
+      showToast("Couldn't save it right now — it will be saved with the sale", "error");
+    } finally {
+      setSavingRx(false);
+    }
+  };
 
   // Cost and profit are deliberately not computed or shown here — the till is
   // visible to customers. createSale still records them server-side, so they
@@ -435,6 +591,13 @@ export function POSClient({
     setUseCustomLens(false);
     setCustomLensName("");
     setCustomLensPrice(0);
+    setCustomLensQty(1);
+    setBillDate("");
+    setDeductOldStock(false);
+    clientRef.current = null;
+    setRxTouched(false);
+    setRxPrefilledFrom(null);
+    setSavedRx(null);
     setLensColorChoice("");
     setLensColorOther("");
     setLensDescription("");
@@ -453,8 +616,6 @@ export function POSClient({
     router.refresh();
   };
 
-  const num = (v: string) => (v === "" ? 0 : Number(v));
-
   const completeSale = async () => {
     if (!hasSaleableItems) return;
     if (paymentType === "Advance" && advanceAmount <= 0) {
@@ -469,11 +630,17 @@ export function POSClient({
       showToast("Enter a name and price for the custom lens", "error");
       return;
     }
+    if (billDateValue && (Number.isNaN(billDateValue.getTime()) || billDateValue.getTime() > Date.now() + 60_000)) {
+      showToast("Check the bill date — it can't be in the future", "error");
+      return;
+    }
+    clientRef.current ??= crypto.randomUUID();
     const saleInput: CreateSaleInput = {
       items: cart.map((i) => (i.productId
         ? { productId: i.productId, description: i.description, quantity: i.quantity, unitPrice: i.price, discount: i.discount }
         : { name: i.name, description: i.description, quantity: i.quantity, unitPrice: i.price, discount: i.discount })),
-      customerId: selectedCustomer || undefined,
+      customerId: customer && !customer.local ? customer.id : undefined,
+      newCustomer: customer?.local ? { name: customer.name, phone: customer.phone } : undefined,
       paymentMethod,
       paymentType,
       advanceAmount,
@@ -481,19 +648,62 @@ export function POSClient({
       lensProductId: lensProductId || undefined,
       customLensName: useCustomLens ? customLensName.trim() : undefined,
       customLensPrice: useCustomLens ? customLensPrice : undefined,
+      customLensQty: useCustomLens ? customLensQty : undefined,
       lensColor: lensColor || undefined,
       lensDescription: lensDescription.trim() || undefined,
       labCharges,
       fittingCharges,
       createdById: orderTakenBy || currentUserId,
       receivedById: billGeneratedBy || currentUserId,
-      prescription: recordRx ? {
-        rightSph: num(rx.rightSph), rightCyl: num(rx.rightCyl), rightAxis: num(rx.rightAxis), rightPd: num(rx.rightPd), rightAdd: num(rx.rightAdd),
-        leftSph: num(rx.leftSph), leftCyl: num(rx.leftCyl), leftAxis: num(rx.leftAxis), leftPd: num(rx.leftPd), leftAdd: num(rx.leftAdd),
-        notes: rx.notes,
-        isOwnPrescription: rxIsOwn,
-      } : undefined,
+      prescription: recordRx ? rxValues() : undefined,
+      // Don't save the same numbers twice: attach the record this came from
+      // (saved from here, or the customer's last one left unchanged).
+      existingPrescriptionId: recordRx
+        ? savedRx && savedRx.key === rxKey()
+          ? savedRx.id
+          : !rxTouched && rxPrefilledFrom && customer?.latestRx
+            ? customer.latestRx.id
+            : undefined
+        : undefined,
+      date: billDateValue ? billDateValue.toISOString() : undefined,
+      deductStock: isOldBill ? deductOldStock : undefined,
+      clientRef: clientRef.current,
     };
+    const billTime = billDateValue ?? new Date();
+    const staffName = (id: string) => staff.find((m) => m.id === id)?.name ?? "";
+
+    // No connection: print the bill now with a temporary number and record it
+    // when the connection is back (see syncDrafts).
+    const printOffline = () => {
+      if (isOldBill) {
+        showToast("Old invoices need a connection — enter it once you're back online", "error");
+        return;
+      }
+      const offlineRef = makeOfflineRef(billTime);
+      const draft = addDraft(
+        { ...saleInput, offlineRef, date: billTime.toISOString() },
+        { customerName: customer?.name ?? "Walk-in", itemCount: cart.length, total }
+      );
+      setDrafts(getDrafts().length ? getDrafts() : [draft]);
+      const paid = paymentType === "Full" ? total : paymentType === "Advance" ? advanceAmount : 0;
+      setSaleResult({
+        invoiceNo: offlineRef,
+        provisional: true,
+        orderTakenByName: staffName(orderTakenBy || currentUserId),
+        billGeneratedByName: staffName(billGeneratedBy || currentUserId),
+        date: billTime.toLocaleString("en-PK", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }),
+        paid,
+        balance: Math.max(0, total - paid),
+      });
+      setShowReceipt(true);
+      showToast(`No connection — bill ${offlineRef} saved on this computer. It'll be recorded by itself when the connection is back.`, "info");
+    };
+
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      printOffline();
+      return;
+    }
+
     setSaving(true);
     try {
       const res = await createSale(saleInput);
@@ -507,7 +717,7 @@ export function POSClient({
         invoiceNo: res.invoiceNo,
         orderTakenByName: res.orderTakenByName,
         billGeneratedByName: res.billGeneratedByName,
-        date: new Date().toLocaleString("en-PK", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }),
+        date: billTime.toLocaleString("en-PK", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }),
         paid: res.paid,
         balance: res.balance,
       });
@@ -518,17 +728,10 @@ export function POSClient({
         setShowReceipt(true);
       }, 750);
     } catch {
-      // The request never got a proper answer — most likely no connection.
-      // Keep the sale as a local draft instead of losing it; it can be pushed
-      // through once back online.
-      const draft = addDraft(saleInput, {
-        customerName: customer?.name ?? "Walk-in",
-        itemCount: cart.length,
-        total,
-      });
-      setDrafts((prev) => [...prev, draft]);
-      showToast("No connection — sale saved as an offline draft. Sync it once you're back online.", "info");
-      resetSale();
+      // The request never got a proper answer — most likely no connection. If
+      // it did reach the server after all, the sync finds that invoice by
+      // clientRef instead of recording it twice.
+      printOffline();
     } finally {
       setSaving(false);
     }
@@ -552,6 +755,7 @@ export function POSClient({
   if (showReceipt && saleResult) {
     const invoice: InvoiceData = {
       invoiceNo: saleResult.invoiceNo,
+      provisional: saleResult.provisional,
       date: saleResult.date,
       orderTakenBy: saleResult.orderTakenByName,
       billGeneratedBy: saleResult.billGeneratedByName,
@@ -573,7 +777,7 @@ export function POSClient({
         ...(useCustomLens && customLensAmount > 0
           ? [{
               key: "custom-lens", name: customLensName, description: lensNote(lensColor, lensDescription),
-              quantity: 1, unitPrice: customLensAmount, discount: 0, total: customLensAmount,
+              quantity: customLensQty, unitPrice: customLensPrice, discount: 0, total: customLensAmount,
             }]
           : []),
       ],
@@ -695,15 +899,25 @@ export function POSClient({
     <div className="animate-fade-in">
       <h1 className="text-2xl font-bold mb-6">Point of Sale</h1>
       {drafts.length > 0 && (
-        <div className="glass-card p-3 mb-4 flex items-center justify-between gap-3 border border-warning/30">
-          <div className="flex items-center gap-2 min-w-0">
-            <WifiOff className="w-4 h-4 text-warning flex-shrink-0" />
-            <p className="text-xs font-medium truncate">
-              {drafts.length} offline sale{drafts.length === 1 ? "" : "s"} saved locally — not yet recorded on the server.
-            </p>
+        <div className="glass-card p-3 mb-4 flex items-start justify-between gap-3 border border-warning/30">
+          <div className="flex items-start gap-2 min-w-0">
+            <WifiOff className="w-4 h-4 text-warning flex-shrink-0 mt-0.5" />
+            <div className="min-w-0">
+              <p className="text-xs font-medium">
+                {drafts.length} bill{drafts.length === 1 ? "" : "s"} made offline, waiting to be recorded — {drafts.length === 1 ? "it goes" : "they go"} through by {drafts.length === 1 ? "itself" : "themselves"} when the connection is back.
+              </p>
+              <p className="text-[10px] text-muted-foreground mt-0.5">
+                {drafts.map((d) => d.offlineRef ?? d.summary.customerName).join(" · ")}
+              </p>
+              {drafts.filter((d) => d.lastError).map((d) => (
+                <p key={d.id} className="text-[10px] text-destructive mt-0.5">
+                  {d.offlineRef ?? d.summary.customerName}: {d.lastError}
+                </p>
+              ))}
+            </div>
           </div>
           <button
-            onClick={syncDrafts}
+            onClick={() => syncDrafts(true)}
             disabled={syncing}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-warning text-white rounded-lg text-xs font-medium hover:opacity-90 transition-opacity disabled:opacity-60 flex-shrink-0"
           >
@@ -917,22 +1131,39 @@ export function POSClient({
                       </button>
                     )}
                     {useCustomLens && (
-                      <button onClick={() => { setUseCustomLens(false); setCustomLensName(""); setCustomLensPrice(0); }} className="text-[10px] text-primary font-medium flex items-center gap-1">
+                      <button onClick={() => { setUseCustomLens(false); setCustomLensName(""); setCustomLensPrice(0); setCustomLensQty(1); }} className="text-[10px] text-primary font-medium flex items-center gap-1">
                         <Search className="w-3 h-3" /> Search catalog
                       </button>
                     )}
                   </div>
                   {useCustomLens ? (
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
                       <input type="text" value={customLensName} onChange={(e) => setCustomLensName(e.target.value)}
                         placeholder="Lens name" className="w-full px-3 py-2 glass-input text-xs" />
-                      <input type="number" value={customLensPrice || ""} onChange={(e) => setCustomLensPrice(Number(e.target.value))}
-                        placeholder="Price" className="w-full px-3 py-2 glass-input text-xs" />
+                      <div className="grid grid-cols-[1fr_auto] gap-2">
+                        <input type="number" value={customLensPrice || ""} onChange={(e) => setCustomLensPrice(Number(e.target.value))}
+                          placeholder="Price per lens" className="w-full px-3 py-2 glass-input text-xs" />
+                        <LensQty value={customLensQty} onChange={setCustomLensQty} />
+                      </div>
+                      {customLensPrice > 0 && customLensQty > 1 && (
+                        <p className="text-[10px] text-muted-foreground text-right">
+                          {customLensQty} × {formatCurrency(customLensPrice)} = <span className="font-semibold text-foreground">{formatCurrency(customLensAmount)}</span>
+                        </p>
+                      )}
                     </div>
                   ) : lensProduct ? (
                     <div className="flex items-center justify-between gap-2 px-3 py-2 bg-primary/5 rounded-lg">
                       <span className="text-xs font-medium truncate">{lensProduct.brand} {lensProduct.name} — {formatCurrency(lensProduct.salePrice)}</span>
-                      <button onClick={clearLens} className="flex-shrink-0"><X className="w-3.5 h-3.5" /></button>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        {lensLine && (
+                          <LensQty
+                            value={lensLine.quantity}
+                            max={lensProduct.stock}
+                            onChange={(q) => updateQuantity(lensLine.key, q - lensLine.quantity)}
+                          />
+                        )}
+                        <button onClick={clearLens} className="flex-shrink-0"><X className="w-3.5 h-3.5" /></button>
+                      </div>
                     </div>
                   ) : (
                     <div className="relative">
@@ -1020,8 +1251,18 @@ export function POSClient({
                 </label>
                 {recordRx && (
                   <div className="space-y-2">
+                    {customer ? (
+                      <p className="text-[10px] text-muted-foreground leading-relaxed">
+                        {rxPrefilledFrom && !rxTouched
+                          ? <>Filled in from {customer.name}&apos;s last prescription ({new Date(rxPrefilledFrom).toLocaleDateString("en-GB")}) — change anything that&apos;s different. </>
+                          : null}
+                        {savedRx && savedRx.key === rxKey()
+                          ? <span className="text-success font-medium">Saved to {customer.name}&apos;s prescription record.</span>
+                          : <>Saved to {customer.name}&apos;s prescription record when you complete the sale.</>}
+                      </p>
+                    ) : null}
                     <label className="flex items-center gap-2 text-[10px] font-medium cursor-pointer">
-                      <input type="checkbox" checked={rxIsOwn} onChange={(e) => setRxIsOwn(e.target.checked)} className="rounded" />
+                      <input type="checkbox" checked={rxIsOwn} onChange={(e) => { setRxIsOwn(e.target.checked); setRxTouched(true); }} className="rounded" />
                       Own Prescription — customer brought this from outside
                     </label>
                     {(["Right Eye (OD)", "Left Eye (OS)"] as const).map((eye) => {
@@ -1035,7 +1276,7 @@ export function POSClient({
                                 <label className="text-[9px] text-muted-foreground block text-center mb-0.5">{f.toUpperCase()}</label>
                                 <input type="number" step="0.25" placeholder="0"
                                   value={rx[`${prefix}${f}` as keyof typeof rx]}
-                                  onChange={(e) => setRx((p) => ({ ...p, [`${prefix}${f}`]: e.target.value }))}
+                                  onChange={(e) => editRx({ [`${prefix}${f}`]: e.target.value })}
                                   className="w-full px-1 py-1 glass-input text-[10px] text-center" />
                               </div>
                             ))}
@@ -1043,9 +1284,20 @@ export function POSClient({
                         </div>
                       );
                     })}
-                    <input type="text" value={rx.notes} onChange={(e) => setRx((p) => ({ ...p, notes: e.target.value }))}
+                    <input type="text" value={rx.notes} onChange={(e) => editRx({ notes: e.target.value })}
                       className="w-full px-3 py-1.5 glass-input text-[10px]" placeholder="Rx notes (optional)..." />
                     {!selectedCustomer && <p className="text-[10px] text-warning">Select a customer above to save the prescription.</p>}
+                    {customer && !customer.local && !(savedRx && savedRx.key === rxKey()) && (
+                      <button onClick={saveRxNow} disabled={savingRx}
+                        className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-surface hover:bg-surface-hover text-[10px] font-medium disabled:opacity-60 cursor-pointer">
+                        {savingRx ? <LensLoader /> : <Save className="w-3 h-3" />} Save to {customer.name}&apos;s record now
+                      </button>
+                    )}
+                    {customer && savedRx && savedRx.key === rxKey() && (
+                      <p className="flex items-center justify-center gap-1 text-[10px] text-success font-medium">
+                        <Check className="w-3 h-3" /> On {customer.name}&apos;s record — the sale will use this one
+                      </p>
+                    )}
                   </div>
                 )}
               </div>
@@ -1216,6 +1468,44 @@ export function POSClient({
                       <p className="text-[10px] text-muted-foreground mt-1 text-right">
                         Balance due on collection: <span className="font-semibold text-foreground">{formatCurrency(total - advanceAmount)}</span>
                       </p>
+                    )}
+                  </div>
+                )}
+
+                {canBackdate && (
+                  <div>
+                    {!billDate ? (
+                      <button onClick={() => setBillDate(toLocalInput(new Date()))}
+                        className="text-[10px] text-primary font-medium flex items-center gap-1 cursor-pointer">
+                        <CalendarClock className="w-3 h-3" /> Bill date: now — change for an old invoice
+                      </button>
+                    ) : (
+                      <div className="p-2.5 rounded-lg border border-border space-y-2">
+                        <div className="flex items-center justify-between">
+                          <p className="text-[10px] font-medium text-muted-foreground flex items-center gap-1">
+                            <CalendarClock className="w-3 h-3" /> Bill date &amp; time
+                          </p>
+                          <button onClick={() => { setBillDate(""); setDeductOldStock(false); }} className="text-[10px] text-primary font-medium cursor-pointer">
+                            Use now
+                          </button>
+                        </div>
+                        <input type="datetime-local" value={billDate} max={toLocalInput(new Date())}
+                          onChange={(e) => setBillDate(e.target.value)} className="w-full px-3 py-2 glass-input text-xs" />
+                        {isOldBill && (
+                          <>
+                            <p className="text-[10px] text-warning">
+                              {`Old invoice — it counts on ${billDateValue!.toLocaleDateString("en-GB")} in sales, cash collection and the customer's history.`}
+                            </p>
+                            <label className="flex items-start gap-2 text-[10px] cursor-pointer">
+                              <input type="checkbox" checked={deductOldStock} onChange={(e) => setDeductOldStock(e.target.checked)} className="rounded mt-0.5" />
+                              <span>
+                                Take these items out of stock
+                                <span className="block text-muted-foreground">Leave unticked for old paper records — today&apos;s stock count already reflects them.</span>
+                              </span>
+                            </label>
+                          </>
+                        )}
+                      </div>
                     )}
                   </div>
                 )}

@@ -5,26 +5,44 @@ import { useRouter } from "next/navigation";
 import type { Expense } from "@/lib/mock/types";
 import { formatCurrency, formatDate } from "@/lib/utils/format";
 import { useApp } from "@/lib/context";
-import { createExpense } from "@/lib/actions/expenses";
-import { Plus, Search, X, Loader2, Wallet } from "lucide-react";
+import { createExpense, deleteExpense, updateExpense } from "@/lib/actions/expenses";
+import { Plus, Search, X, Loader2, Wallet, Pencil, Trash2 } from "lucide-react";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
 const EXPENSE_CATEGORIES = ["Rent", "Utilities", "Salaries", "Supplies", "Marketing", "Maintenance", "Transport", "Other"];
 
-export function ExpensesClient({ expenses }: { expenses: Expense[] }) {
+const blankForm = () => ({
+  date: new Date().toISOString().slice(0, 10),
+  category: "Supplies",
+  description: "",
+  amount: 0,
+  paidBy: "",
+});
+
+export function ExpensesClient({ expenses, canManage }: { expenses: Expense[]; canManage: boolean }) {
   const { showToast } = useApp();
   const router = useRouter();
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("All");
   const [showAdd, setShowAdd] = useState(false);
+  // Set while the form is changing an existing expense rather than adding one.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<Expense | null>(null);
+  const [removing, setRemoving] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({
-    date: new Date().toISOString().slice(0, 10),
-    category: "Supplies",
-    description: "",
-    amount: 0,
-    paidBy: "",
-  });
+  const [form, setForm] = useState(blankForm);
+
+  const openAdd = () => {
+    setEditingId(null);
+    setForm(blankForm());
+    setShowAdd(true);
+  };
+  const openEdit = (e: Expense) => {
+    setEditingId(e.id);
+    setForm({ date: e.date.slice(0, 10), category: e.category, description: e.description, amount: e.amount, paidBy: e.paidBy });
+    setShowAdd(true);
+  };
 
   const categories = useMemo(() => {
     const cats = new Set(expenses.map((e) => e.category));
@@ -53,15 +71,44 @@ export function ExpensesClient({ expenses }: { expenses: Expense[] }) {
     }
     setSaving(true);
     try {
-      await createExpense(form);
-      showToast("Expense recorded", "success");
+      if (editingId) {
+        const res = await updateExpense(editingId, form);
+        if (!res.ok) {
+          showToast(res.error, "error");
+          return;
+        }
+        showToast("Expense updated", "success");
+      } else {
+        await createExpense(form);
+        showToast("Expense recorded", "success");
+      }
       setShowAdd(false);
-      setForm({ date: new Date().toISOString().slice(0, 10), category: "Supplies", description: "", amount: 0, paidBy: "" });
+      setEditingId(null);
+      setForm(blankForm());
       router.refresh();
     } catch {
       showToast("Could not save expense", "error");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!deleting) return;
+    setRemoving(true);
+    try {
+      const res = await deleteExpense(deleting.id);
+      if (!res.ok) {
+        showToast(res.error, "error");
+        return;
+      }
+      showToast("Expense moved to Trash", "success");
+      setDeleting(null);
+      router.refresh();
+    } catch {
+      showToast("Could not delete the expense — check the connection and try again", "error");
+    } finally {
+      setRemoving(false);
     }
   };
 
@@ -72,7 +119,7 @@ export function ExpensesClient({ expenses }: { expenses: Expense[] }) {
           <h1 className="text-2xl font-bold">Expenses</h1>
           <p className="text-sm text-muted-foreground mt-0.5">Track daily shop expenses</p>
         </div>
-        <button onClick={() => setShowAdd(true)}
+        <button onClick={openAdd}
           className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-xl text-sm font-medium hover:bg-primary-hover transition-colors">
           <Plus className="w-4 h-4" /> Add Expense
         </button>
@@ -117,11 +164,12 @@ export function ExpensesClient({ expenses }: { expenses: Expense[] }) {
                 <th className="text-left py-3 px-3 text-xs font-medium text-muted-foreground">Description</th>
                 <th className="text-right py-3 px-3 text-xs font-medium text-muted-foreground">Amount</th>
                 <th className="text-center py-3 px-3 text-xs font-medium text-muted-foreground">Paid By</th>
+                {canManage && <th className="text-center py-3 px-3 text-xs font-medium text-muted-foreground">Actions</th>}
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 && (
-                <tr><td colSpan={5}>
+                <tr><td colSpan={canManage ? 6 : 5}>
                   <EmptyState icon={Wallet} title="No expenses recorded" hint="Track rent, utilities, and daily shop costs here — they feed the cash day-close and analytics." />
                 </td></tr>
               )}
@@ -132,6 +180,18 @@ export function ExpensesClient({ expenses }: { expenses: Expense[] }) {
                   <td className="py-3 px-3">{e.description}</td>
                   <td className="py-3 px-3 text-right font-medium text-destructive">{formatCurrency(e.amount)}</td>
                   <td className="py-3 px-3 text-center text-xs text-muted-foreground">{e.paidBy}</td>
+                  {canManage && (
+                    <td className="py-3 px-3">
+                      <div className="flex items-center justify-center gap-1.5">
+                        <button onClick={() => openEdit(e)} title="Edit expense" className="p-1.5 rounded-lg hover:bg-surface-hover cursor-pointer">
+                          <Pencil className="w-3.5 h-3.5 text-muted-foreground" />
+                        </button>
+                        <button onClick={() => setDeleting(e)} title="Delete expense" className="p-1.5 rounded-lg hover:bg-surface-hover cursor-pointer">
+                          <Trash2 className="w-3.5 h-3.5 text-destructive" />
+                        </button>
+                      </div>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -143,7 +203,7 @@ export function ExpensesClient({ expenses }: { expenses: Expense[] }) {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowAdd(false)}>
           <div className="glass-modal p-6 w-full max-w-md animate-rise" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold">Add Expense</h3>
+              <h3 className="text-lg font-semibold">{editingId ? "Edit Expense" : "Add Expense"}</h3>
               <button onClick={() => setShowAdd(false)}><X className="w-5 h-5" /></button>
             </div>
             <div className="space-y-3">
@@ -175,11 +235,21 @@ export function ExpensesClient({ expenses }: { expenses: Expense[] }) {
               </div>
               <button onClick={handleAdd} disabled={saving}
                 className="w-full py-2.5 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-primary-hover transition-colors disabled:opacity-60 flex items-center justify-center gap-2">
-                {saving && <Loader2 className="w-4 h-4 animate-spin" />} Save Expense
+                {saving && <Loader2 className="w-4 h-4 animate-spin" />} {editingId ? "Save Changes" : "Save Expense"}
               </button>
             </div>
           </div>
         </div>
+      )}
+
+      {deleting && (
+        <ConfirmDialog
+          title="Delete this expense?"
+          message={`${deleting.category} — ${formatCurrency(deleting.amount)} on ${formatDate(deleting.date)}. It moves to the Trash and can be restored for 30 days.`}
+          busy={removing}
+          onConfirm={handleDelete}
+          onCancel={() => setDeleting(null)}
+        />
       )}
     </div>
   );

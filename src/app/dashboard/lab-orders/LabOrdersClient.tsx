@@ -7,10 +7,11 @@ import type { LabVendorView } from "@/lib/data";
 import { formatCurrency, formatDate } from "@/lib/utils/format";
 import { useApp } from "@/lib/context";
 import { LAB_ORDER_STATUSES } from "@/lib/constants";
-import { createLabOrder, advanceLabStatus } from "@/lib/actions/lab-orders";
-import { createLab, updateLab } from "@/lib/actions/labs";
-import { FlaskConical, ArrowRight, Plus, X, Loader2, Beaker, Pencil } from "lucide-react";
+import { createLabOrder, advanceLabStatus, updateLabOrder, deleteLabOrder } from "@/lib/actions/lab-orders";
+import { createLab, updateLab, deleteLab } from "@/lib/actions/labs";
+import { FlaskConical, ArrowRight, Plus, X, Loader2, Beaker, Pencil, Trash2 } from "lucide-react";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
 const statusColors: Record<string, string> = {
   "Ordered": "bg-blue-500/10 text-blue-600 border-blue-200",
@@ -23,7 +24,11 @@ const EMPTY_LAB = { name: "", contact: "", phone: "", email: "", address: "" };
 
 interface LabCustomer { id: string; name: string; }
 
-export function LabOrdersClient({ labOrders, customers, labs }: { labOrders: LabOrder[]; customers: LabCustomer[]; labs: LabVendorView[] }) {
+const EMPTY_ORDER = { customerId: "", labId: "", lensType: "", prescription: "", price: 0, expectedDate: "", notes: "" };
+
+export function LabOrdersClient({
+  labOrders, customers, labs, canDelete,
+}: { labOrders: LabOrder[]; customers: LabCustomer[]; labs: LabVendorView[]; canDelete: boolean }) {
   const { showToast } = useApp();
   const router = useRouter();
   const [topTab, setTopTab] = useState<"orders" | "labs">("orders");
@@ -31,10 +36,57 @@ export function LabOrdersClient({ labOrders, customers, labs }: { labOrders: Lab
   const [showAdd, setShowAdd] = useState(false);
   const [saving, setSaving] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
-  const [form, setForm] = useState({
-    customerId: "", labId: "", lensType: "", prescription: "", price: 0,
-    expectedDate: "", notes: "",
-  });
+  const [form, setForm] = useState({ ...EMPTY_ORDER });
+  // Set while the order form is changing an existing order.
+  const [editingOrder, setEditingOrder] = useState<LabOrder | null>(null);
+  const [deletingOrder, setDeletingOrder] = useState<LabOrder | null>(null);
+  const [deletingLab, setDeletingLab] = useState<LabVendorView | null>(null);
+  const [removing, setRemoving] = useState(false);
+
+  const openNewOrder = () => {
+    setEditingOrder(null);
+    setForm({ ...EMPTY_ORDER });
+    setShowAdd(true);
+  };
+  const openEditOrder = (o: LabOrder) => {
+    setEditingOrder(o);
+    setForm({
+      customerId: o.customerId, labId: o.labId, lensType: o.lensType, prescription: o.prescription,
+      price: o.price, expectedDate: o.expectedDate, notes: o.notes,
+    });
+    setShowAdd(true);
+  };
+
+  const confirmDeleteOrder = async () => {
+    if (!deletingOrder) return;
+    setRemoving(true);
+    try {
+      const res = await deleteLabOrder(deletingOrder.id);
+      if (!res.ok) { showToast(res.error, "error"); return; }
+      showToast(`${deletingOrder.orderNo} moved to Trash`, "success");
+      setDeletingOrder(null);
+      router.refresh();
+    } catch {
+      showToast("Could not delete the order — check the connection and try again", "error");
+    } finally {
+      setRemoving(false);
+    }
+  };
+
+  const confirmDeleteLab = async () => {
+    if (!deletingLab) return;
+    setRemoving(true);
+    try {
+      await deleteLab(deletingLab.id);
+      showToast(`${deletingLab.name} moved to Trash`, "success");
+      setDeletingLab(null);
+      router.refresh();
+    } catch {
+      showToast("Could not delete the lab — check the connection and try again", "error");
+    } finally {
+      setRemoving(false);
+    }
+  };
 
   const [labModal, setLabModal] = useState<{ mode: "add" | "edit"; id?: string } | null>(null);
   const [labForm, setLabForm] = useState({ ...EMPTY_LAB });
@@ -60,10 +112,17 @@ export function LabOrdersClient({ labOrders, customers, labs }: { labOrders: Lab
     }
     setSaving(true);
     try {
-      const res = await createLabOrder(form);
-      showToast(`Lab order created — ${res.orderNo}`, "success");
+      if (editingOrder) {
+        const res = await updateLabOrder(editingOrder.id, form);
+        if (!res.ok) { showToast(res.error, "error"); return; }
+        showToast(`${editingOrder.orderNo} updated`, "success");
+      } else {
+        const res = await createLabOrder(form);
+        showToast(`Lab order created — ${res.orderNo}`, "success");
+      }
       setShowAdd(false);
-      setForm({ customerId: "", labId: "", lensType: "", prescription: "", price: 0, expectedDate: "", notes: "" });
+      setEditingOrder(null);
+      setForm({ ...EMPTY_ORDER });
       router.refresh();
     } catch (e) {
       showToast(e instanceof Error ? e.message : "Could not create lab order", "error");
@@ -107,7 +166,7 @@ export function LabOrdersClient({ labOrders, customers, labs }: { labOrders: Lab
         </div>
         {topTab === "orders" ? (
           <div className="flex gap-1.5">
-            <button onClick={() => setShowAdd(true)}
+            <button onClick={openNewOrder}
               className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-xl text-sm font-medium hover:bg-primary-hover transition-colors">
               <Plus className="w-4 h-4" /> New Order
             </button>
@@ -152,9 +211,14 @@ export function LabOrdersClient({ labOrders, customers, labs }: { labOrders: Lab
                     {l.contact && <p className="text-xs text-muted-foreground mt-0.5">Contact: {l.contact}</p>}
                   </div>
                   <div className="flex items-center gap-2">
-                    <button onClick={() => openEditLab(l)} className="p-1.5 rounded-lg hover:bg-surface-hover cursor-pointer">
+                    <button onClick={() => openEditLab(l)} title="Edit lab" className="p-1.5 rounded-lg hover:bg-surface-hover cursor-pointer">
                       <Pencil className="w-3.5 h-3.5 text-muted-foreground" />
                     </button>
+                    {canDelete && (
+                      <button onClick={() => setDeletingLab(l)} title="Delete lab" className="p-1.5 rounded-lg hover:bg-surface-hover cursor-pointer">
+                        <Trash2 className="w-3.5 h-3.5 text-destructive" />
+                      </button>
+                    )}
                     <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
                       <Beaker className="w-4 h-4 text-primary" />
                     </div>
@@ -189,7 +253,16 @@ export function LabOrdersClient({ labOrders, customers, labs }: { labOrders: Lab
                     <div key={order.id} className={`glass-card p-4 border ${statusColors[order.status]}`}>
                       <div className="flex items-start justify-between mb-2">
                         <p className="text-xs font-bold">{order.orderNo}</p>
-                        <FlaskConical className="w-3.5 h-3.5 opacity-40" />
+                        <div className="flex items-center gap-0.5 -mt-1 -mr-1">
+                          <button onClick={() => openEditOrder(order)} title="Edit order" className="p-1 rounded-md hover:bg-surface-hover cursor-pointer">
+                            <Pencil className="w-3 h-3 text-muted-foreground" />
+                          </button>
+                          {canDelete && (
+                            <button onClick={() => setDeletingOrder(order)} title="Delete order" className="p-1 rounded-md hover:bg-surface-hover cursor-pointer">
+                              <Trash2 className="w-3 h-3 text-destructive" />
+                            </button>
+                          )}
+                        </div>
                       </div>
                       <p className="text-sm font-medium">{order.customerName}</p>
                       <p className="text-xs text-muted-foreground mt-1">{order.lensType}</p>
@@ -226,11 +299,12 @@ export function LabOrdersClient({ labOrders, customers, labs }: { labOrders: Lab
                 <th className="text-right py-3 px-3 text-xs font-medium text-muted-foreground">Price</th>
                 <th className="text-center py-3 px-3 text-xs font-medium text-muted-foreground">Status</th>
                 <th className="text-left py-3 px-3 text-xs font-medium text-muted-foreground">Expected</th>
+                <th className="text-center py-3 px-3 text-xs font-medium text-muted-foreground">Actions</th>
               </tr>
             </thead>
             <tbody>
               {labOrders.length === 0 && (
-                <tr><td colSpan={7}>
+                <tr><td colSpan={8}>
                   <EmptyState icon={FlaskConical} title="No lab orders yet" hint="Outsourced lens jobs appear here — track them from Ordered through Fitted." />
                 </td></tr>
               )}
@@ -245,6 +319,18 @@ export function LabOrdersClient({ labOrders, customers, labs }: { labOrders: Lab
                     <span className={`chip ${statusColors[order.status]}`}>{order.status}</span>
                   </td>
                   <td className="py-3 px-3 text-xs text-muted-foreground">{order.expectedDate ? formatDate(order.expectedDate) : "—"}</td>
+                  <td className="py-3 px-3">
+                    <div className="flex items-center justify-center gap-1.5">
+                      <button onClick={() => openEditOrder(order)} title="Edit order" className="p-1.5 rounded-lg hover:bg-surface-hover cursor-pointer">
+                        <Pencil className="w-3.5 h-3.5 text-muted-foreground" />
+                      </button>
+                      {canDelete && (
+                        <button onClick={() => setDeletingOrder(order)} title="Delete order" className="p-1.5 rounded-lg hover:bg-surface-hover cursor-pointer">
+                          <Trash2 className="w-3.5 h-3.5 text-destructive" />
+                        </button>
+                      )}
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -256,7 +342,7 @@ export function LabOrdersClient({ labOrders, customers, labs }: { labOrders: Lab
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowAdd(false)}>
           <div className="glass-modal p-6 w-full max-w-lg animate-rise" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold">New Lab Order</h3>
+              <h3 className="text-lg font-semibold">{editingOrder ? `Edit ${editingOrder.orderNo}` : "New Lab Order"}</h3>
               <button onClick={() => setShowAdd(false)} className="cursor-pointer"><X className="w-5 h-5" /></button>
             </div>
             <div className="space-y-3">
@@ -302,7 +388,7 @@ export function LabOrdersClient({ labOrders, customers, labs }: { labOrders: Lab
               </div>
               <button onClick={handleAdd} disabled={saving}
                 className="w-full py-2.5 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-primary-hover transition-colors disabled:opacity-60 flex items-center justify-center gap-2 cursor-pointer">
-                {saving && <Loader2 className="w-4 h-4 animate-spin" />} Create Order
+                {saving && <Loader2 className="w-4 h-4 animate-spin" />} {editingOrder ? "Save Changes" : "Create Order"}
               </button>
             </div>
           </div>
@@ -346,6 +432,25 @@ export function LabOrdersClient({ labOrders, customers, labs }: { labOrders: Lab
             </div>
           </div>
         </div>
+      )}
+      {deletingOrder && (
+        <ConfirmDialog
+          title={`Delete ${deletingOrder.orderNo}?`}
+          message={`${deletingOrder.customerName} · ${deletingOrder.lab}. It moves to the Trash and can be restored for 30 days.`}
+          busy={removing}
+          onConfirm={confirmDeleteOrder}
+          onCancel={() => setDeletingOrder(null)}
+        />
+      )}
+
+      {deletingLab && (
+        <ConfirmDialog
+          title={`Delete ${deletingLab.name}?`}
+          message="Its past orders keep showing its name. It moves to the Trash and can be restored for 30 days."
+          busy={removing}
+          onConfirm={confirmDeleteLab}
+          onCancel={() => setDeletingLab(null)}
+        />
       )}
     </div>
   );

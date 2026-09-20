@@ -4,11 +4,12 @@ import { useState, useMemo, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import type { SaleView } from "@/lib/data";
 import { formatCurrency, formatDate } from "@/lib/utils/format";
-import { Search, Download, Receipt, RotateCcw, X, Loader2, Trash2, Eye, Printer, MessageCircle, CalendarRange, Wallet, Pencil } from "lucide-react";
+import { Search, Download, Receipt, RotateCcw, X, Loader2, Trash2, Eye, Printer, MessageCircle, CalendarRange, Wallet, Pencil, Undo2, WifiOff, History } from "lucide-react";
 import { useApp } from "@/lib/context";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { PrintPortal } from "@/components/ui/PrintPortal";
-import { createReturn } from "@/lib/actions/returns";
+import { createReturn, deleteReturn } from "@/lib/actions/returns";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { updateOnlineOrderStatus, deleteSale, type OnlineOrderStatusValue } from "@/lib/actions/sales";
 import { PAYMENT_STATUS, paymentStatusChipClass } from "@/lib/constants";
 import { ThermalReceipt, A4Invoice, invoiceFromSale, type ShopDetails } from "@/components/invoice/InvoiceDocuments";
@@ -28,6 +29,92 @@ const ONLINE_ORDER_STATUSES: { value: OnlineOrderStatusValue; label: string }[] 
 function localDay(isoDateTime: string) {
   const d = new Date(isoDateTime);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+const when = (iso: string) =>
+  new Date(iso).toLocaleString("en-PK", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+
+/** Everything that happened to an invoice after it was rung up, with times. */
+function InvoiceHistory({
+  sale, canUndoReturn, onUndoReturn,
+}: {
+  sale: SaleView;
+  canUndoReturn: boolean;
+  onUndoReturn: (ret: SaleView["returns"][number]) => void;
+}) {
+  const laterTotal = sale.payments.reduce((sum, p) => sum + p.amount, 0);
+  const takenAtTill = sale.paid - laterTotal;
+  // An invoice keyed in well after its own date is an old record from paper.
+  const enteredLater = new Date(sale.enteredAt).getTime() - new Date(sale.dateTime).getTime() > 60 * 60_000 && !sale.offlineRef;
+  const hasHistory = sale.payments.length > 0 || sale.returns.length > 0 || enteredLater || !!sale.offlineRef;
+  if (!hasHistory) return null;
+
+  return (
+    <div className="mt-4 rounded-xl border border-border p-3 text-xs space-y-3">
+      <p className="font-semibold flex items-center gap-1.5"><History className="w-3.5 h-3.5 text-primary" /> History</p>
+
+      {sale.offlineRef && (
+        <p className="flex items-start gap-1.5 text-muted-foreground">
+          <WifiOff className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+          Made while the till was offline — the customer&apos;s bill shows {sale.offlineRef}. Synced {when(sale.enteredAt)}.
+        </p>
+      )}
+      {enteredLater && (
+        <p className="text-muted-foreground">
+          Old invoice dated {when(sale.dateTime)}, entered {when(sale.enteredAt)}
+          {sale.stockDeducted ? "." : " without taking items out of stock."}
+        </p>
+      )}
+
+      {sale.payments.length > 0 && (
+        <div>
+          <p className="text-muted-foreground mb-1">Payments</p>
+          <div className="space-y-1">
+            <div className="flex justify-between gap-3">
+              <span>{when(sale.dateTime)} · {sale.paymentMethod} · at the till</span>
+              <span className="font-medium">{formatCurrency(takenAtTill)}</span>
+            </div>
+            {sale.payments.map((p) => (
+              <div key={p.id} className="flex justify-between gap-3">
+                <span>
+                  {when(p.date)} · {p.method}
+                  {p.receivedByName && ` · ${p.receivedByName}`}
+                  {p.note && <span className="text-muted-foreground"> · {p.note}</span>}
+                </span>
+                <span className="font-medium">{formatCurrency(p.amount)}</span>
+              </div>
+            ))}
+            <div className="flex justify-between gap-3 border-t border-border pt-1 font-semibold">
+              <span>{sale.balance > 0 ? "Still owed" : "Paid in full"}</span>
+              <span>{formatCurrency(sale.balance > 0 ? sale.balance : sale.paid)}</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {sale.returns.length > 0 && (
+        <div>
+          <p className="text-muted-foreground mb-1">Returns</p>
+          <div className="space-y-1.5">
+            {sale.returns.map((r) => (
+              <div key={r.id} className="flex items-center justify-between gap-3">
+                <span>
+                  <span className="font-medium">{r.returnNo}</span> · {when(r.date)} · refund {formatCurrency(r.totalRefund)}
+                  {r.reason && <span className="text-muted-foreground"> · {r.reason}</span>}
+                </span>
+                {canUndoReturn && (
+                  <button onClick={() => onUndoReturn(r)}
+                    className="flex items-center gap-1 px-2 py-1 rounded-lg bg-surface hover:bg-surface-hover font-medium cursor-pointer flex-shrink-0">
+                    <Undo2 className="w-3 h-3" /> Undo
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function SalesClient({ sales, isOwner, canEdit, shop }: { sales: SaleView[]; isOwner: boolean; canEdit: boolean; shop: ShopDetails }) {
@@ -50,6 +137,8 @@ export function SalesClient({ sales, isOwner, canEdit, shop }: { sales: SaleView
 
   // Reopening a past invoice to look at or reprint it.
   const [payingSale, setPayingSale] = useState<SaleView | null>(null);
+  const [undoingReturn, setUndoingReturn] = useState<{ sale: SaleView; ret: SaleView["returns"][number] } | null>(null);
+  const [undoing, setUndoing] = useState(false);
   const [editingSale, setEditingSale] = useState<SaleView | null>(null);
   const [viewingSale, setViewingSale] = useState<SaleView | null>(null);
   const [viewFormat, setViewFormat] = useState<"thermal" | "a4">("thermal");
@@ -92,9 +181,7 @@ export function SalesClient({ sales, isOwner, canEdit, shop }: { sales: SaleView
         return;
       }
       showToast(
-        res.hadReturns
-          ? `${deletingSale.invoiceNo} and its return deleted — stock put back`
-          : `${deletingSale.invoiceNo} deleted — stock put back`,
+        `${deletingSale.invoiceNo}${res.hadReturns ? " and its return" : ""} moved to Trash${deletingSale.stockDeducted ? " — stock put back" : ""}`,
         "success"
       );
       setDeletingSale(null);
@@ -145,6 +232,7 @@ export function SalesClient({ sales, isOwner, canEdit, shop }: { sales: SaleView
         !q ||
         s.customerName.toLowerCase().includes(q) ||
         s.invoiceNo.toLowerCase().includes(q) ||
+        (s.offlineRef && s.offlineRef.toLowerCase().includes(q)) ||
         s.customerPhone.includes(q) ||
         s.items.some((i) => i.productName.toLowerCase().includes(q) || i.description.toLowerCase().includes(q));
       const matchesStatus = statusFilter === "All" || s.paymentStatus === statusFilter;
@@ -318,6 +406,7 @@ export function SalesClient({ sales, isOwner, canEdit, shop }: { sales: SaleView
                       className="font-medium text-primary hover:underline cursor-pointer">
                       {sale.invoiceNo}
                     </button>
+                    {sale.offlineRef && <p className="text-[10px] text-muted-foreground">{sale.offlineRef}</p>}
                   </td>
                   <td className="py-3 px-3 text-muted-foreground whitespace-nowrap">{formatDate(sale.dateTime)}</td>
                   <td className="py-3 px-3">{sale.customerName}</td>
@@ -415,6 +504,12 @@ export function SalesClient({ sales, isOwner, canEdit, shop }: { sales: SaleView
                 ? <ThermalReceipt invoice={viewingInvoice} shop={shop} />
                 : <A4Invoice invoice={viewingInvoice} shop={shop} />}
             </div>
+
+            <InvoiceHistory
+              sale={viewingSale}
+              canUndoReturn={canEdit}
+              onUndoReturn={(ret) => setUndoingReturn({ sale: viewingSale, ret })}
+            />
 
             <div className="flex gap-2 mt-4 flex-wrap">
               <button onClick={() => setPrintJob("thermal")} disabled={printJob !== null}
@@ -528,11 +623,12 @@ export function SalesClient({ sales, isOwner, canEdit, shop }: { sales: SaleView
             </div>
             <p className="text-sm text-muted-foreground">
               Delete <span className="font-semibold text-foreground">{deletingSale.invoiceNo}</span> ({formatCurrency(deletingSale.total)})?
-              Items still out with the customer go back into stock. This can&apos;t be undone.
+              {deletingSale.stockDeducted ? " Items still out with the customer go back into stock." : " It was entered without taking stock, so stock doesn't change."}
+              {" "}It moves to the Trash, and you can restore it for 30 days.
             </p>
             {deletingSale.items.some((i) => i.returnedQuantity > 0) && (
               <p className="text-xs text-warning mt-2">
-                This invoice has a return on it — the return record is deleted too. Items already returned were put back in stock at the time, so they aren&apos;t added again.
+                This invoice has a return on it — the return goes to the Trash with it. Items already returned were put back in stock at the time, so they aren&apos;t added again.
               </p>
             )}
             <div className="flex gap-2 mt-5">
@@ -542,11 +638,36 @@ export function SalesClient({ sales, isOwner, canEdit, shop }: { sales: SaleView
               </button>
               <button onClick={confirmDeleteSale} disabled={deleting}
                 className="flex-1 py-2.5 bg-destructive text-white rounded-xl text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-60 flex items-center justify-center gap-2 cursor-pointer">
-                {deleting && <Loader2 className="w-4 h-4 animate-spin" />} Delete
+                {deleting && <Loader2 className="w-4 h-4 animate-spin" />} Move to Trash
               </button>
             </div>
           </div>
         </div>
+      )}
+
+      {undoingReturn && (
+        <ConfirmDialog
+          title={`Undo ${undoingReturn.ret.returnNo}?`}
+          message={`The ${formatCurrency(undoingReturn.ret.totalRefund)} refund on ${undoingReturn.sale.invoiceNo} is cancelled: the items count as sold again and come off the shelf. It moves to the Trash and can be put back for 30 days.`}
+          confirmLabel="Undo return"
+          busy={undoing}
+          onCancel={() => setUndoingReturn(null)}
+          onConfirm={async () => {
+            setUndoing(true);
+            try {
+              const res = await deleteReturn(undoingReturn.ret.id);
+              if (!res.ok) { showToast(res.error, "error"); return; }
+              showToast(`${undoingReturn.ret.returnNo} undone — ${undoingReturn.sale.invoiceNo} can be edited again`, "success");
+              setUndoingReturn(null);
+              setViewingSale(null);
+              router.refresh();
+            } catch {
+              showToast("Could not undo the return — check the connection and try again", "error");
+            } finally {
+              setUndoing(false);
+            }
+          }}
+        />
       )}
 
       {/* Always mounted so the container exists before a print is requested. */}

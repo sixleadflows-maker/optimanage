@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useState, useCallback, ReactNode } from "react";
+import React, { createContext, useContext, useState, useCallback, useEffect, ReactNode } from "react";
 
 interface Toast {
   id: string;
@@ -14,7 +14,6 @@ interface AppContextValue {
   darkMode: boolean;
   toggleDarkMode: () => void;
   isOnline: boolean;
-  toggleOnline: () => void;
   sidebarOpen: boolean;
   setSidebarOpen: (open: boolean) => void;
   toasts: Toast[];
@@ -35,7 +34,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [showWelcome, setShowWelcome] = useState(false);
 
   const toggleDarkMode = useCallback(() => setDarkMode((d) => !d), []);
-  const toggleOnline = useCallback(() => setIsOnline((o) => !o), []);
+  // The real connection, not a switch: the badge in the top bar is what staff
+  // look at to know whether bills are going straight through or queuing.
+  useEffect(() => {
+    const update = () => setIsOnline(navigator.onLine);
+    update();
+    window.addEventListener("online", update);
+    window.addEventListener("offline", update);
+    return () => {
+      window.removeEventListener("online", update);
+      window.removeEventListener("offline", update);
+    };
+  }, []);
 
   const showToast = useCallback((message: string, type: "success" | "error" | "info" = "success") => {
     const id = Date.now().toString();
@@ -52,7 +62,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       value={{
         activeBranch, setActiveBranch,
         darkMode, toggleDarkMode,
-        isOnline, toggleOnline,
+        isOnline,
         sidebarOpen, setSidebarOpen,
         toasts, showToast, removeToast,
         showWelcome, setShowWelcome,

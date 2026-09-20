@@ -2,12 +2,14 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { SaleView } from "@/lib/data";
-import { formatCurrency } from "@/lib/utils/format";
+import { formatCurrency, toLocalInput } from "@/lib/utils/format";
 import { useApp } from "@/lib/context";
 import { collectSalePayment, updateSale } from "@/lib/actions/sales";
 import { searchProductsForSale, type ProductSearchHit } from "@/lib/actions/products";
 import { LENS_COLORS, PAYMENT_METHODS } from "@/lib/constants";
 import { Loader2, Plus, Search, Trash2, Wallet, X, Pencil, AlertTriangle } from "lucide-react";
+
+
 
 export function CollectPaymentModal({
   sale,
@@ -22,13 +24,21 @@ export function CollectPaymentModal({
   const [amount, setAmount] = useState(sale.balance);
   const [method, setMethod] = useState(sale.paymentMethod || "Cash");
   const [note, setNote] = useState("");
+  // When the money was actually taken — now, unless it's being written up later.
+  const [takenAt, setTakenAt] = useState(() => toLocalInput(new Date()));
   const [saving, setSaving] = useState(false);
 
   const remaining = Math.max(0, sale.balance - (amount || 0));
+  const takenAtDate = new Date(takenAt);
+  const dateProblem =
+    !takenAt || Number.isNaN(takenAtDate.getTime()) ? "Enter the date and time"
+    : takenAtDate.getTime() > Date.now() + 60_000 ? "That's in the future"
+    : takenAtDate.getTime() < new Date(sale.dateTime).getTime() - 60_000 ? "That's before the invoice was made"
+    : "";
 
   const submit = async () => {
     setSaving(true);
-    const res = await collectSalePayment({ saleId: sale.id, amount, method, note });
+    const res = await collectSalePayment({ saleId: sale.id, amount, method, note, date: takenAtDate.toISOString() });
     setSaving(false);
     if (!res.ok) {
       showToast(res.error, "error");
@@ -89,6 +99,20 @@ export function CollectPaymentModal({
           ))}
         </div>
 
+        <label className="text-xs font-medium text-muted-foreground mb-1.5 block mt-3">Received on</label>
+        <div className="flex gap-2">
+          <input
+            type="datetime-local" value={takenAt} onChange={(e) => setTakenAt(e.target.value)}
+            min={toLocalInput(new Date(sale.dateTime))} max={toLocalInput(new Date())}
+            className="flex-1 px-3 py-2.5 glass-input text-sm"
+          />
+          <button onClick={() => setTakenAt(toLocalInput(new Date()))}
+            className="px-3 py-2.5 rounded-xl bg-surface hover:bg-surface-hover text-xs font-medium whitespace-nowrap">
+            Now
+          </button>
+        </div>
+        {dateProblem && <p className="text-[11px] text-destructive mt-1.5">{dateProblem}</p>}
+
         <label className="text-xs font-medium text-muted-foreground mb-1.5 block mt-3">Note (optional)</label>
         <input
           type="text" value={note} onChange={(e) => setNote(e.target.value)}
@@ -98,7 +122,7 @@ export function CollectPaymentModal({
         <div className="flex gap-2 mt-5">
           <button onClick={onClose} className="flex-1 py-2.5 glass-card text-sm font-medium cursor-pointer">Cancel</button>
           <button
-            onClick={submit} disabled={saving || !(amount > 0)}
+            onClick={submit} disabled={saving || !(amount > 0) || !!dateProblem}
             className="flex-1 py-2.5 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-primary-hover transition-colors disabled:opacity-60 flex items-center justify-center gap-2 cursor-pointer"
           >
             {saving && <Loader2 className="w-4 h-4 animate-spin" />}
@@ -144,6 +168,7 @@ export function EditInvoiceModal({
   const [invoiceDiscount, setInvoiceDiscount] = useState(sale.discount);
   const [customLensName, setCustomLensName] = useState(sale.customLensName);
   const [customLensPrice, setCustomLensPrice] = useState(sale.customLensPrice);
+  const [customLensQty, setCustomLensQty] = useState(sale.customLensQty || 1);
   const [lensColorChoice, setLensColorChoice] = useState(
     !sale.lensColor ? "" : (LENS_COLORS as readonly string[]).includes(sale.lensColor) ? sale.lensColor : "Other"
   );
@@ -202,7 +227,7 @@ export function EditInvoiceModal({
 
   const lensColor = lensColorChoice === "Other" ? lensColorOther.trim() : lensColorChoice;
   const itemsTotal = lines.reduce((sum, l) => sum + l.unitPrice * l.quantity - l.discount, 0);
-  const subtotal = itemsTotal + Math.max(0, customLensPrice);
+  const subtotal = itemsTotal + Math.max(0, customLensPrice) * customLensQty;
   const total = Math.max(0, subtotal - invoiceDiscount);
   const newBalance = total - sale.paid;
   const belowPaid = total < sale.paid;
@@ -225,6 +250,7 @@ export function EditInvoiceModal({
       lensProductId: lines.some((l) => l.productId === sale.lensProductId) ? sale.lensProductId : undefined,
       customLensName,
       customLensPrice,
+      customLensQty,
       lensColor,
       lensDescription,
       labCharges,
@@ -355,10 +381,17 @@ export function EditInvoiceModal({
               <input type="text" value={customLensName} onChange={(e) => setCustomLensName(e.target.value)}
                 placeholder="Only if the lens isn't a line above" className="w-full px-2.5 py-1.5 glass-input text-xs" />
             </div>
-            <div>
-              <label className="text-[10px] text-muted-foreground block mb-1">Lens price</label>
-              <input type="number" min={0} value={customLensPrice || ""} onChange={(e) => setCustomLensPrice(Math.max(0, Number(e.target.value)))}
-                className="w-full px-2.5 py-1.5 glass-input text-xs" />
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-[10px] text-muted-foreground block mb-1">Price per lens</label>
+                <input type="number" min={0} value={customLensPrice || ""} onChange={(e) => setCustomLensPrice(Math.max(0, Number(e.target.value)))}
+                  className="w-full px-2.5 py-1.5 glass-input text-xs" />
+              </div>
+              <div>
+                <label className="text-[10px] text-muted-foreground block mb-1">Qty</label>
+                <input type="number" min={1} value={customLensQty} onChange={(e) => setCustomLensQty(Math.max(1, Math.floor(Number(e.target.value) || 1)))}
+                  className="w-full px-2.5 py-1.5 glass-input text-xs" />
+              </div>
             </div>
             <div>
               <label className="text-[10px] text-muted-foreground block mb-1">Lens colour</label>

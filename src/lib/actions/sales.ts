@@ -10,6 +10,7 @@ import {
   SaleError,
   type SalePrescriptionInput,
 } from "@/lib/sales/core";
+import { trashInvoice, TrashError } from "@/lib/trash/snapshots";
 
 export interface CartItemInput {
   // Left out for an item typed in at the till that isn't in the inventory.
@@ -36,6 +37,7 @@ export interface CreateSaleInput {
   // Manually-entered lens (no catalog product) — name/price only, no stock impact
   customLensName?: string;
   customLensPrice?: number;
+  customLensQty?: number;
   lensColor?: string;
   lensDescription?: string;
   // Staff tracking: who took the order vs. who generated the bill
@@ -43,6 +45,35 @@ export interface CreateSaleInput {
   receivedById?: string;
   // Optional prescription captured during the sale (needs customerId)
   prescription?: SalePrescriptionInput;
+  // Already saved to the customer's record from the till; attached, not duplicated.
+  existingPrescriptionId?: string;
+  // When the sale happened (ISO), if not now -- an old invoice being entered,
+  // or an offline bill being synced.
+  date?: string;
+  // Old invoices only: take the items out of stock too. Off by default.
+  deductStock?: boolean;
+  // Every bill from the till carries clientRef, so a retry can never record it
+  // twice; offlineRef is set when it was made without a connection.
+  clientRef?: string;
+  offlineRef?: string;
+  // A customer added at the till while offline, created (or matched on phone)
+  // when the bill syncs.
+  newCustomer?: { name: string; phone: string };
+}
+
+// An old invoice is one dated this far before now; anything closer is just the
+// till's clock or a slow connection.
+const BACKDATE_AFTER_MS = 10 * 60_000;
+
+/** Finds the offline customer by phone, or adds them. */
+async function customerForOfflineBill(c: { name: string; phone: string }) {
+  const phone = c.phone.trim();
+  if (phone) {
+    const existing = await db.customer.findUnique({ where: { phone } });
+    if (existing) return existing.id;
+  }
+  const created = await db.customer.create({ data: { name: c.name.trim() || "Customer", phone: phone || null } });
+  return created.id;
 }
 
 // Problems staff can act on (out of stock, missing name...) come back as
@@ -56,6 +87,20 @@ export async function createSale(input: CreateSaleInput) {
 
   const branchId = input.branchId || session.user.branchId || undefined;
 
+  let date: Date | undefined;
+  if (input.date) {
+    date = new Date(input.date);
+    if (Number.isNaN(date.getTime())) return { ok: false as const, error: "Check the bill date and time" };
+    if (date.getTime() > Date.now() + 5 * 60_000) return { ok: false as const, error: "The bill date can't be in the future" };
+  }
+  const offline = !!input.offlineRef;
+  // Entering an old invoice changes past days' takings, so it sits above the
+  // till. An offline bill synced later is just late, not back-dated.
+  const backdated = !!date && !offline && Date.now() - date.getTime() > BACKDATE_AFTER_MS;
+  if (backdated && session.user.role === "CASHIER") {
+    return { ok: false as const, error: "Ask a manager or the owner to enter an old invoice" };
+  }
+
   // Staff tracking: resolve who took the order vs. who generated the bill,
   // defaulting to the signed-in user, and validate any explicit IDs are real.
   const createdById = input.createdById || session.user.id;
@@ -67,9 +112,31 @@ export async function createSale(input: CreateSaleInput) {
   }
 
   try {
+    // Checked here as well as in persistSale: a retry must be recognised before
+    // a customer is added for it, or a name-only customer would be added twice.
+    if (input.clientRef) {
+      const already = await db.sale.findUnique({ where: { clientRef: input.clientRef }, select: { id: true } });
+      if (already) {
+        const result = await persistSale({ ...input, branchId }, { source: "POS", clientRef: input.clientRef });
+        return { ...result, orderTakenByName: staffMap.get(createdById)!.name, billGeneratedByName: staffMap.get(receivedById)!.name };
+      }
+    }
+
+    let customerId = input.customerId;
+    if (!customerId && input.newCustomer?.name.trim()) customerId = await customerForOfflineBill(input.newCustomer);
+
     const result = await persistSale(
-      { ...input, branchId },
-      { source: "POS", createdById, receivedById }
+      { ...input, customerId, branchId },
+      {
+        source: "POS",
+        createdById,
+        receivedById,
+        date,
+        deductStock: backdated ? input.deductStock === true : true,
+        allowOversell: offline,
+        clientRef: input.clientRef,
+        offlineRef: input.offlineRef,
+      }
     );
     return {
       ...result,
@@ -87,6 +154,8 @@ export interface CollectPaymentInput {
   amount: number;
   method: string;
   note?: string;
+  // When the money was taken (ISO); defaults to now.
+  date?: string;
 }
 
 /** Anyone on the till can take money owed on an invoice. */
@@ -100,6 +169,7 @@ export async function collectSalePayment(input: CollectPaymentInput) {
       method: input.method,
       note: input.note,
       receivedById: session.user.id,
+      date: input.date ? new Date(input.date) : undefined,
     });
   } catch (e) {
     if (e instanceof SaleError) return { ok: false as const, error: e.message };
@@ -116,6 +186,7 @@ export interface UpdateSaleInput {
   fittingCharges?: number;
   customLensName?: string;
   customLensPrice?: number;
+  customLensQty?: number;
   lensColor?: string;
   lensDescription?: string;
 }
@@ -153,61 +224,24 @@ export async function updateOnlineOrderStatus(saleId: string, status: OnlineOrde
 }
 
 // Deleting an invoice is Owner-only -- it reverses stock and customer
-// history, so it's a stricter tier than the Return/Refund flow.
-//
-// Invoices that had a return against them used to be refused outright. That
-// was every invoice on the system at the time, and because the refusal was a
-// thrown error (whose message production hides) staff only ever saw a generic
-// failure. Now the return is undone along with the sale: units that were
-// already returned went back on the shelf at the time, so only the rest are
-// put back now -- nothing gets counted twice.
+// history, so it's a stricter tier than the Return/Refund flow. It goes to the
+// trash, from which the owner can put it back (stock permitting) for 30 days.
 export async function deleteSale(saleId: string) {
   const session = await auth();
   if (!session?.user || session.user.role !== "OWNER") {
     return { ok: false as const, error: "Only the owner can delete an invoice" };
   }
-
-  const sale = await db.sale.findUnique({
-    where: { id: saleId },
-    include: { items: true, returns: true },
-  });
-  if (!sale) return { ok: false as const, error: "This invoice has already been deleted" };
-
-  await db.$transaction(async (tx) => {
-    for (const item of sale.items) {
-      // Typed-in items were never in stock, so there's nothing to put back.
-      if (!item.productId) continue;
-      const stillOut = item.quantity - item.returnedQuantity;
-      if (stillOut <= 0) continue;
-      await tx.product.update({
-        where: { id: item.productId },
-        data: { stock: { increment: stillOut } },
-      });
-    }
-
-    if (sale.customerId) {
-      const customer = await tx.customer.findUnique({ where: { id: sale.customerId } });
-      if (customer) {
-        await tx.customer.update({
-          where: { id: customer.id },
-          data: {
-            totalSpend: Math.max(0, customer.totalSpend - sale.total),
-            visitCount: Math.max(0, customer.visitCount - 1),
-          },
-        });
-      }
-    }
-
-    // Return items cascade with their return. The prescription recorded with
-    // the sale is kept -- it's the customer's eye history -- just unlinked.
-    await tx.return.deleteMany({ where: { saleId } });
-    await tx.checkoutSession.updateMany({ where: { saleId }, data: { saleId: null } });
-    await tx.sale.delete({ where: { id: saleId } });
-  }, { timeout: 20_000 });
-
-  revalidatePath("/dashboard");
-  revalidatePath("/dashboard/sales");
-  revalidatePath("/dashboard/inventory");
-  revalidatePath("/dashboard/customers");
-  return { ok: true as const, hadReturns: sale.returns.length > 0 };
+  try {
+    const { hadReturns } = await trashInvoice(saleId, session.user.id);
+    revalidatePath("/dashboard");
+    revalidatePath("/dashboard/sales");
+    revalidatePath("/dashboard/inventory");
+    revalidatePath("/dashboard/customers");
+    revalidatePath("/dashboard/cash");
+    revalidatePath("/dashboard/trash");
+    return { ok: true as const, hadReturns };
+  } catch (e) {
+    if (e instanceof TrashError) return { ok: false as const, error: e.message };
+    throw e;
+  }
 }

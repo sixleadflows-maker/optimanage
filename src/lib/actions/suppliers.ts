@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { auth } from "@/lib/auth";
+import { nextDocumentNumber } from "@/lib/sales/core";
+import { trashPurchaseOrder, TrashError } from "@/lib/trash/snapshots";
 
 async function requireAuth() {
   const session = await auth();
@@ -35,11 +37,30 @@ export async function updateSupplier(id: string, input: SupplierInput) {
   return { ok: true };
 }
 
+// Hidden, not erased: past purchase orders keep the supplier's name, and the
+// trash can bring it back for 30 days.
 export async function deleteSupplier(id: string) {
-  await requireAuth();
-  await db.supplier.update({ where: { id }, data: { active: false } });
+  const session = await requireAuth();
+  if (session.user.role === "CASHIER") return { ok: false as const, error: "Only managers and owners can delete a supplier" };
+  await db.supplier.update({ where: { id }, data: { active: false, deletedAt: new Date() } });
   revalidatePath("/dashboard/suppliers");
-  return { ok: true };
+  revalidatePath("/dashboard/trash");
+  return { ok: true as const };
+}
+
+// Only an order nothing has been received against; see trashPurchaseOrder.
+export async function deletePurchaseOrder(id: string) {
+  const session = await requireAuth();
+  if (session.user.role === "CASHIER") return { ok: false as const, error: "Only managers and owners can delete a purchase order" };
+  try {
+    await trashPurchaseOrder(id, session.user.id);
+  } catch (e) {
+    if (e instanceof TrashError) return { ok: false as const, error: e.message };
+    throw e;
+  }
+  revalidatePath("/dashboard/suppliers");
+  revalidatePath("/dashboard/trash");
+  return { ok: true as const };
 }
 
 export interface POItemInput {
@@ -125,12 +146,11 @@ export async function createPurchaseOrder(input: CreatePOInput) {
   }
   const total = items.reduce((sum, i) => sum + i.total, 0);
 
-  // Numbered from the highest existing order rather than a count, so a gap
-  // can never make two orders share a number.
-  const start = `PO-${new Date().getFullYear()}-`;
-  const existing = await db.purchaseOrder.findMany({ where: { poNumber: { startsWith: start } }, select: { poNumber: true } });
-  const max = existing.reduce((m, po) => Math.max(m, parseInt(po.poNumber.slice(start.length), 10) || 0), 0);
-  const poNumber = `${start}${String(max + 1).padStart(3, "0")}`;
+  // From the stored counter, which only moves forward: an order in the trash
+  // keeps its number, so a new one can't take it and block the restore.
+  const poNumber = await nextDocumentNumber(db, "PO", async (startsWith) =>
+    (await db.purchaseOrder.findMany({ where: { poNumber: { startsWith } }, select: { poNumber: true } })).map((po) => po.poNumber)
+  );
 
   const po = await db.purchaseOrder.create({
     data: {

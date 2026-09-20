@@ -4,6 +4,7 @@ import { getBranches } from "@/lib/data";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Topbar } from "@/components/layout/Topbar";
 import { PageTransition } from "@/components/layout/PageTransition";
+import { ServiceWorker } from "@/components/layout/ServiceWorker";
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const session = await auth();
@@ -13,6 +14,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   return (
     <div className="flex min-h-screen">
+      <ServiceWorker />
       <Sidebar user={{ name: session.user.name, role: session.user.role }} />
       <div className="flex-1 lg:ml-[260px] flex flex-col">
         <Topbar user={session.user} branches={branches.filter((b) => b.active)} />

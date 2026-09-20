@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { auth } from "@/lib/auth";
+import { trashReturn, TrashError } from "@/lib/trash/snapshots";
 import { nextDocumentNumber } from "@/lib/sales/core";
 
 export interface ReturnItemInput {
@@ -87,4 +88,22 @@ export async function createReturn(input: CreateReturnInput) {
   revalidatePath("/dashboard/sales");
   revalidatePath("/dashboard/inventory");
   return { ok: true, returnNo, totalRefund };
+}
+
+// Undoing a return (it moves to the trash and can be put back for 30 days):
+// the items count as sold again and come off the shelf.
+export async function deleteReturn(returnId: string) {
+  const session = await auth();
+  if (!session?.user) return { ok: false as const, error: "You've been signed out — sign in again" };
+  if (session.user.role === "CASHIER") return { ok: false as const, error: "Only managers and owners can undo a return" };
+  try {
+    await trashReturn(returnId, session.user.id);
+  } catch (e) {
+    if (e instanceof TrashError) return { ok: false as const, error: e.message };
+    throw e;
+  }
+  revalidatePath("/dashboard/sales");
+  revalidatePath("/dashboard/inventory");
+  revalidatePath("/dashboard/trash");
+  return { ok: true as const };
 }

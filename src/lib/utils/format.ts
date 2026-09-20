@@ -21,3 +21,9 @@ export function formatDateTime(date: string): string {
     minute: "2-digit",
   });
 }
+
+/** A date as the value a datetime-local box expects (local time, to the minute). */
+export function toLocalInput(d: Date) {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}

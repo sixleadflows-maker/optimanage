@@ -9,9 +9,11 @@ import { useApp } from "@/lib/context";
 import { PURCHASE_TYPES, PURCHASE_PAYMENT_METHODS } from "@/lib/constants";
 import {
   createSupplier, updateSupplier, createPurchaseOrder, updatePurchaseOrderDetails, receiveStock,
+  deleteSupplier, deletePurchaseOrder,
   type PODetailsInput,
 } from "@/lib/actions/suppliers";
 import { Truck, CheckCircle, FileText, Plus, X, Loader2, Search, Trash2, Pencil, PenLine, Wallet, ClipboardList, Building2 } from "lucide-react";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
 const EMPTY_SUPPLIER = { name: "", contact: "", phone: "", email: "", address: "", ntn: "" };
 
@@ -156,7 +158,12 @@ function PODetailsFields({ details, onChange, total }: {
   );
 }
 
-export function SuppliersClient({ suppliers, purchaseOrders, products }: { suppliers: Supplier[]; purchaseOrders: PurchaseOrder[]; products: Product[] }) {
+export function SuppliersClient({
+  suppliers, purchaseOrders, products, canDelete,
+}: { suppliers: Supplier[]; purchaseOrders: PurchaseOrder[]; products: Product[]; canDelete: boolean }) {
+  const [deletingSupplier, setDeletingSupplier] = useState<Supplier | null>(null);
+  const [deletingPO, setDeletingPO] = useState<PurchaseOrder | null>(null);
+  const [removing, setRemoving] = useState(false);
   const { showToast } = useApp();
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<"suppliers" | "orders">("suppliers");
@@ -375,9 +382,14 @@ export function SuppliersClient({ suppliers, purchaseOrders, products }: { suppl
                   <p className="text-xs text-muted-foreground mt-0.5">Contact: {s.contact}</p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <button onClick={() => openEditSupplier(s)} className="p-1.5 rounded-lg hover:bg-surface-hover cursor-pointer">
+                  <button onClick={() => openEditSupplier(s)} title="Edit supplier" className="p-1.5 rounded-lg hover:bg-surface-hover cursor-pointer">
                     <Pencil className="w-3.5 h-3.5 text-muted-foreground" />
                   </button>
+                  {canDelete && (
+                    <button onClick={() => setDeletingSupplier(s)} title="Delete supplier" className="p-1.5 rounded-lg hover:bg-surface-hover cursor-pointer">
+                      <Trash2 className="w-3.5 h-3.5 text-destructive" />
+                    </button>
+                  )}
                   <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
                     <Truck className="w-4 h-4 text-primary" />
                   </div>
@@ -491,6 +503,13 @@ export function SuppliersClient({ suppliers, purchaseOrders, products }: { suppl
                   className="flex items-center gap-2 px-4 py-2 glass-card text-xs font-medium cursor-pointer">
                   <Pencil className="w-3.5 h-3.5" /> Edit Details &amp; Payment
                 </button>
+                {/* Once stock has come in against an order it's part of the shelf count's history. */}
+                {canDelete && po.items.every((i) => i.received === 0) && (
+                  <button onClick={() => setDeletingPO(po)}
+                    className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-medium text-destructive bg-destructive/10 hover:bg-destructive/15 transition-colors cursor-pointer">
+                    <Trash2 className="w-3.5 h-3.5" /> Delete
+                  </button>
+                )}
               </div>
             </div>
             );
@@ -712,6 +731,51 @@ export function SuppliersClient({ suppliers, purchaseOrders, products }: { suppl
             </div>
           </div>
         </div>
+      )}
+      {deletingSupplier && (
+        <ConfirmDialog
+          title={`Delete ${deletingSupplier.name}?`}
+          message="Their past purchase orders keep showing the name. It moves to the Trash and can be restored for 30 days."
+          busy={removing}
+          onCancel={() => setDeletingSupplier(null)}
+          onConfirm={async () => {
+            setRemoving(true);
+            try {
+              const res = await deleteSupplier(deletingSupplier.id);
+              if (!res.ok) { showToast(res.error, "error"); return; }
+              showToast(`${deletingSupplier.name} moved to Trash`, "success");
+              setDeletingSupplier(null);
+              router.refresh();
+            } catch {
+              showToast("Could not delete the supplier — check the connection and try again", "error");
+            } finally {
+              setRemoving(false);
+            }
+          }}
+        />
+      )}
+
+      {deletingPO && (
+        <ConfirmDialog
+          title={`Delete ${deletingPO.poNumber}?`}
+          message={`${deletingPO.supplierName} · ${formatCurrency(deletingPO.total)}. Nothing has been received against it. It moves to the Trash and can be restored for 30 days.`}
+          busy={removing}
+          onCancel={() => setDeletingPO(null)}
+          onConfirm={async () => {
+            setRemoving(true);
+            try {
+              const res = await deletePurchaseOrder(deletingPO.id);
+              if (!res.ok) { showToast(res.error, "error"); return; }
+              showToast(`${deletingPO.poNumber} moved to Trash`, "success");
+              setDeletingPO(null);
+              router.refresh();
+            } catch {
+              showToast("Could not delete the purchase order — check the connection and try again", "error");
+            } finally {
+              setRemoving(false);
+            }
+          }}
+        />
       )}
     </div>
   );

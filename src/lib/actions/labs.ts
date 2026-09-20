@@ -33,9 +33,12 @@ export async function updateLab(id: string, input: LabInput) {
   return { ok: true };
 }
 
+// Hidden, not erased: past lab orders keep the lab's name, and the trash can
+// bring it back for 30 days.
 export async function deleteLab(id: string) {
   await requireAuth();
-  await db.lab.update({ where: { id }, data: { active: false } });
+  await db.lab.update({ where: { id }, data: { active: false, deletedAt: new Date() } });
   revalidatePath("/dashboard/lab-orders");
+  revalidatePath("/dashboard/trash");
   return { ok: true };
 }

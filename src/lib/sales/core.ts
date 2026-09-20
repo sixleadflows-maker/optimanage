@@ -34,13 +34,18 @@ export interface PersistSaleInput {
   lensProductId?: string | null;
   labCharges?: number;
   fittingCharges?: number;
-  // Manually-entered lens (no catalog product) — name/price only, no stock impact
+  // Manually-entered lens (no catalog product) — name/price only, no stock impact.
+  // The price is per lens; a pair is customLensQty 2.
   customLensName?: string;
   customLensPrice?: number;
+  customLensQty?: number;
   // Printed under the lens on the bill, whichever lens was chosen.
   lensColor?: string;
   lensDescription?: string;
   prescription?: SalePrescriptionInput;
+  // A prescription already saved from the till before the sale was finished.
+  // It's attached to this sale instead of saving the same numbers twice.
+  existingPrescriptionId?: string;
 }
 
 export interface PersistSaleMeta {
@@ -50,6 +55,20 @@ export interface PersistSaleMeta {
   fulfillmentType?: "PICKUP" | "DELIVERY";
   deliveryAddress?: string;
   deliveryFee?: number;
+  // When the sale happened, if not now: an old paper invoice being entered, or
+  // a bill rung up while the till was offline and synced later.
+  date?: Date;
+  // False for an old invoice being entered from the records — those frames left
+  // the shop long ago and today's stock count already reflects it.
+  deductStock?: boolean;
+  // A bill made offline has already been handed over with the goods, so it must
+  // be recorded even if the system's count says the stock isn't there (it may
+  // go below zero, which shows the count needs checking).
+  allowOversell?: boolean;
+  // Offline sync: clientRef makes a retry return the sale it already created;
+  // offlineRef is the temporary number printed on the customer's bill.
+  clientRef?: string;
+  offlineRef?: string;
   // Online fulfillment can run from contexts where Next.js rejects revalidatePath
   // (e.g. a client-triggered action right after a route transition). All the pages
   // it would revalidate are force-dynamic anyway, so skipping it there is harmless.
@@ -83,8 +102,10 @@ export async function nextDocumentNumber(
   client: Pick<Prisma.TransactionClient, "documentCounter">,
   prefix: string,
   existing: (startsWith: string) => Promise<string[]>,
+  // An invoice entered for a past date is numbered in that year's series.
+  year: number = new Date().getFullYear(),
 ) {
-  const series = `${prefix}-${new Date().getFullYear()}`;
+  const series = `${prefix}-${year}`;
   const start = `${series}-`;
   const numbers = await existing(start);
   const highestExisting = numbers.reduce((m, no) => {
@@ -122,9 +143,12 @@ async function priceSale(input: {
   fittingCharges?: number;
   customLensName?: string;
   customLensPrice?: number;
+  customLensQty?: number;
   deliveryFee?: number;
 }) {
   const customLensPrice = Math.max(0, input.customLensPrice ?? 0);
+  const customLensQty = customLensPrice > 0 ? Math.max(1, Math.floor(input.customLensQty ?? 1)) : 1;
+  const customLensTotal = customLensPrice * customLensQty;
   const customLensName = customLensPrice > 0 ? (input.customLensName ?? "").trim() : "";
   if (!input.items.length && customLensPrice <= 0) throw new SaleError("Cart is empty");
   if (customLensPrice > 0 && !customLensName) throw new SaleError("Custom lens name is required");
@@ -175,7 +199,7 @@ async function priceSale(input: {
       total: lineTotal,
     };
   });
-  subtotal += customLensPrice;
+  subtotal += customLensTotal;
 
   const deliveryFee = Math.max(0, input.deliveryFee ?? 0);
   const total = Math.max(0, subtotal - input.invoiceDiscount) + deliveryFee;
@@ -189,11 +213,11 @@ async function priceSale(input: {
     const lens = await db.product.findUnique({ where: { id: input.lensProductId } });
     if (lens) lensCost = lens.costPrice;
   }
-  const totalCost = itemCost + lensCost + customLensPrice + labCharges + fittingCharges;
+  const totalCost = itemCost + lensCost + customLensTotal + labCharges + fittingCharges;
 
   return {
     saleItems, productMap, subtotal, total, deliveryFee,
-    labCharges, fittingCharges, customLensName, customLensPrice,
+    labCharges, fittingCharges, customLensName, customLensPrice, customLensQty,
     lensCost, totalCost, profit: total - totalCost,
   };
 }
@@ -206,39 +230,61 @@ function settle(total: number, paid: number) {
 }
 
 export async function persistSale(input: PersistSaleInput, meta: PersistSaleMeta) {
+  // A retried offline bill: the first attempt got through (maybe the reply was
+  // lost), so hand back that sale rather than recording it twice.
+  if (meta.clientRef) {
+    const already = await db.sale.findUnique({ where: { clientRef: meta.clientRef } });
+    if (already) return alreadySynced(already);
+  }
+
   const priced = await priceSale({ ...input, deliveryFee: meta.deliveryFee });
   const {
     saleItems, productMap, subtotal, total, deliveryFee,
-    labCharges, fittingCharges, customLensName, customLensPrice, lensCost, totalCost, profit,
+    labCharges, fittingCharges, customLensName, customLensPrice, customLensQty, lensCost, totalCost, profit,
   } = priced;
 
   const paymentStatus = paymentStatusFor(input.paymentType);
   const paid = input.paymentType === "Full" ? total : input.paymentType === "Advance" ? input.advanceAmount : 0;
   const balance = Math.max(0, total - paid);
+  const saleDate = meta.date ?? new Date();
+  const deductStock = meta.deductStock ?? true;
+  // Items an offline bill took below zero — reported back so someone can
+  // recount them.
+  const oversold: string[] = [];
 
   const createSale = () => db.$transaction(async (tx) => {
-    // Atomic conditional decrement per item — a single UPDATE ... WHERE stock >= qty
-    // statement, so two concurrent sales on the same low-stock item can't both pass.
+    oversold.length = 0;
     for (const i of input.items) {
-      if (!i.productId) continue;
+      if (!i.productId || !deductStock) continue;
+      const p = productMap.get(i.productId);
+      const name = p ? [p.brand, p.name].map((s) => s.trim()).filter(Boolean).join(" ") : i.productId;
+      if (meta.allowOversell) {
+        const updated = await tx.product.update({ where: { id: i.productId }, data: { stock: { decrement: i.quantity } } });
+        if (updated.stock < 0) oversold.push(name);
+        continue;
+      }
+      // Atomic conditional decrement per item — a single UPDATE ... WHERE stock >= qty
+      // statement, so two concurrent sales on the same low-stock item can't both pass.
       const result = await tx.product.updateMany({
         where: { id: i.productId, stock: { gte: i.quantity } },
         data: { stock: { decrement: i.quantity } },
       });
       if (result.count === 0) {
-        const p = productMap.get(i.productId);
-        const name = p ? [p.brand, p.name].map((s) => s.trim()).filter(Boolean).join(" ") : i.productId;
         throw new SaleError(`Not enough stock for ${name} — refresh the page to see the current count`);
       }
     }
 
-    const invoiceNo = await nextDocumentNumber(tx, "INV", async (startsWith) =>
-      (await tx.sale.findMany({ where: { invoiceNo: { startsWith } }, select: { invoiceNo: true } })).map((s) => s.invoiceNo)
+    const invoiceNo = await nextDocumentNumber(
+      tx, "INV",
+      async (startsWith) =>
+        (await tx.sale.findMany({ where: { invoiceNo: { startsWith } }, select: { invoiceNo: true } })).map((s) => s.invoiceNo),
+      saleDate.getFullYear(),
     );
 
     const created = await tx.sale.create({
       data: {
         invoiceNo,
+        date: saleDate,
         customerId: input.customerId || null,
         branchId: input.branchId || null,
         subtotal,
@@ -253,6 +299,7 @@ export async function persistSale(input: PersistSaleInput, meta: PersistSaleMeta
         lensCost,
         customLensName,
         customLensPrice,
+        customLensQty,
         lensColor: (input.lensColor ?? "").trim(),
         lensDescription: (input.lensDescription ?? "").trim(),
         labCharges,
@@ -266,27 +313,42 @@ export async function persistSale(input: PersistSaleInput, meta: PersistSaleMeta
         deliveryAddress: meta.deliveryAddress ?? "",
         deliveryFee,
         onlineOrderStatus: meta.source === "ONLINE" ? "PROCESSING" : null,
+        clientRef: meta.clientRef || null,
+        offlineRef: meta.offlineRef ?? "",
+        stockDeducted: deductStock,
         items: { create: saleItems },
       },
     });
 
     if (input.customerId) {
+      // An old invoice mustn't make a regular look like they were last in years ago.
+      const customer = await tx.customer.findUnique({ where: { id: input.customerId }, select: { lastVisit: true } });
+      const lastVisit = !customer?.lastVisit || customer.lastVisit < saleDate ? saleDate : customer.lastVisit;
       await tx.customer.update({
         where: { id: input.customerId },
         data: {
           totalSpend: { increment: total },
           visitCount: { increment: 1 },
-          lastVisit: new Date(),
+          lastVisit,
         },
       });
     }
 
-    if (input.prescription && input.customerId) {
+    // Already saved from the till before the sale was finished: attach it.
+    const linked = input.existingPrescriptionId && input.customerId
+      ? await tx.prescription.updateMany({
+          where: { id: input.existingPrescriptionId, customerId: input.customerId, saleId: null },
+          data: { saleId: created.id },
+        })
+      : { count: 0 };
+
+    if (input.prescription && input.customerId && linked.count === 0) {
       const p = input.prescription;
       await tx.prescription.create({
         data: {
           customerId: input.customerId,
           saleId: created.id,
+          date: saleDate,
           rightSph: p.rightSph, rightCyl: p.rightCyl, rightAxis: p.rightAxis, rightPd: p.rightPd, rightAdd: p.rightAdd,
           leftSph: p.leftSph, leftCyl: p.leftCyl, leftAxis: p.leftAxis, leftPd: p.leftPd, leftAdd: p.leftAdd,
           notes: p.notes,
@@ -296,7 +358,7 @@ export async function persistSale(input: PersistSaleInput, meta: PersistSaleMeta
     }
 
     return created;
-  });
+  }, { timeout: 20_000 });
 
   // Two tills finishing a sale at the same moment can both pick the same next
   // invoice number; the database rejects the second, so just try again. The
@@ -306,6 +368,11 @@ export async function persistSale(input: PersistSaleInput, meta: PersistSaleMeta
     try {
       sale = await createSale();
     } catch (e) {
+      // Two syncs of the same offline bill racing: the other one won.
+      if (isUniqueViolation(e) && meta.clientRef) {
+        const already = await db.sale.findUnique({ where: { clientRef: meta.clientRef } });
+        if (already) return alreadySynced(already);
+      }
       if (!isUniqueViolation(e) || attempt >= 3) throw e;
     }
   }
@@ -325,6 +392,21 @@ export async function persistSale(input: PersistSaleInput, meta: PersistSaleMeta
     total,
     paid,
     balance,
+    oversold: [...oversold],
+    duplicate: false,
+  };
+}
+
+function alreadySynced(sale: { id: string; invoiceNo: string; total: number; paid: number; balance: number }) {
+  return {
+    ok: true as const,
+    saleId: sale.id,
+    invoiceNo: sale.invoiceNo,
+    total: sale.total,
+    paid: sale.paid,
+    balance: sale.balance,
+    oversold: [] as string[],
+    duplicate: true,
   };
 }
 
@@ -336,6 +418,7 @@ export interface ReviseSaleInput {
   fittingCharges?: number;
   customLensName?: string;
   customLensPrice?: number;
+  customLensQty?: number;
   lensColor?: string;
   lensDescription?: string;
 }
@@ -369,9 +452,12 @@ export async function reviseSale(saleId: string, input: ReviseSaleInput) {
 
   // Stock only moves by what actually changed — quantities that stayed the same
   // are never put back and taken again.
+  // An old invoice entered without touching stock stays that way when edited.
   const quantities = new Map<string, number>();
-  for (const i of sale.items) if (i.productId) quantities.set(i.productId, (quantities.get(i.productId) ?? 0) - i.quantity);
-  for (const i of input.items) if (i.productId) quantities.set(i.productId, (quantities.get(i.productId) ?? 0) + i.quantity);
+  if (sale.stockDeducted) {
+    for (const i of sale.items) if (i.productId) quantities.set(i.productId, (quantities.get(i.productId) ?? 0) - i.quantity);
+    for (const i of input.items) if (i.productId) quantities.set(i.productId, (quantities.get(i.productId) ?? 0) + i.quantity);
+  }
 
   await db.$transaction(async (tx) => {
     for (const [productId, delta] of quantities) {
@@ -404,6 +490,7 @@ export async function reviseSale(saleId: string, input: ReviseSaleInput) {
         lensCost: priced.lensCost,
         customLensName: priced.customLensName,
         customLensPrice: priced.customLensPrice,
+        customLensQty: priced.customLensQty,
         lensColor: (input.lensColor ?? "").trim(),
         lensDescription: (input.lensDescription ?? "").trim(),
         labCharges: priced.labCharges,
@@ -439,10 +526,19 @@ export async function reviseSale(saleId: string, input: ReviseSaleInput) {
  */
 export async function recordSalePayment(
   saleId: string,
-  payment: { amount: number; method: string; note?: string; receivedById?: string | null },
+  payment: { amount: number; method: string; note?: string; receivedById?: string | null; date?: Date },
 ) {
   const sale = await db.sale.findUnique({ where: { id: saleId } });
   if (!sale) throw new SaleError("Invoice not found");
+
+  // Staff can record a payment at the time it was actually taken — but not
+  // one from the future, or from before the invoice existed.
+  const date = payment.date ?? new Date();
+  if (Number.isNaN(date.getTime())) throw new SaleError("Check the payment date and time");
+  if (date.getTime() > Date.now() + 5 * 60_000) throw new SaleError("The payment date can't be in the future");
+  if (date.getTime() < sale.date.getTime() - 60_000) {
+    throw new SaleError(`The payment can't be dated before the invoice (${sale.date.toLocaleDateString("en-GB")})`);
+  }
 
   const amount = Math.round(payment.amount * 100) / 100;
   if (!(amount > 0)) throw new SaleError("Enter the amount received");
@@ -459,6 +555,7 @@ export async function recordSalePayment(
       data: {
         saleId,
         amount,
+        date,
         method: payment.method,
         note: (payment.note ?? "").trim(),
         receivedById: payment.receivedById || null,

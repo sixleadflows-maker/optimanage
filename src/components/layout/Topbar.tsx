@@ -3,6 +3,7 @@
 import { useApp } from "@/lib/context";
 import { SHOP_NAME } from "@/lib/constants";
 import { logout } from "@/lib/actions/auth";
+import { clearOfflinePages } from "@/components/layout/ServiceWorker";
 import { lookupProductByBarcode, type BarcodeLookupResult } from "@/lib/actions/products";
 import type { BranchView } from "@/lib/data";
 import { formatCurrency } from "@/lib/utils/format";
@@ -21,7 +22,7 @@ function initials(name: string) {
 }
 
 export function Topbar({ user, branches }: { user: TopbarUser; branches: BranchView[] }) {
-  const { activeBranch, setActiveBranch, darkMode, toggleDarkMode, isOnline, toggleOnline, setSidebarOpen } = useApp();
+  const { activeBranch, setActiveBranch, darkMode, toggleDarkMode, isOnline, setSidebarOpen } = useApp();
   const [branchOpen, setBranchOpen] = useState(false);
   const [userOpen, setUserOpen] = useState(false);
   const currentBranch = branches.find((b) => b.id === activeBranch) ?? branches[0];
@@ -142,18 +143,18 @@ export function Topbar({ user, branches }: { user: TopbarUser; branches: BranchV
       </div>
 
       <div className="flex items-center gap-2">
-        <button
-          onClick={toggleOnline}
+        <span
+          title={isOnline
+            ? "Connected"
+            : "No internet — the till still works, and bills are recorded once the connection is back"}
           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all ${
-            isOnline
-              ? "bg-success/10 text-success"
-              : "bg-muted text-muted-foreground"
+            isOnline ? "bg-success/10 text-success" : "bg-warning/15 text-warning"
           }`}
         >
           {isOnline && <span className="live-dot w-1.5 h-1.5 rounded-full bg-success" />}
           {isOnline ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}
           <span className="hidden sm:inline">{isOnline ? "Online" : "Offline"}</span>
-        </button>
+        </span>
 
         <span className="hidden sm:inline-flex px-2.5 py-1 rounded-full bg-primary/10 text-primary text-[10px] font-semibold tracking-wide capitalize">
           {user.role.toLowerCase()}
@@ -184,7 +185,7 @@ export function Topbar({ user, branches }: { user: TopbarUser; branches: BranchV
                   <p className="text-xs text-muted-foreground truncate">{user.email}</p>
                 </div>
                 <button
-                  onClick={() => logout()}
+                  onClick={async () => { await clearOfflinePages(); await logout(); }}
                   className="w-full text-left px-3 py-2 rounded-lg text-sm transition-colors hover:bg-surface-hover flex items-center gap-2 text-red-500"
                 >
                   <LogOut className="w-4 h-4" />
