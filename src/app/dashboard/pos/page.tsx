@@ -20,7 +20,8 @@ export default async function POSPage() {
           rightPd: last.rightEye.pd, rightAdd: last.rightEye.add,
           leftSph: last.leftEye.sph, leftCyl: last.leftEye.cyl, leftAxis: last.leftEye.axis,
           leftPd: last.leftEye.pd, leftAdd: last.leftEye.add,
-          notes: last.notes,
+          // A note hidden in the history stays off the till screen too.
+          notes: last.notesHidden ? "" : last.notes,
           isOwn: last.isOwnPrescription,
         }
       : null;

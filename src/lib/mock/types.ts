@@ -41,6 +41,9 @@ export interface Prescription {
   rightEye: EyeRx;
   leftEye: EyeRx;
   notes: string;
+  // Notes kept out of sight on the prescription history until someone unhides
+  // them. The note is still stored and still editable.
+  notesHidden: boolean;
   isOwnPrescription: boolean;
 }
 

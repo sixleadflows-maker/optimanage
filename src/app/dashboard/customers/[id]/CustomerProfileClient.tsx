@@ -6,8 +6,9 @@ import type { CustomerView, SaleView } from "@/lib/data";
 import { formatCurrency, formatDate } from "@/lib/utils/format";
 import { useApp } from "@/lib/context";
 import { deleteCustomer } from "@/lib/actions/customers";
+import { setPrescriptionNotesHidden } from "@/lib/actions/prescriptions";
 import { paymentStatusChipClass } from "@/lib/constants";
-import { ArrowLeft, MessageCircle, Bell, Eye, RefreshCw, Phone, Mail, MapPin, Trash2, Loader2 } from "lucide-react";
+import { ArrowLeft, MessageCircle, Bell, Eye, EyeOff, RefreshCw, Phone, Mail, MapPin, Trash2, Loader2 } from "lucide-react";
 import Link from "next/link";
 
 export function CustomerProfileClient({ customer, sales, canDelete }: { customer: CustomerView; sales: SaleView[]; canDelete: boolean }) {
@@ -15,6 +16,23 @@ export function CustomerProfileClient({ customer, sales, canDelete }: { customer
   const router = useRouter();
   const initials = customer.name.split(" ").map((n) => n[0]).join("").slice(0, 2);
   const [deleting, setDeleting] = useState(false);
+  const [togglingNotes, setTogglingNotes] = useState<string | null>(null);
+
+  // Hiding a note applies everywhere, so the customer's own screen at the
+  // counter never shows it until someone chooses to.
+  const toggleRxNotes = async (rx: { id: string; notesHidden: boolean }) => {
+    setTogglingNotes(rx.id);
+    try {
+      const res = await setPrescriptionNotesHidden(rx.id, !rx.notesHidden);
+      if (!res.ok) { showToast(res.error, "error"); return; }
+      showToast(rx.notesHidden ? "Notes shown again" : "Notes hidden from the history", "success");
+      router.refresh();
+    } catch {
+      showToast("Could not change the notes — check the connection and try again", "error");
+    } finally {
+      setTogglingNotes(null);
+    }
+  };
 
   const handleDelete = async () => {
     if (!confirm(`Delete ${customer.name}? They move to the Trash and can be restored for 30 days. Their invoices and prescriptions are kept.`)) return;
@@ -147,7 +165,25 @@ export function CustomerProfileClient({ customer, sales, canDelete }: { customer
                         </div>
                       </div>
                     </div>
-                    {rx.notes && <p className="text-xs text-muted-foreground mt-2 pt-2 border-t border-border">{rx.notes}</p>}
+                    {rx.notes && (
+                      <div className="flex items-start gap-2 mt-2 pt-2 border-t border-border">
+                        <p className={`text-xs flex-1 min-w-0 ${rx.notesHidden ? "italic text-muted-foreground/70" : "text-muted-foreground"}`}>
+                          {rx.notesHidden ? "Notes hidden" : rx.notes}
+                        </p>
+                        <button
+                          onClick={() => toggleRxNotes(rx)}
+                          disabled={togglingNotes !== null}
+                          title={rx.notesHidden ? "Show these notes" : "Hide these notes"}
+                          className="p-1 rounded-md hover:bg-surface-hover cursor-pointer flex-shrink-0 disabled:opacity-50"
+                        >
+                          {togglingNotes === rx.id
+                            ? <Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground" />
+                            : rx.notesHidden
+                              ? <EyeOff className="w-3.5 h-3.5 text-muted-foreground" />
+                              : <Eye className="w-3.5 h-3.5 text-muted-foreground" />}
+                        </button>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>

@@ -5,9 +5,9 @@ import { useRouter } from "next/navigation";
 import type { PrescriptionView } from "@/lib/data";
 import { formatDate } from "@/lib/utils/format";
 import { useApp } from "@/lib/context";
-import { createPrescription, deletePrescription, updatePrescription } from "@/lib/actions/prescriptions";
+import { createPrescription, deletePrescription, updatePrescription, setPrescriptionNotesHidden } from "@/lib/actions/prescriptions";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
-import { Eye, Save, Search, Loader2, Pencil, Trash2, X } from "lucide-react";
+import { Eye, Save, Search, Loader2, Pencil, Trash2, X, EyeOff } from "lucide-react";
 
 interface RxCustomer { id: string; name: string; phone: string; }
 
@@ -40,6 +40,24 @@ export function PrescriptionsClient({
   const [deleting, setDeleting] = useState<PrescriptionView | null>(null);
   const [removing, setRemoving] = useState(false);
   const [listSearch, setListSearch] = useState("");
+  const [togglingNotes, setTogglingNotes] = useState<string | null>(null);
+
+  const toggleNotes = async (rx: PrescriptionView) => {
+    setTogglingNotes(rx.id);
+    try {
+      const res = await setPrescriptionNotesHidden(rx.id, !rx.notesHidden);
+      if (!res.ok) {
+        showToast(res.error, "error");
+        return;
+      }
+      showToast(rx.notesHidden ? "Notes shown again" : "Notes hidden from the history", "success");
+      router.refresh();
+    } catch {
+      showToast("Could not change the notes — check the connection and try again", "error");
+    } finally {
+      setTogglingNotes(null);
+    }
+  };
 
   const phoneById = useMemo(() => new Map(customers.map((c) => [c.id, c.phone])), [customers]);
 
@@ -274,7 +292,25 @@ export function PrescriptionsClient({
                     ))}
                   </tbody>
                 </table>
-                {rx.notes && <p className="text-[10px] text-muted-foreground mt-2 pt-1 border-t border-border">{rx.notes}</p>}
+                {rx.notes && (
+                  <div className="flex items-start gap-2 mt-2 pt-1 border-t border-border">
+                    <p className={`text-[10px] flex-1 min-w-0 ${rx.notesHidden ? "italic text-muted-foreground/70" : "text-muted-foreground"}`}>
+                      {rx.notesHidden ? "Notes hidden" : rx.notes}
+                    </p>
+                    <button
+                      onClick={() => toggleNotes(rx)}
+                      disabled={togglingNotes !== null}
+                      title={rx.notesHidden ? "Show these notes" : "Hide these notes"}
+                      className="p-1 rounded-md hover:bg-surface-hover cursor-pointer flex-shrink-0 disabled:opacity-50"
+                    >
+                      {togglingNotes === rx.id
+                        ? <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" />
+                        : rx.notesHidden
+                          ? <EyeOff className="w-3 h-3 text-muted-foreground" />
+                          : <Eye className="w-3 h-3 text-muted-foreground" />}
+                    </button>
+                  </div>
+                )}
               </div>
             ))}
           </div>

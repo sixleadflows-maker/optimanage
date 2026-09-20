@@ -66,3 +66,18 @@ export async function deletePrescription(id: string) {
   revalidatePath("/dashboard/trash");
   return { ok: true as const };
 }
+
+/**
+ * Hides or shows one prescription's notes in the history. It applies to
+ * everyone on every computer -- the point is that a note isn't on screen with
+ * the customer there -- and the note itself is untouched either way.
+ */
+export async function setPrescriptionNotesHidden(id: string, hidden: boolean) {
+  const session = await auth();
+  if (!session?.user) return { ok: false as const, error: "You've been signed out — sign in again" };
+  const updated = await db.prescription.updateMany({ where: { id }, data: { notesHidden: hidden } });
+  if (updated.count === 0) return { ok: false as const, error: "This prescription has been deleted" };
+  revalidatePath("/dashboard/prescriptions");
+  revalidatePath("/dashboard/customers");
+  return { ok: true as const };
+}
