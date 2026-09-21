@@ -1,6 +1,7 @@
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import type { Prisma } from "@/generated/prisma/client";
+import { trashPrescriptionRows } from "@/lib/trash/snapshots";
 
 export interface SaleCoreItem {
   // Left out for an item typed in at the till that isn't in the inventory --
@@ -23,6 +24,9 @@ export interface SalePrescriptionInput {
   // Whose eyes, when one slip carries several: a family member's name, or
   // "distance" / "reading".
   label?: string;
+  // A bill corrected from the till: the record already holding this one on
+  // the invoice, so saving again changes it instead of adding another.
+  id?: string;
 }
 
 export interface PersistSaleInput {
@@ -239,7 +243,7 @@ export async function persistSale(input: PersistSaleInput, meta: PersistSaleMeta
   // lost), so hand back that sale rather than recording it twice.
   if (meta.clientRef) {
     const already = await db.sale.findUnique({ where: { clientRef: meta.clientRef } });
-    if (already) return alreadySynced(already);
+    if (already) return await alreadySynced(already);
   }
 
   const priced = await priceSale({ ...input, deliveryFee: meta.deliveryFee });
@@ -256,6 +260,7 @@ export async function persistSale(input: PersistSaleInput, meta: PersistSaleMeta
   // Items an offline bill took below zero — reported back so someone can
   // recount them.
   const oversold: string[] = [];
+  const prescriptionIds: string[] = [];
 
   const createSale = () => db.$transaction(async (tx) => {
     oversold.length = 0;
@@ -348,21 +353,20 @@ export async function persistSale(input: PersistSaleInput, meta: PersistSaleMeta
       : { count: 0 };
 
     // The attached one (linked above) covers the first prescription when it was
-    // saved from the till already; the rest are recorded here.
+    // saved from the till already; the rest are recorded here. Their ids go
+    // back to the till in the same order, so correcting the bill afterwards
+    // changes these records instead of adding more.
+    prescriptionIds.length = 0;
+    if (linked.count > 0) prescriptionIds.push(input.existingPrescriptionId!);
     const toCreate = (input.prescriptions ?? []).slice(linked.count > 0 ? 1 : 0);
-    if (input.customerId && toCreate.length) {
-      await tx.prescription.createMany({
-        data: toCreate.map((p) => ({
-          customerId: input.customerId!,
-          saleId: created.id,
-          date: saleDate,
-          label: (p.label ?? "").trim(),
-          rightSph: p.rightSph, rightCyl: p.rightCyl, rightAxis: p.rightAxis, rightPd: p.rightPd, rightAdd: p.rightAdd,
-          leftSph: p.leftSph, leftCyl: p.leftCyl, leftAxis: p.leftAxis, leftPd: p.leftPd, leftAdd: p.leftAdd,
-          notes: p.notes,
-          isOwnPrescription: p.isOwnPrescription ?? false,
-        })),
-      });
+    if (input.customerId) {
+      for (const p of toCreate) {
+        const rx = await tx.prescription.create({
+          data: { customerId: input.customerId, saleId: created.id, date: saleDate, ...prescriptionFields(p) },
+          select: { id: true },
+        });
+        prescriptionIds.push(rx.id);
+      }
     }
 
     return created;
@@ -379,7 +383,7 @@ export async function persistSale(input: PersistSaleInput, meta: PersistSaleMeta
       // Two syncs of the same offline bill racing: the other one won.
       if (isUniqueViolation(e) && meta.clientRef) {
         const already = await db.sale.findUnique({ where: { clientRef: meta.clientRef } });
-        if (already) return alreadySynced(already);
+        if (already) return await alreadySynced(already);
       }
       if (!isUniqueViolation(e) || attempt >= 3) throw e;
     }
@@ -401,11 +405,12 @@ export async function persistSale(input: PersistSaleInput, meta: PersistSaleMeta
     paid,
     balance,
     oversold: [...oversold],
+    prescriptionIds: [...prescriptionIds],
     duplicate: false,
   };
 }
 
-function alreadySynced(sale: { id: string; invoiceNo: string; total: number; paid: number; balance: number }) {
+async function alreadySynced(sale: { id: string; invoiceNo: string; total: number; paid: number; balance: number }) {
   return {
     ok: true as const,
     saleId: sale.id,
@@ -414,9 +419,41 @@ function alreadySynced(sale: { id: string; invoiceNo: string; total: number; pai
     paid: sale.paid,
     balance: sale.balance,
     oversold: [] as string[],
+    prescriptionIds: await billPrescriptionIds(sale.id),
     duplicate: true,
   };
 }
+
+/** The prescriptions on an invoice, in the order they were put on it. */
+async function billPrescriptionIds(saleId: string) {
+  const rows = await db.prescription.findMany({
+    where: { saleId },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    select: { id: true },
+  });
+  return rows.map((r) => r.id);
+}
+
+/** The columns a prescription on a bill is stored with. */
+function prescriptionFields(p: SalePrescriptionInput) {
+  return {
+    label: (p.label ?? "").trim(),
+    rightSph: p.rightSph, rightCyl: p.rightCyl, rightAxis: p.rightAxis, rightPd: p.rightPd, rightAdd: p.rightAdd,
+    leftSph: p.leftSph, leftCyl: p.leftCyl, leftAxis: p.leftAxis, leftPd: p.leftPd, leftAdd: p.leftAdd,
+    notes: p.notes,
+    isOwnPrescription: p.isOwnPrescription ?? false,
+  };
+}
+
+function samePrescription(row: ReturnType<typeof prescriptionFields>, p: SalePrescriptionInput) {
+  const next = prescriptionFields(p);
+  return (Object.keys(next) as (keyof typeof next)[]).every((k) => row[k] === next[k]);
+}
+
+// A record made within this long before the invoice was made for this visit
+// (saved from the till moments before the sale was finished). Anything older
+// is the customer's history from an earlier visit and is never rewritten.
+const SAME_VISIT_MS = 60 * 60_000;
 
 export interface ReviseSaleInput {
   items: SaleCoreItem[];
@@ -435,6 +472,14 @@ export interface ReviseSaleInput {
   customLensQty?: number;
   lensColor?: string;
   lensDescription?: string;
+  // Corrections made at the till carry these too. The payment taken at the
+  // counter is worked out again from the till's Full / Advance / Balance choice
+  // (payments received on a later day stay as they are).
+  payment?: { type: "Full" | "Advance" | "Balance"; advanceAmount: number };
+  // The prescriptions the bill carries now. Left out, they're left alone.
+  prescriptions?: SalePrescriptionInput[];
+  // Who made the change, for a prescription it moves to the trash.
+  revisedById?: string | null;
 }
 
 /**
@@ -467,13 +512,31 @@ export async function reviseSale(saleId: string, input: ReviseSaleInput) {
   }
 
   const priced = await priceSale({ ...input, deliveryFee: sale.deliveryFee });
-  if (priced.total < sale.paid) {
+  let paid = sale.paid;
+  if (input.payment) {
+    const later = await db.salePayment.aggregate({ where: { saleId }, _sum: { amount: true } });
+    const laterPaid = later._sum.amount ?? 0;
+    if (laterPaid > priced.total + 0.01) {
+      throw new SaleError(
+        `${formatRs(laterPaid)} has been received on this invoice since the sale — more than the new ${formatRs(priced.total)} total. Refund the difference through Return & Refund instead.`
+      );
+    }
+    const { type, advanceAmount } = input.payment;
+    if (type === "Advance" && !(advanceAmount > 0)) throw new SaleError("Enter the advance amount received");
+    const atCounter = type === "Full" ? priced.total - laterPaid : type === "Advance" ? advanceAmount : 0;
+    paid = Math.round((atCounter + laterPaid) * 100) / 100;
+    if (paid > priced.total + 0.01) {
+      throw new SaleError(`The advance is more than the ${formatRs(priced.total)} bill — choose Full Payment instead`);
+    }
+  } else if (priced.total < sale.paid) {
     throw new SaleError(
       `The new total (Rs.${priced.total.toLocaleString()}) is less than the Rs.${sale.paid.toLocaleString()} already paid. Refund the difference through Return & Refund instead.`
     );
   }
-  const { balance, status } = settle(priced.total, sale.paid);
+  const { balance, status } = settle(priced.total, paid);
   const customerId = input.customerId === undefined ? sale.customerId : input.customerId || null;
+  if (input.prescriptions?.length && !customerId) throw new SaleError("Select a customer to save the prescription");
+  let prescriptionIds: string[] | undefined;
 
   // Stock only moves by what actually changed — quantities that stayed the same
   // are never put back and taken again.
@@ -514,6 +577,7 @@ export async function reviseSale(saleId: string, input: ReviseSaleInput) {
         subtotal: priced.subtotal,
         discount: input.invoiceDiscount,
         total: priced.total,
+        paid,
         balance,
         paymentStatus: status,
         lensProductId: input.lensProductId || null,
@@ -562,6 +626,12 @@ export async function reviseSale(saleId: string, input: ReviseSaleInput) {
         });
       }
     }
+
+    if (input.prescriptions) {
+      prescriptionIds = await replaceBillPrescriptions(tx, {
+        saleId, saleMadeAt: sale.createdAt, customerId, date, prescriptions: input.prescriptions, revisedById: input.revisedById ?? null,
+      });
+    }
   }, { timeout: 20_000 });
 
   revalidatePath("/dashboard");
@@ -570,8 +640,70 @@ export async function reviseSale(saleId: string, input: ReviseSaleInput) {
   revalidatePath("/dashboard/customers");
   revalidatePath("/dashboard/cash");
   revalidatePath("/dashboard/prescriptions");
+  if (input.prescriptions) revalidatePath("/dashboard/trash");
 
-  return { ok: true as const, invoiceNo: sale.invoiceNo, total: priced.total, paid: sale.paid, balance };
+  return { ok: true as const, invoiceNo: sale.invoiceNo, total: priced.total, paid, balance, prescriptionIds };
+}
+
+/**
+ * Makes the prescriptions on a corrected bill match what the till now shows,
+ * changing the records already on it rather than adding copies. A record made
+ * for this visit is changed in place (or trashed if it came off the bill); one
+ * from an earlier visit that was only attached is never rewritten — a changed
+ * version is saved as a new record and the old one just comes off the bill.
+ */
+async function replaceBillPrescriptions(
+  tx: Prisma.TransactionClient,
+  bill: {
+    saleId: string;
+    saleMadeAt: Date;
+    customerId: string | null;
+    date: Date;
+    prescriptions: SalePrescriptionInput[];
+    revisedById: string | null;
+  },
+) {
+  const onBill = await tx.prescription.findMany({ where: { saleId: bill.saleId } });
+  const thisVisit = (r: { createdAt: Date }) => r.createdAt.getTime() >= bill.saleMadeAt.getTime() - SAME_VISIT_MS;
+  const kept = new Set<string>();
+  const ids: string[] = [];
+
+  for (const p of bill.prescriptions) {
+    const customerId = bill.customerId!;
+    const row = p.id ? onBill.find((r) => r.id === p.id && !kept.has(r.id)) : undefined;
+    if (row && thisVisit(row)) {
+      await tx.prescription.update({ where: { id: row.id }, data: { customerId, date: bill.date, ...prescriptionFields(p) } });
+      kept.add(row.id);
+      ids.push(row.id);
+      continue;
+    }
+    if (row && row.customerId === customerId && samePrescription(row, p)) {
+      kept.add(row.id);
+      ids.push(row.id);
+      continue;
+    }
+    // Saved to the customer's record from the till while the bill was being
+    // corrected: attach that record instead of storing the numbers twice.
+    if (!row && p.id) {
+      const saved = await tx.prescription.findFirst({ where: { id: p.id, customerId, saleId: null } });
+      if (saved && samePrescription(saved, p)) {
+        await tx.prescription.update({ where: { id: saved.id }, data: { saleId: bill.saleId } });
+        ids.push(saved.id);
+        continue;
+      }
+    }
+    const created = await tx.prescription.create({
+      data: { customerId, saleId: bill.saleId, date: bill.date, ...prescriptionFields(p) },
+      select: { id: true },
+    });
+    ids.push(created.id);
+  }
+
+  const dropped = onBill.filter((r) => !kept.has(r.id));
+  const earlier = dropped.filter((r) => !thisVisit(r)).map((r) => r.id);
+  if (earlier.length) await tx.prescription.updateMany({ where: { id: { in: earlier } }, data: { saleId: null } });
+  await trashPrescriptionRows(tx, dropped.filter(thisVisit).map((r) => r.id), bill.revisedById);
+  return ids;
 }
 
 /**

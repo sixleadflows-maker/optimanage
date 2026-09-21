@@ -255,6 +255,18 @@ export async function getCustomerSales(customerId: string): Promise<SaleView[]> 
   return rows.map(mapSale);
 }
 
+// Who was picked on the last bill rung up. The till starts with them rather
+// than whoever's account it's signed in to -- one shared login rings up for
+// everyone, so that account's name was nearly always the wrong one.
+export async function getLastInvoiceStaff() {
+  const last = await db.sale.findFirst({
+    where: { source: "POS" },
+    orderBy: { createdAt: "desc" },
+    select: { createdById: true, receivedById: true },
+  });
+  return { orderTakenById: last?.createdById ?? null, billGeneratedById: last?.receivedById ?? null };
+}
+
 // Every invoice ever made, newest first -- there is deliberately no date
 // cut-off, so an old bill can always be found, reopened and reprinted.
 export async function getSales(): Promise<SaleView[]> {

@@ -8,15 +8,27 @@ import { useApp } from "@/lib/context";
 import { deleteCustomer } from "@/lib/actions/customers";
 import { setPrescriptionNotesHidden } from "@/lib/actions/prescriptions";
 import { paymentStatusChipClass } from "@/lib/constants";
-import { ArrowLeft, MessageCircle, Bell, Eye, EyeOff, RefreshCw, Phone, Mail, MapPin, Trash2, Loader2 } from "lucide-react";
+import { formatRxValue } from "@/lib/utils/rx";
+import { EditInvoiceModal, type EditorCustomer, type EditorStaff } from "@/app/dashboard/sales/InvoiceEditor";
+import { ArrowLeft, MessageCircle, Bell, Eye, EyeOff, RefreshCw, Phone, Mail, MapPin, Trash2, Loader2, Pencil } from "lucide-react";
 import Link from "next/link";
 
-export function CustomerProfileClient({ customer, sales, canDelete }: { customer: CustomerView; sales: SaleView[]; canDelete: boolean }) {
+export function CustomerProfileClient({
+  customer, sales, canDelete, canEdit, customers, staff,
+}: {
+  customer: CustomerView;
+  sales: SaleView[];
+  canDelete: boolean;
+  canEdit: boolean;
+  customers: EditorCustomer[];
+  staff: EditorStaff[];
+}) {
   const { showToast } = useApp();
   const router = useRouter();
   const initials = customer.name.split(" ").map((n) => n[0]).join("").slice(0, 2);
   const [deleting, setDeleting] = useState(false);
   const [togglingNotes, setTogglingNotes] = useState<string | null>(null);
+  const [editingSale, setEditingSale] = useState<SaleView | null>(null);
 
   // Hiding a note applies everywhere, so the customer's own screen at the
   // counter never shows it until someone chooses to.
@@ -145,10 +157,10 @@ export function CustomerProfileClient({ customer, sales, canDelete }: { customer
                       <div>
                         <p className="text-[10px] font-medium text-muted-foreground mb-2">RIGHT EYE (OD)</p>
                         <div className="grid grid-cols-5 gap-1 text-xs">
-                          {(["SPH", "CYL", "AXIS", "PD", "ADD"] as const).map((f) => (
+                          {(["Sph", "Cyl", "Axis", "Pd", "Add"] as const).map((f) => (
                             <div key={f} className="text-center">
-                              <p className="text-[9px] text-muted-foreground">{f}</p>
-                              <p className="font-medium">{rx.rightEye[f.toLowerCase() as keyof typeof rx.rightEye]}</p>
+                              <p className="text-[9px] text-muted-foreground">{f.toUpperCase()}</p>
+                              <p className="font-medium">{formatRxValue(f, rx.rightEye[f.toLowerCase() as keyof typeof rx.rightEye])}</p>
                             </div>
                           ))}
                         </div>
@@ -156,10 +168,10 @@ export function CustomerProfileClient({ customer, sales, canDelete }: { customer
                       <div>
                         <p className="text-[10px] font-medium text-muted-foreground mb-2">LEFT EYE (OS)</p>
                         <div className="grid grid-cols-5 gap-1 text-xs">
-                          {(["SPH", "CYL", "AXIS", "PD", "ADD"] as const).map((f) => (
+                          {(["Sph", "Cyl", "Axis", "Pd", "Add"] as const).map((f) => (
                             <div key={f} className="text-center">
-                              <p className="text-[9px] text-muted-foreground">{f}</p>
-                              <p className="font-medium">{rx.leftEye[f.toLowerCase() as keyof typeof rx.leftEye]}</p>
+                              <p className="text-[9px] text-muted-foreground">{f.toUpperCase()}</p>
+                              <p className="font-medium">{formatRxValue(f, rx.leftEye[f.toLowerCase() as keyof typeof rx.leftEye])}</p>
                             </div>
                           ))}
                         </div>
@@ -208,9 +220,17 @@ export function CustomerProfileClient({ customer, sales, canDelete }: { customer
                         {sale.items.map((i) => i.productName).join(", ")}
                       </p>
                     </div>
-                    <div className="text-right">
-                      <p className="text-sm font-semibold">{formatCurrency(sale.total)}</p>
-                      <span className={`chip ${paymentStatusChipClass(sale.paymentStatus)}`}>{sale.paymentStatus}</span>
+                    <div className="flex items-center gap-2">
+                      <div className="text-right">
+                        <p className="text-sm font-semibold">{formatCurrency(sale.total)}</p>
+                        <span className={`chip ${paymentStatusChipClass(sale.paymentStatus)}`}>{sale.paymentStatus}</span>
+                      </div>
+                      {canEdit && sale.source === "POS" && !sale.hasReturn && (
+                        <button onClick={() => setEditingSale(sale)} title="Edit invoice"
+                          className="p-1.5 rounded-lg hover:bg-surface-hover cursor-pointer">
+                          <Pencil className="w-3.5 h-3.5 text-muted-foreground" />
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -219,6 +239,21 @@ export function CustomerProfileClient({ customer, sales, canDelete }: { customer
           </div>
         </div>
       </div>
+
+      {editingSale && (
+        <EditInvoiceModal
+          sale={editingSale}
+          customers={customers}
+          staff={staff}
+          canBackdate={canEdit}
+          onClose={() => setEditingSale(null)}
+          onDone={(message) => {
+            setEditingSale(null);
+            showToast(message, "success");
+            router.refresh();
+          }}
+        />
+      )}
     </div>
   );
 }

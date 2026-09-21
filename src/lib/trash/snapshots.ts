@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
 import type { Prisma } from "@/generated/prisma/client";
 import type { SnapshotTrashKind } from "@/lib/constants";
+import { formatRxPower } from "@/lib/utils/rx";
 
 /**
  * Trash for records that are really removed when deleted.
@@ -231,15 +232,29 @@ export async function trashExpense(id: string, deletedById: string | null) {
 }
 
 export async function trashPrescription(id: string, deletedById: string | null) {
-  const p = await db.prescription.findUnique({ where: { id }, include: { customer: { select: { name: true } } } });
-  if (!p) throw new TrashError("This prescription has already been deleted");
-  const { customer, ...row } = p;
-  await db.$transaction(async (tx) => {
+  const exists = await db.prescription.findUnique({ where: { id }, select: { id: true } });
+  if (!exists) throw new TrashError("This prescription has already been deleted");
+  await db.$transaction((tx) => trashPrescriptionRows(tx, [id], deletedById));
+}
+
+/**
+ * Moves prescriptions to the trash inside a transaction that's already running
+ * — a bill corrected at the till drops one it no longer carries in the same
+ * step as the rest of the change.
+ */
+export async function trashPrescriptionRows(tx: Tx, ids: string[], deletedById: string | null) {
+  for (const id of ids) {
+    const p = await tx.prescription.findUnique({ where: { id }, include: { customer: { select: { name: true } } } });
+    if (!p) continue;
+    const { customer, ...row } = p;
     await store(tx, "prescription", p.id, `Prescription — ${customer.name}`,
-      [p.date.toLocaleDateString("en-GB"), `OD ${p.rightSph}/${p.rightCyl} · OS ${p.leftSph}/${p.leftCyl}`].join(" · "),
+      [
+        p.date.toLocaleDateString("en-GB"),
+        `OD ${formatRxPower(p.rightSph)}/${formatRxPower(p.rightCyl)} · OS ${formatRxPower(p.leftSph)}/${formatRxPower(p.leftCyl)}`,
+      ].join(" · "),
       { prescription: row }, deletedById);
     await tx.prescription.delete({ where: { id } });
-  });
+  }
 }
 
 export async function trashLabOrder(id: string, deletedById: string | null) {

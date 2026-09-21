@@ -556,6 +556,12 @@ export function SalesClient({
                 className="flex-1 min-w-[140px] flex items-center justify-center gap-2 py-2.5 glass-card text-sm font-medium cursor-pointer disabled:opacity-60">
                 <Printer className="w-4 h-4" /> Print A4
               </button>
+              {canEdit && viewingSale.source === "POS" && !viewingSale.hasReturn && (
+                <button onClick={() => { const sale = viewingSale; setViewingSale(null); setEditingSale(sale); }}
+                  className="flex-1 min-w-[140px] flex items-center justify-center gap-2 py-2.5 glass-card text-sm font-medium cursor-pointer">
+                  <Pencil className="w-4 h-4" /> Edit invoice
+                </button>
+              )}
               {viewingSale.balance > 0 && (
                 <button onClick={() => { const sale = viewingSale; setViewingSale(null); setPayingSale(sale); }}
                   className="flex-1 min-w-[140px] flex items-center justify-center gap-2 py-2.5 bg-primary text-white rounded-2xl text-sm font-medium hover:bg-primary-hover transition-colors cursor-pointer">

@@ -1,4 +1,4 @@
-import { getProducts, getCustomers, getUsers, getSettings } from "@/lib/data";
+import { getProducts, getCustomers, getUsers, getSettings, getLastInvoiceStaff } from "@/lib/data";
 import { auth } from "@/lib/auth";
 import { POSClient, type POSRx } from "./POSClient";
 import { shopDetailsFromSettings } from "@/components/invoice/InvoiceDocuments";
@@ -6,8 +6,8 @@ import { shopDetailsFromSettings } from "@/components/invoice/InvoiceDocuments";
 export const dynamic = "force-dynamic";
 
 export default async function POSPage() {
-  const [products, customers, users, settings, session] = await Promise.all([
-    getProducts(), getCustomers(), getUsers(), getSettings(), auth(),
+  const [products, customers, users, settings, lastStaff, session] = await Promise.all([
+    getProducts(), getCustomers(), getUsers(), getSettings(), getLastInvoiceStaff(), auth(),
   ]);
   const posCustomers = customers.map((c) => {
     // Newest first (getCustomers orders them): the till starts a new Rx from it.
@@ -29,6 +29,9 @@ export default async function POSPage() {
     return { id: c.id, name: c.name, phone: c.phone, serialNumber: c.serialNumber, latestRx };
   });
   const staff = users.filter((u) => u.active).map((u) => ({ id: u.id, name: u.name }));
+  const currentUserId = session?.user?.id ?? "";
+  // Start with whoever was on the last bill (if they're still on the staff).
+  const stillHere = (id: string | null) => (id && staff.some((m) => m.id === id) ? id : currentUserId);
   // No cost/profit is passed to the till at all — the screen faces customers,
   // and those figures live in Analytics instead.
   return (
@@ -36,9 +39,12 @@ export default async function POSPage() {
       products={products}
       customers={posCustomers}
       staff={staff}
-      currentUserId={session?.user?.id ?? ""}
+      currentUserId={currentUserId}
+      defaultOrderTakenBy={stillHere(lastStaff.orderTakenById)}
+      defaultBillGeneratedBy={stillHere(lastStaff.billGeneratedById)}
       shop={shopDetailsFromSettings(settings)}
       canBackdate={!!session?.user && session.user.role !== "CASHIER"}
+      canEditBill={!!session?.user && session.user.role !== "CASHIER"}
     />
   );
 }

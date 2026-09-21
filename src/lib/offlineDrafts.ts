@@ -22,6 +22,10 @@ export interface OfflineDraft {
   };
   // The server was reached but refused the bill; needs someone to look at it.
   lastError?: string;
+  // Bumped each time the bill is corrected at the till before it has synced.
+  // A sync already on its way with an older version must not drop the newer
+  // one, and has to apply the correction to the invoice it just created.
+  revision?: number;
 }
 
 function readAll(): OfflineDraft[] {
@@ -61,8 +65,23 @@ export function addDraft(input: CreateSaleInput, summary: OfflineDraft["summary"
   return draft;
 }
 
-export function removeDraft(id: string) {
-  writeAll(readAll().filter((d) => d.id !== id));
+/**
+ * Saves a correction over a bill still waiting to sync. False if it's no
+ * longer waiting (it has gone through, so the invoice itself must be changed).
+ */
+export function replaceDraft(id: string, input: CreateSaleInput, summary: OfflineDraft["summary"]): boolean {
+  const drafts = readAll();
+  const draft = drafts.find((d) => d.id === id);
+  if (!draft) return false;
+  writeAll(drafts.map((d) => (d.id === id
+    ? { ...d, input: { ...input, offlineRef: d.input.offlineRef, date: d.input.date }, summary, lastError: undefined, revision: (d.revision ?? 0) + 1 }
+    : d)));
+  return true;
+}
+
+/** Drops a synced bill -- unless it was corrected while that sync was under way. */
+export function removeDraft(id: string, revision?: number) {
+  writeAll(readAll().filter((d) => d.id !== id || (revision !== undefined && (d.revision ?? 0) !== revision)));
 }
 
 export function markDraftFailed(id: string, error: string) {

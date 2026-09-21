@@ -78,6 +78,19 @@ async function customerForOfflineBill(c: { name: string; phone: string }) {
   return created.id;
 }
 
+/**
+ * Who took the order vs. who generated the bill, defaulting to the signed-in
+ * user. Null when an explicit pick isn't a real account.
+ */
+async function billStaff(input: { createdById?: string; receivedById?: string }, signedInId: string) {
+  const createdById = input.createdById || signedInId;
+  const receivedById = input.receivedById || signedInId;
+  const staffUsers = await db.user.findMany({ where: { id: { in: [...new Set([createdById, receivedById])] } } });
+  const staffMap = new Map(staffUsers.map((u) => [u.id, u]));
+  if (!staffMap.has(createdById) || !staffMap.has(receivedById)) return null;
+  return { createdById, receivedById, staffMap };
+}
+
 // Problems staff can act on (out of stock, missing name...) come back as
 // { ok: false, error } rather than being thrown. A thrown error's message is
 // replaced with a generic one in production, so the till couldn't tell "this
@@ -103,15 +116,9 @@ export async function createSale(input: CreateSaleInput) {
     return { ok: false as const, error: "Ask a manager or the owner to enter an old invoice" };
   }
 
-  // Staff tracking: resolve who took the order vs. who generated the bill,
-  // defaulting to the signed-in user, and validate any explicit IDs are real.
-  const createdById = input.createdById || session.user.id;
-  const receivedById = input.receivedById || session.user.id;
-  const staffUsers = await db.user.findMany({ where: { id: { in: [...new Set([createdById, receivedById])] } } });
-  const staffMap = new Map(staffUsers.map((u) => [u.id, u]));
-  if (!staffMap.has(createdById) || !staffMap.has(receivedById)) {
-    return { ok: false as const, error: "Selected staff member not found" };
-  }
+  const staff = await billStaff(input, session.user.id);
+  if (!staff) return { ok: false as const, error: "Selected staff member not found" };
+  const { createdById, receivedById, staffMap } = staff;
 
   try {
     // Checked here as well as in persistSale: a retry must be recognised before
@@ -210,6 +217,68 @@ export async function updateSale(input: UpdateSaleInput) {
 
   try {
     return await reviseSale(input.saleId, { ...input, date: input.date ? new Date(input.date) : undefined });
+  } catch (e) {
+    if (e instanceof SaleError) return { ok: false as const, error: e.message };
+    throw e;
+  }
+}
+
+/**
+ * The till's "Edit bill": the bill just rung up, corrected and saved again.
+ * It's found by the till's clientRef, so however many times it's changed it
+ * stays one invoice with one number. Everything on the till screen is saved
+ * over it — items, customer, staff, the payment taken at the counter and the
+ * prescriptions.
+ */
+export async function updateTillSale(input: CreateSaleInput) {
+  const session = await auth();
+  if (!session?.user) return { ok: false as const, error: "You've been signed out — sign in again" };
+  if (session.user.role === "CASHIER") {
+    return { ok: false as const, error: "Ask a manager or the owner to change a finished invoice" };
+  }
+  if (!input.clientRef) return { ok: false as const, error: "This bill can't be found — change it from Sales & Invoices" };
+
+  const sale = await db.sale.findUnique({ where: { clientRef: input.clientRef }, select: { id: true } });
+  if (!sale) return { ok: false as const, error: "This bill hasn't been recorded yet — try again in a moment" };
+
+  const staff = await billStaff(input, session.user.id);
+  if (!staff) return { ok: false as const, error: "Selected staff member not found" };
+
+  let date: Date | undefined;
+  if (input.date) {
+    date = new Date(input.date);
+    if (Number.isNaN(date.getTime())) return { ok: false as const, error: "Check the bill date and time" };
+  }
+
+  try {
+    let customerId = input.customerId ?? null;
+    if (!customerId && input.newCustomer?.name.trim()) customerId = await customerForOfflineBill(input.newCustomer);
+
+    const result = await reviseSale(sale.id, {
+      items: input.items,
+      invoiceDiscount: input.invoiceDiscount,
+      date,
+      customerId,
+      paymentMethod: input.paymentMethod,
+      createdById: staff.createdById,
+      receivedById: staff.receivedById,
+      lensProductId: input.lensProductId ?? null,
+      labCharges: input.labCharges,
+      fittingCharges: input.fittingCharges,
+      customLensName: input.customLensName,
+      customLensPrice: input.customLensPrice,
+      customLensQty: input.customLensQty,
+      lensColor: input.lensColor,
+      lensDescription: input.lensDescription,
+      payment: { type: input.paymentType, advanceAmount: input.advanceAmount },
+      prescriptions: input.prescriptions ?? [],
+      revisedById: session.user.id,
+    });
+    return {
+      ...result,
+      orderTakenByName: staff.staffMap.get(staff.createdById)!.name,
+      billGeneratedByName: staff.staffMap.get(staff.receivedById)!.name,
+    };
   } catch (e) {
     if (e instanceof SaleError) return { ok: false as const, error: e.message };
     throw e;

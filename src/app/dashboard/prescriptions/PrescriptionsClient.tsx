@@ -7,6 +7,8 @@ import { formatDate } from "@/lib/utils/format";
 import { useApp } from "@/lib/context";
 import { createPrescription, deletePrescription, updatePrescription, setPrescriptionNotesHidden } from "@/lib/actions/prescriptions";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { RxPowerInput } from "@/components/ui/RxPowerInput";
+import { formatRxValue, isPowerField, parseRxText, rxFieldText } from "@/lib/utils/rx";
 import { Eye, Save, Search, Loader2, Pencil, Trash2, X, EyeOff } from "lucide-react";
 
 interface RxCustomer { id: string; name: string; phone: string; }
@@ -17,8 +19,6 @@ const empty = {
   label: "",
   notes: "",
 };
-
-const show = (n: number) => (n === 0 ? "" : String(n));
 
 export function PrescriptionsClient({
   prescriptions,
@@ -77,7 +77,7 @@ export function PrescriptionsClient({
     );
   }, [prescriptions, listSearch, phoneById]);
 
-  const num = (v: string) => (v === "" ? 0 : Number(v));
+  const num = parseRxText;
   const values = () => ({
     rightSph: num(form.rightSph), rightCyl: num(form.rightCyl), rightAxis: num(form.rightAxis), rightPd: num(form.rightPd), rightAdd: num(form.rightAdd),
     leftSph: num(form.leftSph), leftCyl: num(form.leftCyl), leftAxis: num(form.leftAxis), leftPd: num(form.leftPd), leftAdd: num(form.leftAdd),
@@ -100,10 +100,12 @@ export function PrescriptionsClient({
     setCustomerSearch(rx.customerName);
     setIsOwn(rx.isOwnPrescription);
     setForm({
-      rightSph: show(rx.rightEye.sph), rightCyl: show(rx.rightEye.cyl), rightAxis: show(rx.rightEye.axis),
-      rightPd: show(rx.rightEye.pd), rightAdd: show(rx.rightEye.add),
-      leftSph: show(rx.leftEye.sph), leftCyl: show(rx.leftEye.cyl), leftAxis: show(rx.leftEye.axis),
-      leftPd: show(rx.leftEye.pd), leftAdd: show(rx.leftEye.add),
+      rightSph: rxFieldText("Sph", rx.rightEye.sph), rightCyl: rxFieldText("Cyl", rx.rightEye.cyl),
+      rightAxis: rxFieldText("Axis", rx.rightEye.axis), rightPd: rxFieldText("Pd", rx.rightEye.pd),
+      rightAdd: rxFieldText("Add", rx.rightEye.add),
+      leftSph: rxFieldText("Sph", rx.leftEye.sph), leftCyl: rxFieldText("Cyl", rx.leftEye.cyl),
+      leftAxis: rxFieldText("Axis", rx.leftEye.axis), leftPd: rxFieldText("Pd", rx.leftEye.pd),
+      leftAdd: rxFieldText("Add", rx.leftEye.add),
       label: rx.label,
       notes: rx.notes,
     });
@@ -202,15 +204,22 @@ export function PrescriptionsClient({
               <div key={eye} className="mb-4">
                 <p className="text-xs font-medium text-muted-foreground mb-2">{eye}</p>
                 <div className="grid grid-cols-5 gap-2">
-                  {(["Sph", "Cyl", "Axis", "Pd", "Add"] as const).map((field) => (
-                    <div key={field}>
-                      <label className="text-[10px] text-muted-foreground block text-center mb-1">{field.toUpperCase()}</label>
-                      <input type="number" step="0.25" placeholder="0.00"
-                        value={form[`${prefix}${field}` as keyof typeof form]}
-                        onChange={(e) => setForm((p) => ({ ...p, [`${prefix}${field}`]: e.target.value }))}
-                        className="w-full px-2 py-2 glass-input text-xs text-center" />
-                    </div>
-                  ))}
+                  {(["Sph", "Cyl", "Axis", "Pd", "Add"] as const).map((field) => {
+                    const key = `${prefix}${field}` as keyof typeof form;
+                    return (
+                      <div key={field}>
+                        <label className="text-[10px] text-muted-foreground block text-center mb-1">{field.toUpperCase()}</label>
+                        {isPowerField(field) ? (
+                          <RxPowerInput value={form[key]} onChange={(v) => setForm((p) => ({ ...p, [key]: v }))} />
+                        ) : (
+                          <input type="number" step={field === "Axis" ? 1 : 0.5} min={0} placeholder="0"
+                            value={form[key]}
+                            onChange={(e) => setForm((p) => ({ ...p, [key]: e.target.value }))}
+                            className="w-full px-2 py-2 glass-input text-xs text-center" />
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             );
@@ -299,7 +308,8 @@ export function PrescriptionsClient({
                     {([["OD (R)", rx.rightEye], ["OS (L)", rx.leftEye]] as const).map(([label, eye]) => (
                       <tr key={label}>
                         <td className="text-left font-medium text-muted-foreground py-0.5">{label}</td>
-                        <td>{eye.sph}</td><td>{eye.cyl}</td><td>{eye.axis}</td><td>{eye.pd}</td><td>{eye.add}</td>
+                        <td>{formatRxValue("Sph", eye.sph)}</td><td>{formatRxValue("Cyl", eye.cyl)}</td>
+                        <td>{eye.axis}</td><td>{eye.pd}</td><td>{formatRxValue("Add", eye.add)}</td>
                       </tr>
                     ))}
                   </tbody>

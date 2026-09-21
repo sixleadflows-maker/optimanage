@@ -5,10 +5,10 @@ import type { Product } from "@/lib/mock/types";
 import { formatCurrency, toLocalInput } from "@/lib/utils/format";
 import { useApp } from "@/lib/context";
 import { DISCOUNT_PERCENTAGES, LENS_COLORS, PAYMENT_TYPE_LABEL } from "@/lib/constants";
-import { createSale, type CreateSaleInput } from "@/lib/actions/sales";
+import { createSale, updateTillSale, type CreateSaleInput } from "@/lib/actions/sales";
 import { createCustomer } from "@/lib/actions/customers";
 import { createPrescription } from "@/lib/actions/prescriptions";
-import { getDrafts, addDraft, removeDraft, markDraftFailed, makeOfflineRef, type OfflineDraft } from "@/lib/offlineDrafts";
+import { getDrafts, addDraft, replaceDraft, removeDraft, markDraftFailed, makeOfflineRef, type OfflineDraft } from "@/lib/offlineDrafts";
 import { useRouter } from "next/navigation";
 import {
   Search, Plus, Minus, Trash2, X, User, CreditCard,
@@ -18,6 +18,8 @@ import {
 } from "lucide-react";
 import { firstImage } from "@/lib/utils/images";
 import { LensLoader } from "@/components/ui/LensLoader";
+import { RxPowerInput } from "@/components/ui/RxPowerInput";
+import { isPowerField, parseRxText, rxFieldText } from "@/lib/utils/rx";
 import { ThermalReceipt, A4Invoice, lensNote, type InvoiceData, type ShopDetails } from "@/components/invoice/InvoiceDocuments";
 
 interface CartItem {
@@ -81,6 +83,9 @@ interface RxEntry {
   // sale instead of storing the same numbers again.
   fromRecordId?: string;
   savedId?: string;
+  // The record holding it on the invoice once the bill is saved, so saving a
+  // corrected bill changes that record instead of adding another.
+  onBillId?: string;
 }
 
 const blankRx = (): RxEntry => ({
@@ -98,8 +103,6 @@ const EMPTY_RX = {
 
 const EMPTY_MANUAL_ITEM = { name: "", description: "", price: "", quantity: "1" };
 const EMPTY_NEW_CUSTOMER = { name: "", phone: "", serialNumber: "" };
-
-const show = (n: number) => (n === 0 ? "" : String(n));
 
 // A bill dated this far back is an old invoice being entered from the records.
 const OLD_BILL_AFTER_MS = 10 * 60_000;
@@ -129,25 +132,38 @@ function LensQty({ value, onChange, max }: { value: number; onChange: (n: number
 }
 
 export function POSClient({
-  products, customers, staff, currentUserId, shop, canBackdate,
+  products, customers, staff, currentUserId, defaultOrderTakenBy, defaultBillGeneratedBy, shop, canBackdate, canEditBill,
 }: {
   products: Product[];
   customers: POSCustomer[];
   staff: StaffMember[];
   currentUserId: string;
+  // Who was picked on the last bill -- the till starts with them.
+  defaultOrderTakenBy: string;
+  defaultBillGeneratedBy: string;
   shop: ShopDetails;
   // Owners and managers can enter an old invoice with its original date.
   canBackdate: boolean;
+  // ...and correct a bill after it's been rung up.
+  canEditBill: boolean;
 }) {
   const { showToast } = useApp();
   const router = useRouter();
-  const num = (v: string) => (v === "" ? 0 : Number(v));
+  const num = parseRxText;
   const [entryMode, setEntryMode] = useState<"choose" | "manual" | "scan">("choose");
   const [search, setSearch] = useState("");
   const [cart, setCart] = useState<CartItem[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState<string>("");
-  const [orderTakenBy, setOrderTakenBy] = useState(currentUserId);
-  const [billGeneratedBy, setBillGeneratedBy] = useState(currentUserId);
+  // Staff pick up where the last bill left off rather than going back to the
+  // signed-in account after every sale.
+  const [lastStaff, setLastStaff] = useState({
+    orderTakenBy: defaultOrderTakenBy || currentUserId,
+    billGeneratedBy: defaultBillGeneratedBy || currentUserId,
+  });
+  const [orderTakenBy, setOrderTakenBy] = useState(lastStaff.orderTakenBy);
+  const [billGeneratedBy, setBillGeneratedBy] = useState(lastStaff.billGeneratedBy);
+  // Correcting the bill just rung up: saving goes over that same invoice.
+  const [editingBill, setEditingBill] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState("Cash");
   const [paymentType, setPaymentType] = useState<"Full" | "Advance" | "Balance">("Full");
   const [advanceAmount, setAdvanceAmount] = useState(0);
@@ -282,7 +298,18 @@ export function POSClient({
       try {
         const res = await createSale(draft.input);
         if (res.ok) {
-          removeDraft(draft.id);
+          // Corrected at the till while an earlier sync was already under way:
+          // the invoice was made from the older version, so apply the correction.
+          if (res.duplicate && (draft.revision ?? 0) > 0) {
+            const fixed = await updateTillSale(draft.input);
+            if (!fixed.ok) {
+              markDraftFailed(draft.id, fixed.error);
+              failed++;
+              lastError = fixed.error;
+              continue;
+            }
+          }
+          removeDraft(draft.id, draft.revision ?? 0);
           synced.push(draft.offlineRef ? `${draft.offlineRef} is ${res.invoiceNo}` : res.invoiceNo);
           for (const name of res.oversold ?? []) oversold.add(name);
         } else {
@@ -503,10 +530,12 @@ export function POSClient({
     if (!last) return blankRx();
     return {
       ...blankRx(),
-      rightSph: show(last.rightSph), rightCyl: show(last.rightCyl), rightAxis: show(last.rightAxis),
-      rightPd: show(last.rightPd), rightAdd: show(last.rightAdd),
-      leftSph: show(last.leftSph), leftCyl: show(last.leftCyl), leftAxis: show(last.leftAxis),
-      leftPd: show(last.leftPd), leftAdd: show(last.leftAdd),
+      rightSph: rxFieldText("Sph", last.rightSph), rightCyl: rxFieldText("Cyl", last.rightCyl),
+      rightAxis: rxFieldText("Axis", last.rightAxis), rightPd: rxFieldText("Pd", last.rightPd),
+      rightAdd: rxFieldText("Add", last.rightAdd),
+      leftSph: rxFieldText("Sph", last.leftSph), leftCyl: rxFieldText("Cyl", last.leftCyl),
+      leftAxis: rxFieldText("Axis", last.leftAxis), leftPd: rxFieldText("Pd", last.leftPd),
+      leftAdd: rxFieldText("Add", last.leftAdd),
       label: last.label,
       notes: last.notes,
       isOwn: last.isOwn,
@@ -635,14 +664,79 @@ export function POSClient({
     setFittingCharges(0);
     setRecordRx(false);
     setRxList([]);
-    setOrderTakenBy(currentUserId);
-    setBillGeneratedBy(currentUserId);
+    setOrderTakenBy(lastStaff.orderTakenBy);
+    setBillGeneratedBy(lastStaff.billGeneratedBy);
+    setEditingBill(false);
     setShowManualItem(false);
     setManualItem({ ...EMPTY_MANUAL_ITEM });
     setEditingDetailsKey(null);
     setShowNewCustomer(false);
     setNewCustomer({ ...EMPTY_NEW_CUSTOMER });
     router.refresh();
+  };
+
+  /**
+   * "Edit bill": the bill just rung up, saved again over the same invoice --
+   * however many times it's corrected, it stays one invoice with one number.
+   * A bill made offline that hasn't synced yet is corrected in the queue.
+   */
+  const saveBillChanges = async (
+    saleInput: CreateSaleInput,
+    shown: {
+      staffNames: { orderTakenByName: string; billGeneratedByName: string };
+      pickedStaff: { orderTakenBy: string; billGeneratedBy: string };
+      date: string;
+    },
+  ) => {
+    if (!saleResult) return;
+    const finish = (result: SaleResult, message: string) => {
+      setSaleResult(result);
+      setLastStaff(shown.pickedStaff);
+      setEditingBill(false);
+      setShowReceipt(true);
+      showToast(message, "success");
+    };
+
+    const summary = { customerName: customer?.name ?? "Walk-in", itemCount: cart.length, total };
+    if (saleResult.provisional && clientRef.current && replaceDraft(clientRef.current, saleInput, summary)) {
+      setDrafts(getDrafts());
+      const paid = paymentType === "Full" ? total : paymentType === "Advance" ? advanceAmount : 0;
+      finish(
+        { ...saleResult, ...shown.staffNames, date: shown.date, paid, balance: Math.max(0, total - paid) },
+        `${saleResult.invoiceNo} updated — it'll be recorded once the connection is back`,
+      );
+      return;
+    }
+
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      showToast("No connection — the changes weren't saved. Try again once the connection is back.", "error");
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await updateTillSale(saleInput);
+      if (!res.ok) {
+        showToast(res.error, "error");
+        return;
+      }
+      const rxIds = res.prescriptionIds ?? [];
+      if (recordRx) setRxList((prev) => prev.map((e, i) => ({ ...e, onBillId: rxIds[i] })));
+      finish(
+        {
+          invoiceNo: res.invoiceNo,
+          orderTakenByName: res.orderTakenByName,
+          billGeneratedByName: res.billGeneratedByName,
+          date: shown.date,
+          paid: res.paid,
+          balance: res.balance,
+        },
+        `${res.invoiceNo} updated — still one invoice`,
+      );
+    } catch {
+      showToast("Couldn't reach the server — the changes weren't saved. Try again.", "error");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const completeSale = async () => {
@@ -684,7 +778,9 @@ export function POSClient({
       fittingCharges,
       createdById: orderTakenBy || currentUserId,
       receivedById: billGeneratedBy || currentUserId,
-      prescriptions: recordRx ? rxList.map(rxValues) : undefined,
+      prescriptions: recordRx
+        ? rxList.map((e) => (editingBill ? { ...rxValues(e), id: e.onBillId ?? e.savedId } : rxValues(e)))
+        : undefined,
       // Don't save the same numbers twice: attach the record the first one came
       // from (saved from here, or the customer's last one left unchanged).
       existingPrescriptionId: recordRx && rxList[0]
@@ -696,6 +792,18 @@ export function POSClient({
     };
     const billTime = billDateValue ?? new Date();
     const staffName = (id: string) => staff.find((m) => m.id === id)?.name ?? "";
+    const pickedStaff = { orderTakenBy: orderTakenBy || currentUserId, billGeneratedBy: billGeneratedBy || currentUserId };
+    const formatBillTime = (d: Date) =>
+      d.toLocaleString("en-PK", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+
+    if (editingBill && saleResult) {
+      await saveBillChanges(saleInput, {
+        staffNames: { orderTakenByName: staffName(pickedStaff.orderTakenBy), billGeneratedByName: staffName(pickedStaff.billGeneratedBy) },
+        pickedStaff,
+        date: billDateValue ? formatBillTime(billDateValue) : saleResult.date,
+      });
+      return;
+    }
 
     // No connection: print the bill now with a temporary number and record it
     // when the connection is back (see syncDrafts).
@@ -710,13 +818,14 @@ export function POSClient({
         { customerName: customer?.name ?? "Walk-in", itemCount: cart.length, total }
       );
       setDrafts(getDrafts().length ? getDrafts() : [draft]);
+      setLastStaff(pickedStaff);
       const paid = paymentType === "Full" ? total : paymentType === "Advance" ? advanceAmount : 0;
       setSaleResult({
         invoiceNo: offlineRef,
         provisional: true,
         orderTakenByName: staffName(orderTakenBy || currentUserId),
         billGeneratedByName: staffName(billGeneratedBy || currentUserId),
-        date: billTime.toLocaleString("en-PK", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }),
+        date: formatBillTime(billTime),
         paid,
         balance: Math.max(0, total - paid),
       });
@@ -742,10 +851,14 @@ export function POSClient({
         invoiceNo: res.invoiceNo,
         orderTakenByName: res.orderTakenByName,
         billGeneratedByName: res.billGeneratedByName,
-        date: billTime.toLocaleString("en-PK", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }),
+        date: formatBillTime(billTime),
         paid: res.paid,
         balance: res.balance,
       });
+      setLastStaff(pickedStaff);
+      // Remember which records hold the prescriptions, for "Edit bill".
+      const rxIds = res.prescriptionIds ?? [];
+      if (recordRx) setRxList((prev) => prev.map((e, i) => ({ ...e, onBillId: rxIds[i] })));
       setShowSuccess(true);
       showToast(`Sale completed — ${res.invoiceNo}`, "success");
       setTimeout(() => {
@@ -819,9 +932,19 @@ export function POSClient({
       <div className="animate-slide-right">
         <div className="flex items-center justify-between mb-6 no-print">
           <h1 className="text-2xl font-bold">Invoice Preview</h1>
-          <button onClick={resetSale} className="px-4 py-2 glass-card text-sm font-medium cursor-pointer">
-            ← New Sale
-          </button>
+          <div className="flex items-center gap-2">
+            {canEditBill && (
+              <button
+                onClick={() => { setEditingBill(true); setEntryMode("manual"); setShowReceipt(false); }}
+                title="Change this bill — saving updates the same invoice"
+                className="px-4 py-2 glass-card text-sm font-medium cursor-pointer flex items-center gap-2">
+                <PenLine className="w-4 h-4" /> Edit bill
+              </button>
+            )}
+            <button onClick={resetSale} className="px-4 py-2 glass-card text-sm font-medium cursor-pointer">
+              ← New Sale
+            </button>
+          </div>
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="glass-card p-6">
@@ -916,6 +1039,24 @@ export function POSClient({
   return (
     <div className="animate-fade-in">
       <h1 className="text-2xl font-bold mb-6">Point of Sale</h1>
+      {editingBill && saleResult && (
+        <div className="glass-card p-3 mb-4 flex items-center justify-between gap-3 border border-primary/30">
+          <div className="flex items-start gap-2 min-w-0">
+            <PenLine className="w-4 h-4 text-primary flex-shrink-0 mt-0.5" />
+            <div className="min-w-0">
+              <p className="text-xs font-medium">Editing {saleResult.invoiceNo}</p>
+              <p className="text-[10px] text-muted-foreground mt-0.5">
+                Saving updates this invoice — it won&apos;t make a new one.
+              </p>
+            </div>
+          </div>
+          <button onClick={resetSale}
+            title="Keep the invoice as it was last saved and start the next sale"
+            className="px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-surface-hover cursor-pointer flex-shrink-0">
+            Leave it — new sale
+          </button>
+        </div>
+      )}
       {drafts.length > 0 && (
         <div className="glass-card p-3 mb-4 flex items-start justify-between gap-3 border border-warning/30">
           <div className="flex items-start gap-2 min-w-0">
@@ -1309,15 +1450,23 @@ export function POSClient({
                             <div key={eye}>
                               <p className="text-[10px] font-medium text-muted-foreground mb-1">{eye}</p>
                               <div className="grid grid-cols-5 gap-1">
-                                {(["Sph", "Cyl", "Axis", "Pd", "Add"] as const).map((f) => (
-                                  <div key={f}>
-                                    <label className="text-[9px] text-muted-foreground block text-center mb-0.5">{f.toUpperCase()}</label>
-                                    <input type="number" step="0.25" placeholder="0"
-                                      value={entry[`${prefix}${f}` as keyof RxEntry] as string}
-                                      onChange={(e) => editRx(entry.key, { [`${prefix}${f}`]: e.target.value })}
-                                      className="w-full px-1 py-1 glass-input text-[10px] text-center" />
-                                  </div>
-                                ))}
+                                {(["Sph", "Cyl", "Axis", "Pd", "Add"] as const).map((f) => {
+                                  const key = `${prefix}${f}` as keyof RxEntry;
+                                  return (
+                                    <div key={f}>
+                                      <label className="text-[9px] text-muted-foreground block text-center mb-0.5">{f.toUpperCase()}</label>
+                                      {isPowerField(f) ? (
+                                        <RxPowerInput compact placeholder="0" value={entry[key] as string}
+                                          onChange={(v) => editRx(entry.key, { [key]: v })} />
+                                      ) : (
+                                        <input type="number" step={f === "Axis" ? 1 : 0.5} min={0} placeholder="0"
+                                          value={entry[key] as string}
+                                          onChange={(e) => editRx(entry.key, { [key]: e.target.value })}
+                                          className="w-full px-1 py-1 glass-input text-[10px] text-center" />
+                                      )}
+                                    </div>
+                                  );
+                                })}
                               </div>
                             </div>
                           );
@@ -1563,7 +1712,11 @@ export function POSClient({
                   className="w-full py-3 bg-primary text-white rounded-2xl text-sm font-semibold hover:bg-primary-hover transition-colors disabled:opacity-60 flex items-center justify-center gap-2"
                 >
                   {saving && <LensLoader light />}
-                  {saving ? "Processing…" : `Complete Sale — ${formatCurrency(total)}`}
+                  {saving
+                    ? "Processing…"
+                    : editingBill && saleResult
+                      ? `Save changes to ${saleResult.invoiceNo} — ${formatCurrency(total)}`
+                      : `Complete Sale — ${formatCurrency(total)}`}
                 </button>
               </div>
             </>
