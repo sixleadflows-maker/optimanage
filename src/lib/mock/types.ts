@@ -40,6 +40,8 @@ export interface Prescription {
   date: string;
   rightEye: EyeRx;
   leftEye: EyeRx;
+  // Whose eyes, when one order carries several prescriptions.
+  label: string;
   notes: string;
   // Notes kept out of sight on the prescription history until someone unhides
   // them. The note is still stored and still editable.

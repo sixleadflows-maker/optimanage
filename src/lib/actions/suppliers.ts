@@ -226,3 +226,49 @@ export async function receiveStock(poId: string, receipts: ReceiveInput[]) {
   revalidatePath("/dashboard/inventory");
   return { ok: true, status };
 }
+
+/**
+ * Replaces the lines on a purchase order. Only while nothing has been received
+ * against it — after that the order is part of how the shelf count was reached.
+ */
+export async function updatePurchaseOrderItems(poId: string, items: POItemInput[]) {
+  const session = await requireAuth();
+  if (session.user.role === "CASHIER") return { ok: false as const, error: "Only managers and owners can change a purchase order" };
+
+  const po = await db.purchaseOrder.findUnique({ where: { id: poId }, include: { items: true } });
+  if (!po) return { ok: false as const, error: "This purchase order has been deleted" };
+  if (po.items.some((i) => i.received > 0)) {
+    return { ok: false as const, error: `${po.poNumber} has stock received against it, so its items can't be changed` };
+  }
+  if (items.length === 0) return { ok: false as const, error: "A purchase order needs at least one item" };
+
+  const productIds = items.flatMap((i) => (i.productId ? [i.productId] : []));
+  const products = await db.product.findMany({ where: { id: { in: productIds } }, select: { id: true, brand: true, name: true } });
+  const nameById = new Map(products.map((p) => [p.id, [p.brand, p.name].map((t) => t.trim()).filter(Boolean).join(" ")]));
+
+  const lines = items.map((i) => {
+    const quantity = Math.max(1, Math.floor(i.quantity));
+    const unitCost = Math.max(0, i.unitCost);
+    return {
+      productId: i.productId || null,
+      productName: i.productId ? nameById.get(i.productId) ?? i.name ?? "" : (i.name ?? "").trim(),
+      description: i.description ?? "",
+      quantity,
+      unitCost,
+      total: quantity * unitCost,
+      received: 0,
+    };
+  });
+  if (lines.some((l) => !l.productName)) return { ok: false as const, error: "Give every typed-in item a name" };
+
+  await db.$transaction(async (tx) => {
+    await tx.purchaseOrderItem.deleteMany({ where: { orderId: poId } });
+    await tx.purchaseOrder.update({
+      where: { id: poId },
+      data: { total: lines.reduce((sum, l) => sum + l.total, 0), items: { create: lines } },
+    });
+  });
+
+  revalidatePath("/dashboard/suppliers");
+  return { ok: true as const };
+}

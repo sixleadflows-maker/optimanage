@@ -27,6 +27,7 @@ const PAGES: Record<TrashKind, string[]> = {
   prescription: ["/dashboard/prescriptions", "/dashboard/customers"],
   labOrder: ["/dashboard/lab-orders"],
   purchaseOrder: ["/dashboard/suppliers"],
+  stockAdjustment: ["/dashboard/stock-adjustments", "/dashboard/inventory"],
 };
 
 function refresh(kind: TrashKind) {

@@ -35,6 +35,7 @@ interface CartItem {
 export interface POSRx {
   id: string;
   date: string;
+  label: string;
   rightSph: number; rightCyl: number; rightAxis: number; rightPd: number; rightAdd: number;
   leftSph: number; leftCyl: number; leftAxis: number; leftPd: number; leftAdd: number;
   notes: string;
@@ -67,6 +68,27 @@ interface SaleResult {
   paid: number;
   balance: number;
 }
+
+/** One prescription on the slip. An order can carry several. */
+interface RxEntry {
+  key: string;
+  label: string;
+  isOwn: boolean;
+  rightSph: string; rightCyl: string; rightAxis: string; rightPd: string; rightAdd: string;
+  leftSph: string; leftCyl: string; leftAxis: string; leftPd: string; leftAdd: string;
+  notes: string;
+  // The record it was filled in from, or saved to from here — attached to the
+  // sale instead of storing the same numbers again.
+  fromRecordId?: string;
+  savedId?: string;
+}
+
+const blankRx = (): RxEntry => ({
+  key: crypto.randomUUID(),
+  label: "",
+  isOwn: false,
+  ...EMPTY_RX,
+});
 
 const EMPTY_RX = {
   rightSph: "", rightCyl: "", rightAxis: "", rightPd: "", rightAdd: "",
@@ -163,14 +185,13 @@ export function POSClient({
   const [fittingCharges, setFittingCharges] = useState(0);
 
   const [recordRx, setRecordRx] = useState(false);
-  const [rxIsOwn, setRxIsOwn] = useState(false);
-  const [rx, setRx] = useState({ ...EMPTY_RX });
+  // One order can carry several prescriptions under the same customer — a
+  // family sharing a serial number, or distance and reading on one slip.
+  const [rxList, setRxList] = useState<RxEntry[]>([]);
   // Whether staff have typed into the Rx form (so switching customer doesn't wipe it).
   const [rxTouched, setRxTouched] = useState(false);
   const [rxPrefilledFrom, setRxPrefilledFrom] = useState<string | null>(null);
-  // Saved to the customer's record from here before the sale was finished.
-  const [savedRx, setSavedRx] = useState<{ id: string; key: string } | null>(null);
-  const [savingRx, setSavingRx] = useState(false);
+  const [savingRx, setSavingRx] = useState<string | null>(null);
   const [poppedId, setPoppedId] = useState<string | null>(null);
   const popTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -466,59 +487,69 @@ export function POSClient({
   const billDateValue = billDate ? new Date(billDate) : null;
   const isOldBill = !!billDateValue && Date.now() - billDateValue.getTime() > OLD_BILL_AFTER_MS;
 
-  const rxValues = () => ({
-    rightSph: num(rx.rightSph), rightCyl: num(rx.rightCyl), rightAxis: num(rx.rightAxis), rightPd: num(rx.rightPd), rightAdd: num(rx.rightAdd),
-    leftSph: num(rx.leftSph), leftCyl: num(rx.leftCyl), leftAxis: num(rx.leftAxis), leftPd: num(rx.leftPd), leftAdd: num(rx.leftAdd),
-    notes: rx.notes,
-    isOwnPrescription: rxIsOwn,
+  const rxValues = (entry: RxEntry) => ({
+    rightSph: num(entry.rightSph), rightCyl: num(entry.rightCyl), rightAxis: num(entry.rightAxis), rightPd: num(entry.rightPd), rightAdd: num(entry.rightAdd),
+    leftSph: num(entry.leftSph), leftCyl: num(entry.leftCyl), leftAxis: num(entry.leftAxis), leftPd: num(entry.leftPd), leftAdd: num(entry.leftAdd),
+    notes: entry.notes,
+    label: entry.label.trim(),
+    isOwnPrescription: entry.isOwn,
   });
-  const rxKey = () => JSON.stringify(rxValues());
+  const rxKey = (entry: RxEntry) => JSON.stringify(rxValues(entry));
 
-  // Start the Rx form from the customer's last prescription -- most visits
+  // The first prescription starts from the customer's last one -- most visits
   // are a small change to it, not a new one -- unless staff already typed.
-  const fillRxFrom = (c?: POSCustomer) => {
+  const rxFromCustomer = (c?: POSCustomer): RxEntry => {
     const last = c?.latestRx;
-    if (last) {
-      setRx({
-        rightSph: show(last.rightSph), rightCyl: show(last.rightCyl), rightAxis: show(last.rightAxis),
-        rightPd: show(last.rightPd), rightAdd: show(last.rightAdd),
-        leftSph: show(last.leftSph), leftCyl: show(last.leftCyl), leftAxis: show(last.leftAxis),
-        leftPd: show(last.leftPd), leftAdd: show(last.leftAdd),
-        notes: last.notes,
-      });
-      setRxIsOwn(last.isOwn);
-      setRxPrefilledFrom(last.date);
-    } else {
-      setRx({ ...EMPTY_RX });
-      setRxIsOwn(false);
-      setRxPrefilledFrom(null);
-    }
-    setRxTouched(false);
+    if (!last) return blankRx();
+    return {
+      ...blankRx(),
+      rightSph: show(last.rightSph), rightCyl: show(last.rightCyl), rightAxis: show(last.rightAxis),
+      rightPd: show(last.rightPd), rightAdd: show(last.rightAdd),
+      leftSph: show(last.leftSph), leftCyl: show(last.leftCyl), leftAxis: show(last.leftAxis),
+      leftPd: show(last.leftPd), leftAdd: show(last.leftAdd),
+      label: last.label,
+      notes: last.notes,
+      isOwn: last.isOwn,
+      fromRecordId: last.id,
+    };
   };
 
   useEffect(() => {
-    setSavedRx(null);
-    if (recordRx && !rxTouched) fillRxFrom(customer);
+    if (!recordRx) return;
+    if (rxTouched && rxList.length) return;
+    setRxList([rxFromCustomer(customer)]);
+    setRxPrefilledFrom(customer?.latestRx?.date ?? null);
+    setRxTouched(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedCustomer, recordRx]);
 
-  const editRx = (patch: Partial<typeof EMPTY_RX>) => {
-    setRx((p) => ({ ...p, ...patch }));
+  const editRx = (key: string, patch: Partial<RxEntry>) => {
+    setRxList((prev) => prev.map((e) => (e.key === key ? { ...e, ...patch, savedId: undefined } : e)));
     setRxTouched(true);
   };
 
-  const saveRxNow = async () => {
+  const addRx = () => {
+    setRxList((prev) => [...prev, blankRx()]);
+    setRxTouched(true);
+  };
+
+  const removeRx = (key: string) => {
+    setRxList((prev) => (prev.length <= 1 ? prev : prev.filter((e) => e.key !== key)));
+    setRxTouched(true);
+  };
+
+  const saveRxNow = async (entry: RxEntry) => {
     if (!customer) { showToast("Select the customer first", "error"); return; }
     if (customer.local) { showToast(`${customer.name} isn't on the system yet — the prescription is saved with the bill`, "info"); return; }
-    setSavingRx(true);
+    setSavingRx(entry.key);
     try {
-      const res = await createPrescription({ customerId: customer.id, ...rxValues() });
-      setSavedRx({ id: res.id, key: rxKey() });
+      const res = await createPrescription({ customerId: customer.id, ...rxValues(entry) });
+      setRxList((prev) => prev.map((e) => (e.key === entry.key ? { ...e, savedId: res.id } : e)));
       showToast(`Saved to ${customer.name}'s prescription record`, "success");
     } catch {
       showToast("Couldn't save it right now — it will be saved with the sale", "error");
     } finally {
-      setSavingRx(false);
+      setSavingRx(null);
     }
   };
 
@@ -597,15 +628,13 @@ export function POSClient({
     clientRef.current = null;
     setRxTouched(false);
     setRxPrefilledFrom(null);
-    setSavedRx(null);
     setLensColorChoice("");
     setLensColorOther("");
     setLensDescription("");
     setLabCharges(0);
     setFittingCharges(0);
     setRecordRx(false);
-    setRxIsOwn(false);
-    setRx({ ...EMPTY_RX });
+    setRxList([]);
     setOrderTakenBy(currentUserId);
     setBillGeneratedBy(currentUserId);
     setShowManualItem(false);
@@ -655,15 +684,11 @@ export function POSClient({
       fittingCharges,
       createdById: orderTakenBy || currentUserId,
       receivedById: billGeneratedBy || currentUserId,
-      prescription: recordRx ? rxValues() : undefined,
-      // Don't save the same numbers twice: attach the record this came from
-      // (saved from here, or the customer's last one left unchanged).
-      existingPrescriptionId: recordRx
-        ? savedRx && savedRx.key === rxKey()
-          ? savedRx.id
-          : !rxTouched && rxPrefilledFrom && customer?.latestRx
-            ? customer.latestRx.id
-            : undefined
+      prescriptions: recordRx ? rxList.map(rxValues) : undefined,
+      // Don't save the same numbers twice: attach the record the first one came
+      // from (saved from here, or the customer's last one left unchanged).
+      existingPrescriptionId: recordRx && rxList[0]
+        ? rxList[0].savedId ?? (!rxTouched && rxPrefilledFrom ? rxList[0].fromRecordId : undefined)
         : undefined,
       date: billDateValue ? billDateValue.toISOString() : undefined,
       deductStock: isOldBill ? deductOldStock : undefined,
@@ -788,13 +813,6 @@ export function POSClient({
       paymentStatus: PAYMENT_TYPE_LABEL[paymentType],
       paid: saleResult.paid,
       balance: saleResult.balance,
-      prescription: recordRx
-        ? {
-            right: { sph: rx.rightSph, cyl: rx.rightCyl, axis: rx.rightAxis, pd: rx.rightPd, add: rx.rightAdd },
-            left: { sph: rx.leftSph, cyl: rx.leftCyl, axis: rx.leftAxis, pd: rx.leftPd, add: rx.leftAdd },
-            isOwn: rxIsOwn,
-          }
-        : null,
     };
 
     return (
@@ -1254,50 +1272,79 @@ export function POSClient({
                     {customer ? (
                       <p className="text-[10px] text-muted-foreground leading-relaxed">
                         {rxPrefilledFrom && !rxTouched
-                          ? <>Filled in from {customer.name}&apos;s last prescription ({new Date(rxPrefilledFrom).toLocaleDateString("en-GB")}) — change anything that&apos;s different. </>
-                          : null}
-                        {savedRx && savedRx.key === rxKey()
-                          ? <span className="text-success font-medium">Saved to {customer.name}&apos;s prescription record.</span>
-                          : <>Saved to {customer.name}&apos;s prescription record when you complete the sale.</>}
+                          ? `Filled in from ${customer.name}'s last prescription (${new Date(rxPrefilledFrom).toLocaleDateString("en-GB")}) — change anything that's different. `
+                          : ""}
+                        {`Saved to ${customer.name}'s prescription record when you complete the sale.`}
                       </p>
-                    ) : null}
-                    <label className="flex items-center gap-2 text-[10px] font-medium cursor-pointer">
-                      <input type="checkbox" checked={rxIsOwn} onChange={(e) => { setRxIsOwn(e.target.checked); setRxTouched(true); }} className="rounded" />
-                      Own Prescription — customer brought this from outside
-                    </label>
-                    {(["Right Eye (OD)", "Left Eye (OS)"] as const).map((eye) => {
-                      const prefix = eye.includes("Right") ? "right" : "left";
-                      return (
-                        <div key={eye}>
-                          <p className="text-[10px] font-medium text-muted-foreground mb-1">{eye}</p>
-                          <div className="grid grid-cols-5 gap-1">
-                            {(["Sph", "Cyl", "Axis", "Pd", "Add"] as const).map((f) => (
-                              <div key={f}>
-                                <label className="text-[9px] text-muted-foreground block text-center mb-0.5">{f.toUpperCase()}</label>
-                                <input type="number" step="0.25" placeholder="0"
-                                  value={rx[`${prefix}${f}` as keyof typeof rx]}
-                                  onChange={(e) => editRx({ [`${prefix}${f}`]: e.target.value })}
-                                  className="w-full px-1 py-1 glass-input text-[10px] text-center" />
-                              </div>
-                            ))}
-                          </div>
+                    ) : (
+                      <p className="text-[10px] text-warning">Select a customer above to save the prescription.</p>
+                    )}
+
+                    {rxList.map((entry, index) => (
+                      <div key={entry.key} className="p-2 rounded-lg border border-border space-y-2">
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="text" value={entry.label}
+                            onChange={(e) => editRx(entry.key, { label: e.target.value })}
+                            placeholder={rxList.length > 1 ? `Whose eyes? e.g. ${index === 0 ? "Ahmed" : "Sara"}, or "reading"` : "Whose eyes / what for (optional)"}
+                            className="flex-1 px-2.5 py-1.5 glass-input text-[11px]"
+                          />
+                          {rxList.length > 1 && (
+                            <button onClick={() => removeRx(entry.key)} title="Remove this prescription"
+                              className="p-1 rounded-md hover:bg-surface-hover cursor-pointer flex-shrink-0">
+                              <X className="w-3.5 h-3.5 text-destructive" />
+                            </button>
+                          )}
                         </div>
-                      );
-                    })}
-                    <input type="text" value={rx.notes} onChange={(e) => editRx({ notes: e.target.value })}
-                      className="w-full px-3 py-1.5 glass-input text-[10px]" placeholder="Rx notes (optional)..." />
-                    {!selectedCustomer && <p className="text-[10px] text-warning">Select a customer above to save the prescription.</p>}
-                    {customer && !customer.local && !(savedRx && savedRx.key === rxKey()) && (
-                      <button onClick={saveRxNow} disabled={savingRx}
-                        className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-surface hover:bg-surface-hover text-[10px] font-medium disabled:opacity-60 cursor-pointer">
-                        {savingRx ? <LensLoader /> : <Save className="w-3 h-3" />} Save to {customer.name}&apos;s record now
-                      </button>
-                    )}
-                    {customer && savedRx && savedRx.key === rxKey() && (
-                      <p className="flex items-center justify-center gap-1 text-[10px] text-success font-medium">
-                        <Check className="w-3 h-3" /> On {customer.name}&apos;s record — the sale will use this one
-                      </p>
-                    )}
+
+                        <label className="flex items-center gap-2 text-[10px] font-medium cursor-pointer">
+                          <input type="checkbox" checked={entry.isOwn}
+                            onChange={(e) => editRx(entry.key, { isOwn: e.target.checked })} className="rounded" />
+                          Own Prescription — customer brought this from outside
+                        </label>
+
+                        {(["Right Eye (OD)", "Left Eye (OS)"] as const).map((eye) => {
+                          const prefix = eye.includes("Right") ? "right" : "left";
+                          return (
+                            <div key={eye}>
+                              <p className="text-[10px] font-medium text-muted-foreground mb-1">{eye}</p>
+                              <div className="grid grid-cols-5 gap-1">
+                                {(["Sph", "Cyl", "Axis", "Pd", "Add"] as const).map((f) => (
+                                  <div key={f}>
+                                    <label className="text-[9px] text-muted-foreground block text-center mb-0.5">{f.toUpperCase()}</label>
+                                    <input type="number" step="0.25" placeholder="0"
+                                      value={entry[`${prefix}${f}` as keyof RxEntry] as string}
+                                      onChange={(e) => editRx(entry.key, { [`${prefix}${f}`]: e.target.value })}
+                                      className="w-full px-1 py-1 glass-input text-[10px] text-center" />
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })}
+
+                        <input type="text" value={entry.notes} onChange={(e) => editRx(entry.key, { notes: e.target.value })}
+                          className="w-full px-3 py-1.5 glass-input text-[10px]" placeholder="Rx notes (optional)..." />
+
+                        {customer && !customer.local && (
+                          entry.savedId ? (
+                            <p className="flex items-center justify-center gap-1 text-[10px] text-success font-medium">
+                              <Check className="w-3 h-3" /> On {customer.name}&apos;s record — the sale will use this one
+                            </p>
+                          ) : (
+                            <button onClick={() => saveRxNow(entry)} disabled={savingRx !== null}
+                              className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-surface hover:bg-surface-hover text-[10px] font-medium disabled:opacity-60 cursor-pointer">
+                              {savingRx === entry.key ? <LensLoader /> : <Save className="w-3 h-3" />} Save to {customer.name}&apos;s record now
+                            </button>
+                          )
+                        )}
+                      </div>
+                    ))}
+
+                    <button onClick={addRx}
+                      className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-primary/10 text-primary text-[10px] font-semibold hover:bg-primary/15 transition-colors cursor-pointer">
+                      <Plus className="w-3 h-3" /> Add another prescription to this slip
+                    </button>
                   </div>
                 )}
               </div>

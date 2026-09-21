@@ -6,13 +6,16 @@ import type { Product } from "@/lib/mock/types";
 import type { StockAdjustmentView } from "@/lib/data";
 import { formatDate } from "@/lib/utils/format";
 import { useApp } from "@/lib/context";
-import { createStockAdjustment } from "@/lib/actions/stock-adjustments";
-import { ClipboardList, Plus, X, Search, Loader2 } from "lucide-react";
+import { createStockAdjustment, updateStockAdjustment, deleteStockAdjustment } from "@/lib/actions/stock-adjustments";
+import { ClipboardList, Plus, X, Search, Loader2, Pencil, Trash2 } from "lucide-react";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
 const ADJUSTMENT_REASONS = ["Damage", "Theft/Shrinkage", "Recount", "Expired/Obsolete", "Other"] as const;
 
-export function AdjustmentsClient({ products, adjustments }: { products: Product[]; adjustments: StockAdjustmentView[] }) {
+export function AdjustmentsClient({
+  products, adjustments, canManage,
+}: { products: Product[]; adjustments: StockAdjustmentView[]; canManage: boolean }) {
   const { showToast } = useApp();
   const router = useRouter();
 
@@ -23,6 +26,50 @@ export function AdjustmentsClient({ products, adjustments }: { products: Product
   const [reason, setReason] = useState<string>(ADJUSTMENT_REASONS[0]);
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
+
+  // Correcting a stock change that was recorded wrongly.
+  const [editing, setEditing] = useState<StockAdjustmentView | null>(null);
+  const [editForm, setEditForm] = useState({ newStock: 0, reason: "", notes: "" });
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [deletingAdjustment, setDeletingAdjustment] = useState<StockAdjustmentView | null>(null);
+  const [removing, setRemoving] = useState(false);
+
+  const openEdit = (a: StockAdjustmentView) => {
+    setEditing(a);
+    setEditForm({ newStock: a.newStock, reason: a.reason, notes: a.notes });
+  };
+
+  const saveEdit = async () => {
+    if (!editing) return;
+    setSavingEdit(true);
+    try {
+      const res = await updateStockAdjustment(editing.id, editForm);
+      if (!res.ok) { showToast(res.error, "error"); return; }
+      showToast(`${editing.productName} stock record updated`, "success");
+      setEditing(null);
+      router.refresh();
+    } catch {
+      showToast("Could not update the record — check the connection and try again", "error");
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  const confirmDelete = async () => {
+    if (!deletingAdjustment) return;
+    setRemoving(true);
+    try {
+      const res = await deleteStockAdjustment(deletingAdjustment.id);
+      if (!res.ok) { showToast(res.error, "error"); return; }
+      showToast(`Stock change removed — ${deletingAdjustment.productName} is back to ${deletingAdjustment.previousStock}`, "success");
+      setDeletingAdjustment(null);
+      router.refresh();
+    } catch {
+      showToast("Could not remove the record — check the connection and try again", "error");
+    } finally {
+      setRemoving(false);
+    }
+  };
 
   const filteredProducts = useMemo(() => {
     if (!productSearch) return [];
@@ -91,6 +138,7 @@ export function AdjustmentsClient({ products, adjustments }: { products: Product
                   <th className="text-center py-3 px-3 text-xs font-medium text-muted-foreground">Change</th>
                   <th className="text-left py-3 px-3 text-xs font-medium text-muted-foreground">Reason</th>
                   <th className="text-left py-3 px-3 text-xs font-medium text-muted-foreground">Adjusted By</th>
+                  {canManage && <th className="text-center py-3 px-3 text-xs font-medium text-muted-foreground">Actions</th>}
                 </tr>
               </thead>
               <tbody>
@@ -108,6 +156,20 @@ export function AdjustmentsClient({ products, adjustments }: { products: Product
                       {a.notes && <p className="text-[10px] text-muted-foreground mt-1">{a.notes}</p>}
                     </td>
                     <td className="py-3 px-3 text-xs text-muted-foreground">{a.adjustedByName || "—"}</td>
+                    {canManage && (
+                      <td className="py-3 px-3">
+                        <div className="flex items-center justify-center gap-1.5">
+                          <button onClick={() => openEdit(a)} title="Correct this record"
+                            className="p-1.5 rounded-lg hover:bg-surface-hover cursor-pointer">
+                            <Pencil className="w-3.5 h-3.5 text-muted-foreground" />
+                          </button>
+                          <button onClick={() => setDeletingAdjustment(a)} title="Undo this stock change"
+                            className="p-1.5 rounded-lg hover:bg-surface-hover cursor-pointer">
+                            <Trash2 className="w-3.5 h-3.5 text-destructive" />
+                          </button>
+                        </div>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -184,6 +246,56 @@ export function AdjustmentsClient({ products, adjustments }: { products: Product
             </div>
           </div>
         </div>
+      )}
+      {editing && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setEditing(null)}>
+          <div className="glass-modal p-6 w-full max-w-md animate-rise" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold">Correct stock record</h3>
+              <button onClick={() => setEditing(null)} className="cursor-pointer"><X className="w-5 h-5" /></button>
+            </div>
+            <p className="text-xs text-muted-foreground mb-3">
+              {`${editing.productName} — recorded as ${editing.previousStock} → ${editing.newStock} on ${formatDate(editing.date)}. Changing the count here moves the shelf figure by the difference.`}
+            </p>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Counted stock</label>
+                <input type="number" min={0} value={editForm.newStock}
+                  onChange={(e) => setEditForm((f) => ({ ...f, newStock: Math.max(0, Math.floor(Number(e.target.value) || 0)) }))}
+                  className="w-full px-3 py-2.5 glass-input text-sm" />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Reason</label>
+                <select value={editForm.reason} onChange={(e) => setEditForm((f) => ({ ...f, reason: e.target.value }))}
+                  className="w-full px-3 py-2.5 glass-input text-sm">
+                  {[...new Set([editing.reason, ...ADJUSTMENT_REASONS])].filter(Boolean).map((r) => (
+                    <option key={r} value={r}>{r}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Notes</label>
+                <input type="text" value={editForm.notes} onChange={(e) => setEditForm((f) => ({ ...f, notes: e.target.value }))}
+                  className="w-full px-3 py-2.5 glass-input text-sm" placeholder="Optional" />
+              </div>
+              <button onClick={saveEdit} disabled={savingEdit}
+                className="w-full py-2.5 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-primary-hover transition-colors disabled:opacity-60 flex items-center justify-center gap-2 cursor-pointer">
+                {savingEdit && <Loader2 className="w-4 h-4 animate-spin" />} Save changes
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deletingAdjustment && (
+        <ConfirmDialog
+          title="Undo this stock change?"
+          message={`${deletingAdjustment.productName} goes back to ${deletingAdjustment.previousStock} in stock. The record moves to the Trash and can be put back for 30 days.`}
+          confirmLabel="Undo stock change"
+          busy={removing}
+          onConfirm={confirmDelete}
+          onCancel={() => setDeletingAdjustment(null)}
+        />
       )}
     </div>
   );

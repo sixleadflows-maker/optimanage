@@ -11,7 +11,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import {
   Trash2, RotateCcw, Package, MapPin, UserRound, Users, Loader2, Truck, FlaskConical,
-  Receipt, Undo2, Wallet, Eye, ClipboardList, XCircle,
+  Receipt, Undo2, Wallet, Eye, ClipboardList, XCircle, Boxes,
 } from "lucide-react";
 
 const kindMeta: Record<TrashKind, { icon: typeof Package; label: string; plural: string; color: string }> = {
@@ -25,6 +25,7 @@ const kindMeta: Record<TrashKind, { icon: typeof Package; label: string; plural:
   purchaseOrder: { icon: ClipboardList, label: "Purchase order", plural: "Purchase orders", color: "bg-secondary/10 text-secondary" },
   lab: { icon: FlaskConical, label: "Lab", plural: "Labs", color: "bg-warning/10 text-warning" },
   labOrder: { icon: FlaskConical, label: "Lab order", plural: "Lab orders", color: "bg-warning/10 text-warning" },
+  stockAdjustment: { icon: Boxes, label: "Stock change", plural: "Stock changes", color: "bg-warning/10 text-warning" },
   location: { icon: MapPin, label: "Location", plural: "Locations", color: "bg-secondary/10 text-secondary" },
   staff: { icon: UserRound, label: "Staff", plural: "Staff", color: "bg-warning/10 text-warning" },
 };

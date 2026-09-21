@@ -7,6 +7,7 @@ import {
   persistSale,
   reviseSale,
   recordSalePayment,
+  reviseSalePayment,
   SaleError,
   type SalePrescriptionInput,
 } from "@/lib/sales/core";
@@ -43,8 +44,9 @@ export interface CreateSaleInput {
   // Staff tracking: who took the order vs. who generated the bill
   createdById?: string;
   receivedById?: string;
-  // Optional prescription captured during the sale (needs customerId)
-  prescription?: SalePrescriptionInput;
+  // Prescriptions captured during the sale (needs customerId). One order can
+  // carry several under the same customer.
+  prescriptions?: SalePrescriptionInput[];
   // Already saved to the customer's record from the till; attached, not duplicated.
   existingPrescriptionId?: string;
   // When the sale happened (ISO), if not now -- an old invoice being entered,
@@ -181,6 +183,12 @@ export interface UpdateSaleInput {
   saleId: string;
   items: CartItemInput[];
   invoiceDiscount: number;
+  // The invoice's own details (ISO date), all correctable.
+  date?: string;
+  customerId?: string | null;
+  paymentMethod?: string;
+  createdById?: string;
+  receivedById?: string;
   lensProductId?: string;
   labCharges?: number;
   fittingCharges?: number;
@@ -201,7 +209,39 @@ export async function updateSale(input: UpdateSaleInput) {
   }
 
   try {
-    return await reviseSale(input.saleId, input);
+    return await reviseSale(input.saleId, { ...input, date: input.date ? new Date(input.date) : undefined });
+  } catch (e) {
+    if (e instanceof SaleError) return { ok: false as const, error: e.message };
+    throw e;
+  }
+}
+
+export interface UpdatePaymentInput {
+  paymentId: string;
+  amount?: number;
+  method?: string;
+  note?: string;
+  date?: string;
+  remove?: boolean;
+}
+
+// Correcting money already taken rewrites a day's cash, so it sits with the
+// other invoice edits: owner or manager, not cashiers.
+export async function updateSalePayment(input: UpdatePaymentInput) {
+  const session = await auth();
+  if (!session?.user) return { ok: false as const, error: "You've been signed out — sign in again" };
+  if (session.user.role === "CASHIER") {
+    return { ok: false as const, error: "Ask a manager or the owner to change a payment" };
+  }
+
+  try {
+    return await reviseSalePayment(input.paymentId, {
+      amount: input.amount,
+      method: input.method,
+      note: input.note,
+      date: input.date ? new Date(input.date) : undefined,
+      remove: input.remove,
+    });
   } catch (e) {
     if (e instanceof SaleError) return { ok: false as const, error: e.message };
     throw e;

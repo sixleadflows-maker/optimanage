@@ -8,12 +8,12 @@ import { Search, Download, Receipt, RotateCcw, X, Loader2, Trash2, Eye, Printer,
 import { useApp } from "@/lib/context";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { PrintPortal } from "@/components/ui/PrintPortal";
-import { createReturn, deleteReturn } from "@/lib/actions/returns";
+import { createReturn, deleteReturn, updateReturn } from "@/lib/actions/returns";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { updateOnlineOrderStatus, deleteSale, type OnlineOrderStatusValue } from "@/lib/actions/sales";
 import { PAYMENT_STATUS, paymentStatusChipClass } from "@/lib/constants";
 import { ThermalReceipt, A4Invoice, invoiceFromSale, type ShopDetails } from "@/components/invoice/InvoiceDocuments";
-import { CollectPaymentModal, EditInvoiceModal } from "./InvoiceEditor";
+import { CollectPaymentModal, EditInvoiceModal, EditPaymentModal, type EditorCustomer, type EditorStaff } from "./InvoiceEditor";
 
 const REFUND_METHODS = ["Cash", "Card", "Bank Transfer", "JazzCash"];
 const ONLINE_ORDER_STATUSES: { value: OnlineOrderStatusValue; label: string }[] = [
@@ -36,11 +36,14 @@ const when = (iso: string) =>
 
 /** Everything that happened to an invoice after it was rung up, with times. */
 function InvoiceHistory({
-  sale, canUndoReturn, onUndoReturn,
+  sale, canUndoReturn, onUndoReturn, canEditPayments, onEditPayment, onEditReturn,
 }: {
   sale: SaleView;
   canUndoReturn: boolean;
   onUndoReturn: (ret: SaleView["returns"][number]) => void;
+  canEditPayments: boolean;
+  onEditPayment: (payment: SaleView["payments"][number]) => void;
+  onEditReturn: (ret: SaleView["returns"][number]) => void;
 }) {
   const laterTotal = sale.payments.reduce((sum, p) => sum + p.amount, 0);
   const takenAtTill = sale.paid - laterTotal;
@@ -75,13 +78,21 @@ function InvoiceHistory({
               <span className="font-medium">{formatCurrency(takenAtTill)}</span>
             </div>
             {sale.payments.map((p) => (
-              <div key={p.id} className="flex justify-between gap-3">
-                <span>
+              <div key={p.id} className="flex justify-between gap-3 items-start">
+                <span className="min-w-0">
                   {when(p.date)} · {p.method}
                   {p.receivedByName && ` · ${p.receivedByName}`}
                   {p.note && <span className="text-muted-foreground"> · {p.note}</span>}
                 </span>
-                <span className="font-medium">{formatCurrency(p.amount)}</span>
+                <span className="flex items-center gap-1.5 flex-shrink-0">
+                  <span className="font-medium">{formatCurrency(p.amount)}</span>
+                  {canEditPayments && (
+                    <button onClick={() => onEditPayment(p)} title="Correct this payment"
+                      className="p-0.5 rounded hover:bg-surface-hover cursor-pointer">
+                      <Pencil className="w-3 h-3 text-muted-foreground" />
+                    </button>
+                  )}
+                </span>
               </div>
             ))}
             <div className="flex justify-between gap-3 border-t border-border pt-1 font-semibold">
@@ -103,10 +114,16 @@ function InvoiceHistory({
                   {r.reason && <span className="text-muted-foreground"> · {r.reason}</span>}
                 </span>
                 {canUndoReturn && (
-                  <button onClick={() => onUndoReturn(r)}
-                    className="flex items-center gap-1 px-2 py-1 rounded-lg bg-surface hover:bg-surface-hover font-medium cursor-pointer flex-shrink-0">
-                    <Undo2 className="w-3 h-3" /> Undo
-                  </button>
+                  <span className="flex items-center gap-1 flex-shrink-0">
+                    <button onClick={() => onEditReturn(r)}
+                      className="flex items-center gap-1 px-2 py-1 rounded-lg bg-surface hover:bg-surface-hover font-medium cursor-pointer">
+                      <Pencil className="w-3 h-3" /> Edit
+                    </button>
+                    <button onClick={() => onUndoReturn(r)}
+                      className="flex items-center gap-1 px-2 py-1 rounded-lg bg-surface hover:bg-surface-hover font-medium cursor-pointer">
+                      <Undo2 className="w-3 h-3" /> Undo
+                    </button>
+                  </span>
                 )}
               </div>
             ))}
@@ -117,7 +134,16 @@ function InvoiceHistory({
   );
 }
 
-export function SalesClient({ sales, isOwner, canEdit, shop }: { sales: SaleView[]; isOwner: boolean; canEdit: boolean; shop: ShopDetails }) {
+export function SalesClient({
+  sales, isOwner, canEdit, customers, staff, shop,
+}: {
+  sales: SaleView[];
+  isOwner: boolean;
+  canEdit: boolean;
+  customers: EditorCustomer[];
+  staff: EditorStaff[];
+  shop: ShopDetails;
+}) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("All");
   const [sourceFilter, setSourceFilter] = useState<string>("All");
@@ -138,6 +164,10 @@ export function SalesClient({ sales, isOwner, canEdit, shop }: { sales: SaleView
   // Reopening a past invoice to look at or reprint it.
   const [payingSale, setPayingSale] = useState<SaleView | null>(null);
   const [undoingReturn, setUndoingReturn] = useState<{ sale: SaleView; ret: SaleView["returns"][number] } | null>(null);
+  const [editingPayment, setEditingPayment] = useState<{ sale: SaleView; payment: SaleView["payments"][number] } | null>(null);
+  const [editingReturn, setEditingReturn] = useState<SaleView["returns"][number] | null>(null);
+  const [returnForm, setReturnForm] = useState({ reason: "", refundMethod: "Cash", totalRefund: 0 });
+  const [savingReturnEdit, setSavingReturnEdit] = useState(false);
   const [undoing, setUndoing] = useState(false);
   const [editingSale, setEditingSale] = useState<SaleView | null>(null);
   const [viewingSale, setViewingSale] = useState<SaleView | null>(null);
@@ -509,6 +539,12 @@ export function SalesClient({ sales, isOwner, canEdit, shop }: { sales: SaleView
               sale={viewingSale}
               canUndoReturn={canEdit}
               onUndoReturn={(ret) => setUndoingReturn({ sale: viewingSale, ret })}
+              canEditPayments={canEdit}
+              onEditPayment={(payment) => setEditingPayment({ sale: viewingSale, payment })}
+              onEditReturn={(ret) => {
+                setEditingReturn(ret);
+                setReturnForm({ reason: ret.reason, refundMethod: "Cash", totalRefund: ret.totalRefund });
+              }}
             />
 
             <div className="flex gap-2 mt-4 flex-wrap">
@@ -553,9 +589,26 @@ export function SalesClient({ sales, isOwner, canEdit, shop }: { sales: SaleView
         />
       )}
 
+      {editingPayment && (
+        <EditPaymentModal
+          sale={editingPayment.sale}
+          payment={editingPayment.payment}
+          onClose={() => setEditingPayment(null)}
+          onDone={(message) => {
+            setEditingPayment(null);
+            setViewingSale(null);
+            showToast(message, "success");
+            router.refresh();
+          }}
+        />
+      )}
+
       {editingSale && (
         <EditInvoiceModal
           sale={editingSale}
+          customers={customers}
+          staff={staff}
+          canBackdate={canEdit}
           onClose={() => setEditingSale(null)}
           onDone={(message) => {
             setEditingSale(null);
@@ -639,6 +692,60 @@ export function SalesClient({ sales, isOwner, canEdit, shop }: { sales: SaleView
               <button onClick={confirmDeleteSale} disabled={deleting}
                 className="flex-1 py-2.5 bg-destructive text-white rounded-xl text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-60 flex items-center justify-center gap-2 cursor-pointer">
                 {deleting && <Loader2 className="w-4 h-4 animate-spin" />} Move to Trash
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {editingReturn && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setEditingReturn(null)}>
+          <div className="glass-modal p-6 w-full max-w-sm animate-rise" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold">Edit {editingReturn.returnNo}</h3>
+              <button onClick={() => setEditingReturn(null)} className="cursor-pointer"><X className="w-5 h-5" /></button>
+            </div>
+            <p className="text-xs text-muted-foreground mb-3">
+              To change which items came back, undo the return and enter it again — the stock has to move with it.
+            </p>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Refund amount</label>
+                <input type="number" min={0} value={returnForm.totalRefund}
+                  onChange={(e) => setReturnForm((f) => ({ ...f, totalRefund: Math.max(0, Number(e.target.value) || 0) }))}
+                  className="w-full px-3 py-2.5 glass-input text-sm" />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Refunded by</label>
+                <select value={returnForm.refundMethod} onChange={(e) => setReturnForm((f) => ({ ...f, refundMethod: e.target.value }))}
+                  className="w-full px-3 py-2.5 glass-input text-sm">
+                  {REFUND_METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Reason</label>
+                <input type="text" value={returnForm.reason} onChange={(e) => setReturnForm((f) => ({ ...f, reason: e.target.value }))}
+                  className="w-full px-3 py-2.5 glass-input text-sm" placeholder="Optional" />
+              </div>
+              <button
+                onClick={async () => {
+                  setSavingReturnEdit(true);
+                  try {
+                    const res = await updateReturn(editingReturn.id, returnForm);
+                    if (!res.ok) { showToast(res.error, "error"); return; }
+                    showToast(`${editingReturn.returnNo} updated`, "success");
+                    setEditingReturn(null);
+                    setViewingSale(null);
+                    router.refresh();
+                  } catch {
+                    showToast("Could not update the return — check the connection and try again", "error");
+                  } finally {
+                    setSavingReturnEdit(false);
+                  }
+                }}
+                disabled={savingReturnEdit}
+                className="w-full py-2.5 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-primary-hover transition-colors disabled:opacity-60 flex items-center justify-center gap-2 cursor-pointer">
+                {savingReturnEdit && <Loader2 className="w-4 h-4 animate-spin" />} Save changes
               </button>
             </div>
           </div>

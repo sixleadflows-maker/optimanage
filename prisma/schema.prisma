@@ -99,6 +99,9 @@ model Prescription {
   leftPd     Float    @default(0)
   leftAdd    Float    @default(0)
 
+  // Whose eyes this is for, when one order carries several prescriptions under
+  // the same customer -- a family member's name, or "distance" / "reading".
+  label      String   @default("")
   notes      String   @default("")
   // Kept out of sight on the prescription history (for everyone, on every
   // computer) until someone unhides it -- notes staff would rather not have on

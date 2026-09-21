@@ -110,8 +110,8 @@ export const TRASH_PURGED_AT = new Date(0);
 // Records that are hidden when deleted and simply un-hidden on restore.
 export type SoftTrashKind = "product" | "customer" | "location" | "staff" | "supplier" | "lab";
 // Records copied into TrashEntry and really removed; restore rebuilds them.
-export type SnapshotTrashKind = "invoice" | "return" | "expense" | "prescription" | "labOrder" | "purchaseOrder";
+export type SnapshotTrashKind = "invoice" | "return" | "expense" | "prescription" | "labOrder" | "purchaseOrder" | "stockAdjustment";
 export type TrashKind = SoftTrashKind | SnapshotTrashKind;
 export const SNAPSHOT_TRASH_KINDS: readonly SnapshotTrashKind[] = [
-  "invoice", "return", "expense", "prescription", "labOrder", "purchaseOrder",
+  "invoice", "return", "expense", "prescription", "labOrder", "purchaseOrder", "stockAdjustment",
 ];

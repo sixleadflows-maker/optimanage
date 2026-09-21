@@ -20,6 +20,9 @@ export interface SalePrescriptionInput {
   leftSph: number; leftCyl: number; leftAxis: number; leftPd: number; leftAdd: number;
   notes: string;
   isOwnPrescription?: boolean;
+  // Whose eyes, when one slip carries several: a family member's name, or
+  // "distance" / "reading".
+  label?: string;
 }
 
 export interface PersistSaleInput {
@@ -42,7 +45,9 @@ export interface PersistSaleInput {
   // Printed under the lens on the bill, whichever lens was chosen.
   lensColor?: string;
   lensDescription?: string;
-  prescription?: SalePrescriptionInput;
+  // One order can carry several prescriptions under the same customer — a
+  // family sharing a serial number, or distance and reading on one slip.
+  prescriptions?: SalePrescriptionInput[];
   // A prescription already saved from the till before the sale was finished.
   // It's attached to this sale instead of saving the same numbers twice.
   existingPrescriptionId?: string;
@@ -342,18 +347,21 @@ export async function persistSale(input: PersistSaleInput, meta: PersistSaleMeta
         })
       : { count: 0 };
 
-    if (input.prescription && input.customerId && linked.count === 0) {
-      const p = input.prescription;
-      await tx.prescription.create({
-        data: {
-          customerId: input.customerId,
+    // The attached one (linked above) covers the first prescription when it was
+    // saved from the till already; the rest are recorded here.
+    const toCreate = (input.prescriptions ?? []).slice(linked.count > 0 ? 1 : 0);
+    if (input.customerId && toCreate.length) {
+      await tx.prescription.createMany({
+        data: toCreate.map((p) => ({
+          customerId: input.customerId!,
           saleId: created.id,
           date: saleDate,
+          label: (p.label ?? "").trim(),
           rightSph: p.rightSph, rightCyl: p.rightCyl, rightAxis: p.rightAxis, rightPd: p.rightPd, rightAdd: p.rightAdd,
           leftSph: p.leftSph, leftCyl: p.leftCyl, leftAxis: p.leftAxis, leftPd: p.leftPd, leftAdd: p.leftAdd,
           notes: p.notes,
           isOwnPrescription: p.isOwnPrescription ?? false,
-        },
+        })),
       });
     }
 
@@ -413,6 +421,12 @@ function alreadySynced(sale: { id: string; invoiceNo: string; total: number; pai
 export interface ReviseSaleInput {
   items: SaleCoreItem[];
   invoiceDiscount: number;
+  // The invoice's own details, all correctable after the fact.
+  date?: Date;
+  customerId?: string | null;
+  paymentMethod?: string;
+  createdById?: string | null;
+  receivedById?: string | null;
   lensProductId?: string | null;
   labCharges?: number;
   fittingCharges?: number;
@@ -442,6 +456,16 @@ export async function reviseSale(saleId: string, input: ReviseSaleInput) {
     );
   }
 
+  const date = input.date ?? sale.date;
+  if (Number.isNaN(date.getTime())) throw new SaleError("Check the bill date and time");
+  if (date.getTime() > Date.now() + 5 * 60_000) throw new SaleError("The bill date can't be in the future");
+  const earliestPayment = await db.salePayment.findFirst({ where: { saleId }, orderBy: { date: "asc" }, select: { date: true } });
+  if (earliestPayment && date.getTime() > earliestPayment.date.getTime() + 60_000) {
+    throw new SaleError(
+      `A payment was taken on ${earliestPayment.date.toLocaleDateString("en-GB")}, so the invoice can't be dated after that`
+    );
+  }
+
   const priced = await priceSale({ ...input, deliveryFee: sale.deliveryFee });
   if (priced.total < sale.paid) {
     throw new SaleError(
@@ -449,6 +473,7 @@ export async function reviseSale(saleId: string, input: ReviseSaleInput) {
     );
   }
   const { balance, status } = settle(priced.total, sale.paid);
+  const customerId = input.customerId === undefined ? sale.customerId : input.customerId || null;
 
   // Stock only moves by what actually changed — quantities that stayed the same
   // are never put back and taken again.
@@ -481,6 +506,11 @@ export async function reviseSale(saleId: string, input: ReviseSaleInput) {
     await tx.sale.update({
       where: { id: saleId },
       data: {
+        date,
+        customerId: customerId ?? null,
+        paymentMethod: input.paymentMethod ?? sale.paymentMethod,
+        createdById: input.createdById === undefined ? sale.createdById : input.createdById || null,
+        receivedById: input.receivedById === undefined ? sale.receivedById : input.receivedById || null,
         subtotal: priced.subtotal,
         discount: input.invoiceDiscount,
         total: priced.total,
@@ -501,12 +531,36 @@ export async function reviseSale(saleId: string, input: ReviseSaleInput) {
       },
     });
 
-    // The customer's lifetime spend counted the old total; move it by the change.
-    if (sale.customerId && priced.total !== sale.total) {
-      await tx.customer.update({
-        where: { id: sale.customerId },
-        data: { totalSpend: { increment: priced.total - sale.total } },
-      });
+    // Lifetime spend and visits follow the invoice: moved between customers if
+    // the bill was put on the wrong one, otherwise adjusted by the difference.
+    if (customerId === sale.customerId) {
+      if (sale.customerId && priced.total !== sale.total) {
+        await tx.customer.update({
+          where: { id: sale.customerId },
+          data: { totalSpend: { increment: priced.total - sale.total } },
+        });
+      }
+    } else {
+      if (sale.customerId) {
+        const previous = await tx.customer.findUnique({ where: { id: sale.customerId } });
+        if (previous) {
+          await tx.customer.update({
+            where: { id: previous.id },
+            data: { totalSpend: Math.max(0, previous.totalSpend - sale.total), visitCount: Math.max(0, previous.visitCount - 1) },
+          });
+        }
+      }
+      if (customerId) {
+        const next = await tx.customer.findUnique({ where: { id: customerId }, select: { lastVisit: true } });
+        await tx.customer.update({
+          where: { id: customerId },
+          data: {
+            totalSpend: { increment: priced.total },
+            visitCount: { increment: 1 },
+            lastVisit: !next?.lastVisit || next.lastVisit < date ? date : next.lastVisit,
+          },
+        });
+      }
     }
   }, { timeout: 20_000 });
 
@@ -515,6 +569,7 @@ export async function reviseSale(saleId: string, input: ReviseSaleInput) {
   revalidatePath("/dashboard/inventory");
   revalidatePath("/dashboard/customers");
   revalidatePath("/dashboard/cash");
+  revalidatePath("/dashboard/prescriptions");
 
   return { ok: true as const, invoiceNo: sale.invoiceNo, total: priced.total, paid: sale.paid, balance };
 }
@@ -570,4 +625,59 @@ export async function recordSalePayment(
   revalidatePath("/dashboard/cash");
 
   return { ok: true as const, invoiceNo: sale.invoiceNo, total: sale.total, paid, balance };
+}
+
+/**
+ * Corrects a payment already taken against an invoice — a mistyped amount, the
+ * wrong method, the wrong day. The invoice's paid total and balance are worked
+ * out again from what's left, so the day's cash follows the correction.
+ * Passing `remove` deletes the payment instead.
+ */
+export async function reviseSalePayment(
+  paymentId: string,
+  change: { amount?: number; method?: string; note?: string; date?: Date; remove?: boolean },
+) {
+  const payment = await db.salePayment.findUnique({ where: { id: paymentId }, include: { sale: true } });
+  if (!payment) throw new SaleError("That payment has already been removed");
+  const sale = payment.sale;
+
+  const amount = change.remove ? 0 : Math.round((change.amount ?? payment.amount) * 100) / 100;
+  const date = change.date ?? payment.date;
+  if (!change.remove) {
+    if (!(amount > 0)) throw new SaleError("Enter the amount received");
+    if (Number.isNaN(date.getTime())) throw new SaleError("Check the payment date and time");
+    if (date.getTime() > Date.now() + 5 * 60_000) throw new SaleError("The payment date can't be in the future");
+    if (date.getTime() < sale.date.getTime() - 60_000) {
+      throw new SaleError(`The payment can't be dated before the invoice (${sale.date.toLocaleDateString("en-GB")})`);
+    }
+  }
+
+  const paid = sale.paid - payment.amount + amount;
+  if (paid > sale.total + 0.01) {
+    throw new SaleError(`That would take the payments past the ${formatRs(sale.total)} invoice total`);
+  }
+  if (paid < 0) throw new SaleError("That would make the amount paid less than nothing");
+  const { balance, status } = settle(sale.total, paid);
+
+  await db.$transaction(async (tx) => {
+    if (change.remove) {
+      await tx.salePayment.delete({ where: { id: paymentId } });
+    } else {
+      await tx.salePayment.update({
+        where: { id: paymentId },
+        data: { amount, date, method: change.method ?? payment.method, note: (change.note ?? payment.note).trim() },
+      });
+    }
+    await tx.sale.update({ where: { id: sale.id }, data: { paid, balance, paymentStatus: status } });
+  });
+
+  revalidatePath("/dashboard");
+  revalidatePath("/dashboard/sales");
+  revalidatePath("/dashboard/customers");
+  revalidatePath("/dashboard/cash");
+  return { ok: true as const, invoiceNo: sale.invoiceNo, paid, balance };
+}
+
+function formatRs(n: number) {
+  return `Rs.${Math.round(n).toLocaleString("en-PK")}`;
 }

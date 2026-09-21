@@ -271,6 +271,28 @@ export async function trashPurchaseOrder(id: string, deletedById: string | null)
   });
 }
 
+/**
+ * Removing a stock change puts the count back where it was before it — the
+ * adjustment is undone, not just hidden.
+ */
+export async function trashStockAdjustment(id: string, deletedById: string | null) {
+  const adjustment = await db.stockAdjustment.findUnique({ where: { id } });
+  if (!adjustment) throw new TrashError("This stock change has already been removed");
+
+  await db.$transaction(async (tx) => {
+    await store(tx, "stockAdjustment", adjustment.id, adjustment.productName,
+      [`${adjustment.previousStock} → ${adjustment.newStock}`, adjustment.reason, adjustment.notes].filter(Boolean).join(" · "),
+      { adjustment }, deletedById);
+
+    const product = await tx.product.findUnique({ where: { id: adjustment.productId }, select: { stock: true } });
+    if (product && product.stock - adjustment.delta < 0) {
+      throw new TrashError(`Undoing this would put ${adjustment.productName} below zero in stock`);
+    }
+    await tx.product.update({ where: { id: adjustment.productId }, data: { stock: { decrement: adjustment.delta } } });
+    await tx.stockAdjustment.delete({ where: { id } });
+  });
+}
+
 // ─── Restore ────────────────────────────────────────────────
 
 export async function restoreSnapshot(entryId: string) {
@@ -296,6 +318,14 @@ export async function restoreSnapshot(entryId: string) {
         }
         const saleExists = p.saleId ? !!(await tx.sale.findUnique({ where: { id: p.saleId as string }, select: { id: true } })) : false;
         await tx.prescription.create({ data: { ...(p as Prisma.PrescriptionUncheckedCreateInput), saleId: saleExists ? (p.saleId as string) : null } });
+        break;
+      }
+      case "stockAdjustment": {
+        const adjustment = revive(data.adjustment as Row, ["createdAt"]);
+        const product = await tx.product.findUnique({ where: { id: adjustment.productId as string }, select: { stock: true } });
+        if (!product) throw new TrashError("Can't restore this stock change: the product is no longer on the system");
+        await tx.product.update({ where: { id: adjustment.productId as string }, data: { stock: { increment: adjustment.delta as number } } });
+        await tx.stockAdjustment.create({ data: adjustment as Prisma.StockAdjustmentUncheckedCreateInput });
         break;
       }
       case "labOrder":

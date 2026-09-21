@@ -165,6 +165,9 @@ export function CustomerProfileClient({ customer, sales, canDelete }: { customer
                         </div>
                       </div>
                     </div>
+                    {rx.label && (
+                      <p className="text-[11px] font-medium text-primary mb-1">For {rx.label}</p>
+                    )}
                     {rx.notes && (
                       <div className="flex items-start gap-2 mt-2 pt-2 border-t border-border">
                         <p className={`text-xs flex-1 min-w-0 ${rx.notesHidden ? "italic text-muted-foreground/70" : "text-muted-foreground"}`}>

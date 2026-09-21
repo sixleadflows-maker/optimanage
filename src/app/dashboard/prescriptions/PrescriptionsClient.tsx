@@ -14,6 +14,7 @@ interface RxCustomer { id: string; name: string; phone: string; }
 const empty = {
   rightSph: "", rightCyl: "", rightAxis: "", rightPd: "", rightAdd: "",
   leftSph: "", leftCyl: "", leftAxis: "", leftPd: "", leftAdd: "",
+  label: "",
   notes: "",
 };
 
@@ -80,6 +81,7 @@ export function PrescriptionsClient({
   const values = () => ({
     rightSph: num(form.rightSph), rightCyl: num(form.rightCyl), rightAxis: num(form.rightAxis), rightPd: num(form.rightPd), rightAdd: num(form.rightAdd),
     leftSph: num(form.leftSph), leftCyl: num(form.leftCyl), leftAxis: num(form.leftAxis), leftPd: num(form.leftPd), leftAdd: num(form.leftAdd),
+    label: form.label.trim(),
     notes: form.notes,
     isOwnPrescription: isOwn,
   });
@@ -102,6 +104,7 @@ export function PrescriptionsClient({
       rightPd: show(rx.rightEye.pd), rightAdd: show(rx.rightEye.add),
       leftSph: show(rx.leftEye.sph), leftCyl: show(rx.leftEye.cyl), leftAxis: show(rx.leftEye.axis),
       leftPd: show(rx.leftEye.pd), leftAdd: show(rx.leftEye.add),
+      label: rx.label,
       notes: rx.notes,
     });
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -214,6 +217,12 @@ export function PrescriptionsClient({
           })}
 
           <div className="mb-4">
+            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Whose eyes / what for</label>
+            <input type="text" value={form.label} onChange={(e) => setForm((p) => ({ ...p, label: e.target.value }))}
+              className="w-full px-4 py-2 glass-input text-sm" placeholder="Optional — a family member's name, or “reading”" />
+          </div>
+
+          <div className="mb-4">
             <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Notes</label>
             <textarea value={form.notes} onChange={(e) => setForm((p) => ({ ...p, notes: e.target.value }))}
               rows={2} className="w-full px-4 py-2 glass-input text-sm resize-none" placeholder="Any additional notes..." />
@@ -258,7 +267,10 @@ export function PrescriptionsClient({
               <div key={rx.id} className={`p-3 bg-surface rounded-xl ${editing?.id === rx.id ? "ring-2 ring-primary/40" : ""}`}>
                 <div className="flex items-center justify-between mb-2 gap-2">
                   <div className="min-w-0">
-                    <p className="text-sm font-medium truncate">{rx.customerName}</p>
+                    <p className="text-sm font-medium truncate">
+                      {rx.customerName}
+                      {rx.label && <span className="text-muted-foreground font-normal"> · {rx.label}</span>}
+                    </p>
                     <p className="text-[10px] text-muted-foreground">
                       {formatDate(rx.date)}{phoneById.get(rx.customerId) ? ` · ${phoneById.get(rx.customerId)}` : ""}
                     </p>

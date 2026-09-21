@@ -13,12 +13,6 @@ export interface InvoiceLine {
   total: number;
 }
 
-export interface InvoicePrescription {
-  right: { sph: number | string; cyl: number | string; axis: number | string; pd: number | string; add: number | string };
-  left: { sph: number | string; cyl: number | string; axis: number | string; pd: number | string; add: number | string };
-  isOwn: boolean;
-}
-
 // Comes from Settings → Shop, so changing the address there changes every
 // bill. It used to be typed into the receipt itself, which is why the old
 // Tariq Road address kept printing after the shop's address was updated.
@@ -48,14 +42,11 @@ export interface InvoiceData {
   // Money taken after the sale (an advance settled later), printed on the
   // reissued bill so the customer can see how the total was made up.
   payments?: { date: string; amount: number; method: string }[];
-  prescription: InvoicePrescription | null;
   // Printed offline: invoiceNo is a temporary number until the till reconnects.
   provisional?: boolean;
   // On a reprint of a bill that was made offline: the number the customer holds.
   offlineRef?: string;
 }
-
-const v = (x: number | string) => (x === "" ? 0 : x);
 
 // Plain amounts in the item columns; "Rs." only where it helps (totals).
 const amt = (n: number) => Math.round(n).toLocaleString("en-PK");
@@ -82,7 +73,6 @@ const Rule = ({ double = false }: { double?: boolean }) => (
  * frame names never squeeze the numbers.
  */
 export function ThermalReceipt({ invoice, shop }: { invoice: InvoiceData; shop: ShopDetails }) {
-  const rx = invoice.prescription;
   const laterPayments = invoice.payments ?? [];
   const takenAtTill = invoice.paid - laterPayments.reduce((sum, p) => sum + p.amount, 0);
   const units = invoice.lines.reduce((sum, l) => sum + l.quantity, 0);
@@ -166,24 +156,6 @@ export function ThermalReceipt({ invoice, shop }: { invoice: InvoiceData; shop: 
           : <p className="text-center font-bold tracking-wider pt-0.5">*** PAID IN FULL ***</p>}
       </div>
 
-      {rx && (
-        <>
-          <Rule />
-          <p className="font-bold text-center tracking-wide">PRESCRIPTION{rx.isOwn ? " (CUSTOMER'S OWN)" : ""}</p>
-          <table className="w-full text-[10px] text-center mt-1">
-            <thead>
-              <tr className="font-bold">
-                <th className="text-left font-bold"></th><th>SPH</th><th>CYL</th><th>AXIS</th><th>PD</th><th>ADD</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr><td className="text-left font-bold">OD (R)</td><td>{v(rx.right.sph)}</td><td>{v(rx.right.cyl)}</td><td>{v(rx.right.axis)}</td><td>{v(rx.right.pd)}</td><td>{v(rx.right.add)}</td></tr>
-              <tr><td className="text-left font-bold">OS (L)</td><td>{v(rx.left.sph)}</td><td>{v(rx.left.cyl)}</td><td>{v(rx.left.axis)}</td><td>{v(rx.left.pd)}</td><td>{v(rx.left.add)}</td></tr>
-            </tbody>
-          </table>
-        </>
-      )}
-
       {invoice.provisional && (
         <div className="mt-2 p-1.5 border border-black text-center text-[10px]">
           Made while offline. This bill&apos;s final invoice number is given when the till reconnects —
@@ -199,7 +171,6 @@ export function ThermalReceipt({ invoice, shop }: { invoice: InvoiceData; shop: 
 }
 
 export function A4Invoice({ invoice, shop }: { invoice: InvoiceData; shop: ShopDetails }) {
-  const rx = invoice.prescription;
   return (
     <div className="a4-invoice bg-white text-black rounded-lg p-6 shadow-lg text-base">
       <div className="flex justify-between items-center pb-4 border-b-2 border-[#6d5ef0]">
@@ -231,36 +202,6 @@ export function A4Invoice({ invoice, shop }: { invoice: InvoiceData; shop: ShopD
           <p className="text-gray-600">Status: {invoice.paymentStatus}</p>
         </div>
       </div>
-
-      {rx && (
-        <div className="py-4 border-b border-gray-200">
-          <p className="text-[10px] uppercase tracking-widest text-gray-400 mb-2">
-            Prescription{rx.isOwn ? " (Customer's Own)" : ""}
-          </p>
-          <table className="w-full text-sm text-center">
-            <thead>
-              <tr className="bg-gray-100">
-                <th className="py-1.5 pl-2 text-left font-semibold">Eye</th>
-                <th className="font-semibold">SPH</th>
-                <th className="font-semibold">CYL</th>
-                <th className="font-semibold">AXIS</th>
-                <th className="font-semibold">PD</th>
-                <th className="font-semibold">ADD</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr className="border-b border-gray-100">
-                <td className="py-1.5 pl-2 text-left">OD (Right)</td>
-                <td>{v(rx.right.sph)}</td><td>{v(rx.right.cyl)}</td><td>{v(rx.right.axis)}</td><td>{v(rx.right.pd)}</td><td>{v(rx.right.add)}</td>
-              </tr>
-              <tr>
-                <td className="py-1.5 pl-2 text-left">OS (Left)</td>
-                <td>{v(rx.left.sph)}</td><td>{v(rx.left.cyl)}</td><td>{v(rx.left.axis)}</td><td>{v(rx.left.pd)}</td><td>{v(rx.left.add)}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      )}
 
       <table className="w-full text-sm my-4">
         <thead>
@@ -360,7 +301,6 @@ export function invoiceFromSale(sale: {
   subtotal: number; discount: number; total: number; paid: number; balance: number;
   paymentMethod: string; paymentStatus: string;
   payments: { date: string; amount: number; method: string }[];
-  prescription: { rightEye: InvoicePrescription["right"]; leftEye: InvoicePrescription["left"]; isOwnPrescription: boolean } | null;
 }): InvoiceData {
   // Colour and description belong to whichever lens was sold, so they print
   // under that line rather than as a stray note at the bottom.
@@ -397,9 +337,6 @@ export function invoiceFromSale(sale: {
     balance: sale.balance,
     payments: sale.payments,
     offlineRef: sale.offlineRef || undefined,
-    prescription: sale.prescription
-      ? { right: sale.prescription.rightEye, left: sale.prescription.leftEye, isOwn: sale.prescription.isOwnPrescription }
-      : null,
   };
 }
 

@@ -14,6 +14,7 @@ import {
 } from "@/lib/actions/suppliers";
 import { Truck, CheckCircle, FileText, Plus, X, Loader2, Search, Trash2, Pencil, PenLine, Wallet, ClipboardList, Building2 } from "lucide-react";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { POItemsEditor } from "./POItemsEditor";
 
 const EMPTY_SUPPLIER = { name: "", contact: "", phone: "", email: "", address: "", ntn: "" };
 
@@ -163,6 +164,7 @@ export function SuppliersClient({
 }: { suppliers: Supplier[]; purchaseOrders: PurchaseOrder[]; products: Product[]; canDelete: boolean }) {
   const [deletingSupplier, setDeletingSupplier] = useState<Supplier | null>(null);
   const [deletingPO, setDeletingPO] = useState<PurchaseOrder | null>(null);
+  const [editingPOItems, setEditingPOItems] = useState<PurchaseOrder | null>(null);
   const [removing, setRemoving] = useState(false);
   const { showToast } = useApp();
   const router = useRouter();
@@ -505,6 +507,12 @@ export function SuppliersClient({
                 </button>
                 {/* Once stock has come in against an order it's part of the shelf count's history. */}
                 {canDelete && po.items.every((i) => i.received === 0) && (
+                  <button onClick={() => setEditingPOItems(po)}
+                    className="flex items-center gap-2 px-4 py-2 glass-card text-xs font-medium cursor-pointer">
+                    <Pencil className="w-3.5 h-3.5" /> Edit Items
+                  </button>
+                )}
+                {canDelete && po.items.every((i) => i.received === 0) && (
                   <button onClick={() => setDeletingPO(po)}
                     className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-medium text-destructive bg-destructive/10 hover:bg-destructive/15 transition-colors cursor-pointer">
                     <Trash2 className="w-3.5 h-3.5" /> Delete
@@ -774,6 +782,17 @@ export function SuppliersClient({
             } finally {
               setRemoving(false);
             }
+          }}
+        />
+      )}
+      {editingPOItems && (
+        <POItemsEditor
+          order={editingPOItems}
+          onClose={() => setEditingPOItems(null)}
+          onDone={(message) => {
+            setEditingPOItems(null);
+            showToast(message, "success");
+            router.refresh();
           }}
         />
       )}

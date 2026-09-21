@@ -16,6 +16,7 @@ export default async function POSPage() {
       ? {
           id: last.id,
           date: last.date,
+          label: last.label,
           rightSph: last.rightEye.sph, rightCyl: last.rightEye.cyl, rightAxis: last.rightEye.axis,
           rightPd: last.rightEye.pd, rightAdd: last.rightEye.add,
           leftSph: last.leftEye.sph, leftCyl: last.leftEye.cyl, leftAxis: last.leftEye.axis,

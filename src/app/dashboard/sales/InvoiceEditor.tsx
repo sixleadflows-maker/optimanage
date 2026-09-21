@@ -4,10 +4,13 @@ import { useEffect, useRef, useState } from "react";
 import type { SaleView } from "@/lib/data";
 import { formatCurrency, toLocalInput } from "@/lib/utils/format";
 import { useApp } from "@/lib/context";
-import { collectSalePayment, updateSale } from "@/lib/actions/sales";
+import { collectSalePayment, updateSale, updateSalePayment } from "@/lib/actions/sales";
 import { searchProductsForSale, type ProductSearchHit } from "@/lib/actions/products";
 import { LENS_COLORS, PAYMENT_METHODS } from "@/lib/constants";
-import { Loader2, Plus, Search, Trash2, Wallet, X, Pencil, AlertTriangle } from "lucide-react";
+import { Loader2, Plus, Search, Trash2, Wallet, X, Pencil, AlertTriangle, CalendarClock, User } from "lucide-react";
+
+export interface EditorCustomer { id: string; name: string; phone: string }
+export interface EditorStaff { id: string; name: string }
 
 
 
@@ -146,10 +149,16 @@ interface EditLine {
 
 export function EditInvoiceModal({
   sale,
+  customers,
+  staff,
+  canBackdate,
   onClose,
   onDone,
 }: {
   sale: SaleView;
+  customers: EditorCustomer[];
+  staff: EditorStaff[];
+  canBackdate: boolean;
   onClose: () => void;
   onDone: (message: string) => void;
 }) {
@@ -179,6 +188,22 @@ export function EditInvoiceModal({
   const [labCharges, setLabCharges] = useState(sale.labCharges);
   const [fittingCharges, setFittingCharges] = useState(sale.fittingCharges);
   const [saving, setSaving] = useState(false);
+
+  // The invoice's own details, all correctable.
+  const [billDate, setBillDate] = useState(() => toLocalInput(new Date(sale.dateTime)));
+  const [customerId, setCustomerId] = useState(sale.customerId);
+  const [customerSearch, setCustomerSearch] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState(sale.paymentMethod);
+  const [orderTakenBy, setOrderTakenBy] = useState(staff.find((m) => m.name === sale.createdByName)?.id ?? "");
+  const [billedBy, setBilledBy] = useState(staff.find((m) => m.name === sale.receivedByName)?.id ?? "");
+
+  const customer = customers.find((c) => c.id === customerId);
+  const customerMatches = customerSearch.trim()
+    ? customers.filter((c) => {
+        const q = customerSearch.trim().toLowerCase();
+        return c.name.toLowerCase().includes(q) || c.phone.replace(/[^0-9]/g, "").includes(q.replace(/[^0-9]/g, ""));
+      }).slice(0, 5)
+    : [];
 
   const [search, setSearch] = useState("");
   const [hits, setHits] = useState<ProductSearchHit[]>([]);
@@ -240,6 +265,11 @@ export function EditInvoiceModal({
     setSaving(true);
     const res = await updateSale({
       saleId: sale.id,
+      date: canBackdate ? new Date(billDate).toISOString() : undefined,
+      customerId: customerId || null,
+      paymentMethod,
+      createdById: orderTakenBy || undefined,
+      receivedById: billedBy || undefined,
       items: lines.map((l) =>
         l.productId
           ? { productId: l.productId, description: l.description, quantity: l.quantity, unitPrice: l.unitPrice, discount: l.discount }
@@ -281,6 +311,75 @@ export function EditInvoiceModal({
             </p>
           </div>
           <button onClick={onClose} className="cursor-pointer"><X className="w-5 h-5" /></button>
+        </div>
+
+        <div className="p-3 rounded-xl border border-border space-y-2 mb-3">
+          <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Invoice details</p>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-[10px] text-muted-foreground block mb-1 flex items-center gap-1">
+                <CalendarClock className="w-3 h-3" /> Bill date &amp; time
+              </label>
+              <input type="datetime-local" value={billDate} max={toLocalInput(new Date())} disabled={!canBackdate}
+                onChange={(e) => setBillDate(e.target.value)}
+                className="w-full px-2.5 py-1.5 glass-input text-xs disabled:opacity-60" />
+            </div>
+            <div>
+              <label className="text-[10px] text-muted-foreground block mb-1">Payment method</label>
+              <select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)}
+                className="w-full px-2.5 py-1.5 glass-input text-xs">
+                {PAYMENT_METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </div>
+            <div className="col-span-2">
+              <label className="text-[10px] text-muted-foreground block mb-1 flex items-center gap-1">
+                <User className="w-3 h-3" /> Customer
+              </label>
+              {customerId ? (
+                <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 bg-surface rounded-lg">
+                  <span className="text-xs truncate">{customer?.name ?? sale.customerName}{customer?.phone ? ` · ${customer.phone}` : ""}</span>
+                  <button onClick={() => { setCustomerId(""); setCustomerSearch(""); }} title="Make this a walk-in sale"
+                    className="cursor-pointer flex-shrink-0"><X className="w-3.5 h-3.5" /></button>
+                </div>
+              ) : (
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+                  <input type="text" value={customerSearch} onChange={(e) => setCustomerSearch(e.target.value)}
+                    placeholder="Walk-in — search to attach a customer" className="w-full pl-9 pr-3 py-1.5 glass-input text-xs" />
+                  {customerMatches.length > 0 && (
+                    <div className="mt-1 glass rounded-lg p-1 max-h-32 overflow-y-auto">
+                      {customerMatches.map((c) => (
+                        <button key={c.id} onClick={() => { setCustomerId(c.id); setCustomerSearch(""); }}
+                          className="w-full text-left px-3 py-1.5 rounded-lg hover:bg-surface-hover text-xs cursor-pointer">
+                          {c.name}{c.phone ? ` · ${c.phone}` : ""}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+            {staff.length > 0 && (
+              <>
+                <div>
+                  <label className="text-[10px] text-muted-foreground block mb-1">Order taken by</label>
+                  <select value={orderTakenBy} onChange={(e) => setOrderTakenBy(e.target.value)}
+                    className="w-full px-2.5 py-1.5 glass-input text-xs">
+                    <option value="">—</option>
+                    {staff.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[10px] text-muted-foreground block mb-1">Bill generated by</label>
+                  <select value={billedBy} onChange={(e) => setBilledBy(e.target.value)}
+                    className="w-full px-2.5 py-1.5 glass-input text-xs">
+                    <option value="">—</option>
+                    {staff.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                  </select>
+                </div>
+              </>
+            )}
+          </div>
         </div>
 
         <div className="space-y-2">
@@ -468,6 +567,109 @@ export function EditInvoiceModal({
             className="flex-1 py-2.5 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-primary-hover transition-colors disabled:opacity-60 flex items-center justify-center gap-2 cursor-pointer"
           >
             {saving && <Loader2 className="w-4 h-4 animate-spin" />} Save invoice
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Correct or remove one payment already taken against an invoice. */
+export function EditPaymentModal({
+  sale,
+  payment,
+  onClose,
+  onDone,
+}: {
+  sale: SaleView;
+  payment: SaleView["payments"][number];
+  onClose: () => void;
+  onDone: (message: string) => void;
+}) {
+  const { showToast } = useApp();
+  const [amount, setAmount] = useState(payment.amount);
+  const [method, setMethod] = useState(payment.method);
+  const [note, setNote] = useState(payment.note);
+  const [takenAt, setTakenAt] = useState(() => toLocalInput(new Date(payment.date)));
+  const [saving, setSaving] = useState(false);
+  const [removing, setRemoving] = useState(false);
+
+  const takenAtDate = new Date(takenAt);
+  const otherPayments = sale.paid - payment.amount;
+  const problem =
+    !(amount > 0) ? "Enter the amount received"
+    : Number.isNaN(takenAtDate.getTime()) ? "Enter the date and time"
+    : takenAtDate.getTime() > Date.now() + 60_000 ? "That's in the future"
+    : takenAtDate.getTime() < new Date(sale.dateTime).getTime() - 60_000 ? "That's before the invoice was made"
+    : otherPayments + amount > sale.total + 0.01 ? `That takes the payments past the ${formatCurrency(sale.total)} total`
+    : "";
+
+  const submit = async (remove = false) => {
+    remove ? setRemoving(true) : setSaving(true);
+    const res = await updateSalePayment({
+      paymentId: payment.id,
+      ...(remove ? { remove: true } : { amount, method, note, date: takenAtDate.toISOString() }),
+    });
+    setSaving(false);
+    setRemoving(false);
+    if (!res.ok) {
+      showToast(res.error, "error");
+      return;
+    }
+    onDone(
+      remove
+        ? `Payment removed — ${res.balance > 0 ? `${formatCurrency(res.balance)} now owed` : "paid in full"}`
+        : `Payment updated — ${res.balance > 0 ? `${formatCurrency(res.balance)} still owed` : "paid in full"}`
+    );
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div className="glass-modal p-6 w-full max-w-md animate-rise" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold flex items-center gap-2">
+            <Pencil className="w-4 h-4 text-primary" /> Correct payment
+          </h3>
+          <button onClick={onClose} className="cursor-pointer"><X className="w-5 h-5" /></button>
+        </div>
+
+        <p className="text-xs text-muted-foreground mb-3">
+          {`On ${sale.invoiceNo} · invoice total ${formatCurrency(sale.total)}`}
+        </p>
+
+        <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Amount received</label>
+        <input type="number" value={amount || ""} autoFocus onChange={(e) => setAmount(Math.max(0, Number(e.target.value)))}
+          className="w-full px-3 py-2.5 glass-input text-sm" />
+
+        <label className="text-xs font-medium text-muted-foreground mb-1.5 block mt-3">Paid by</label>
+        <div className="grid grid-cols-4 gap-1.5">
+          {PAYMENT_METHODS.map((m) => (
+            <button key={m} onClick={() => setMethod(m)}
+              className={`py-2 rounded-xl text-[11px] font-medium transition-all ${method === m ? "bg-primary text-white" : "bg-surface hover:bg-surface-hover"}`}>
+              {m}
+            </button>
+          ))}
+        </div>
+
+        <label className="text-xs font-medium text-muted-foreground mb-1.5 block mt-3">Received on</label>
+        <input type="datetime-local" value={takenAt} onChange={(e) => setTakenAt(e.target.value)}
+          min={toLocalInput(new Date(sale.dateTime))} max={toLocalInput(new Date())}
+          className="w-full px-3 py-2.5 glass-input text-sm" />
+
+        <label className="text-xs font-medium text-muted-foreground mb-1.5 block mt-3">Note (optional)</label>
+        <input type="text" value={note} onChange={(e) => setNote(e.target.value)}
+          placeholder="Cheque no., who collected it..." className="w-full px-3 py-2.5 glass-input text-sm" />
+
+        {problem && <p className="text-[11px] text-destructive mt-2">{problem}</p>}
+
+        <div className="flex gap-2 mt-5">
+          <button onClick={() => submit(true)} disabled={saving || removing}
+            className="py-2.5 px-4 rounded-xl text-sm font-medium text-destructive bg-destructive/10 hover:bg-destructive/15 transition-colors disabled:opacity-60 flex items-center justify-center gap-2 cursor-pointer">
+            {removing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />} Remove
+          </button>
+          <button onClick={() => submit()} disabled={saving || removing || !!problem}
+            className="flex-1 py-2.5 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-primary-hover transition-colors disabled:opacity-60 flex items-center justify-center gap-2 cursor-pointer">
+            {saving && <Loader2 className="w-4 h-4 animate-spin" />} Save changes
           </button>
         </div>
       </div>

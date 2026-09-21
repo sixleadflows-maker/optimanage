@@ -7,6 +7,7 @@ import { trashPrescription, TrashError } from "@/lib/trash/snapshots";
 
 export interface PrescriptionInput {
   customerId: string;
+  label?: string;
   rightSph: number; rightCyl: number; rightAxis: number; rightPd: number; rightAdd: number;
   leftSph: number; leftCyl: number; leftAxis: number; leftPd: number; leftAdd: number;
   notes: string;
@@ -23,6 +24,7 @@ export async function createPrescription(input: PrescriptionInput) {
       customerId: input.customerId,
       rightSph: input.rightSph, rightCyl: input.rightCyl, rightAxis: input.rightAxis, rightPd: input.rightPd, rightAdd: input.rightAdd,
       leftSph: input.leftSph, leftCyl: input.leftCyl, leftAxis: input.leftAxis, leftPd: input.leftPd, leftAdd: input.leftAdd,
+      label: (input.label ?? "").trim(),
       notes: input.notes,
       isOwnPrescription: input.isOwnPrescription ?? false,
     },
@@ -40,6 +42,7 @@ export async function updatePrescription(id: string, input: Omit<PrescriptionInp
     data: {
       rightSph: input.rightSph, rightCyl: input.rightCyl, rightAxis: input.rightAxis, rightPd: input.rightPd, rightAdd: input.rightAdd,
       leftSph: input.leftSph, leftCyl: input.leftCyl, leftAxis: input.leftAxis, leftPd: input.leftPd, leftAdd: input.leftAdd,
+      label: (input.label ?? "").trim(),
       notes: input.notes,
       isOwnPrescription: input.isOwnPrescription ?? false,
     },

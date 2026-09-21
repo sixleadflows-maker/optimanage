@@ -107,3 +107,25 @@ export async function deleteReturn(returnId: string) {
   revalidatePath("/dashboard/trash");
   return { ok: true as const };
 }
+
+/**
+ * Corrects a return's details. Changing which items came back means undoing
+ * the return and entering it again — the stock has to move with it.
+ */
+export async function updateReturn(returnId: string, input: { reason?: string; refundMethod?: string; totalRefund?: number }) {
+  const session = await auth();
+  if (!session?.user) return { ok: false as const, error: "You've been signed out — sign in again" };
+  if (session.user.role === "CASHIER") return { ok: false as const, error: "Only managers and owners can change a return" };
+
+  const updated = await db.return.updateMany({
+    where: { id: returnId },
+    data: {
+      reason: input.reason,
+      refundMethod: input.refundMethod,
+      ...(input.totalRefund === undefined ? {} : { totalRefund: Math.max(0, input.totalRefund) }),
+    },
+  });
+  if (updated.count === 0) return { ok: false as const, error: "This return has been undone" };
+  revalidatePath("/dashboard/sales");
+  return { ok: true as const };
+}

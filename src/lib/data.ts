@@ -68,13 +68,14 @@ export type CustomerView = Customer & { visitCount: number };
 function mapPrescription(p: {
   id: string; date: Date; rightSph: number; rightCyl: number; rightAxis: number; rightPd: number; rightAdd: number;
   leftSph: number; leftCyl: number; leftAxis: number; leftPd: number; leftAdd: number; notes: string;
-  notesHidden: boolean; isOwnPrescription: boolean;
+  label: string; notesHidden: boolean; isOwnPrescription: boolean;
 }): Prescription {
   return {
     id: p.id,
     date: iso(p.date),
     rightEye: { sph: p.rightSph, cyl: p.rightCyl, axis: p.rightAxis, pd: p.rightPd, add: p.rightAdd },
     leftEye: { sph: p.leftSph, cyl: p.leftCyl, axis: p.leftAxis, pd: p.leftPd, add: p.leftAdd },
+    label: p.label,
     notes: p.notes,
     notesHidden: p.notesHidden,
     isOwnPrescription: p.isOwnPrescription,
@@ -147,7 +148,8 @@ export type SaleView = Sale & {
   payments: SalePaymentView[];
   hasReturn: boolean;
   returns: { id: string; returnNo: string; date: string; totalRefund: number; reason: string }[];
-  prescription: Prescription | null;
+  // Every prescription taken with this sale, in the order they were entered.
+  prescriptions: Prescription[];
 };
 
 export interface SalePaymentView {
@@ -167,7 +169,7 @@ const saleInclude = {
   lensProduct: { select: { brand: true, name: true, salePrice: true } },
   payments: { orderBy: { date: "asc" }, include: { receivedBy: { select: { name: true } } } },
   returns: { select: { id: true, returnNo: true, date: true, totalRefund: true, reason: true }, orderBy: { date: "asc" } },
-  prescriptions: { orderBy: { date: "desc" }, take: 1 },
+  prescriptions: { orderBy: { createdAt: "asc" } },
 } satisfies Prisma.SaleInclude;
 
 type SaleRow = Prisma.SaleGetPayload<{ include: typeof saleInclude }>;
@@ -222,7 +224,7 @@ function mapSale(s: SaleRow): SaleView {
     })),
     hasReturn: s.returns.length > 0,
     returns: s.returns.map((r) => ({ id: r.id, returnNo: r.returnNo, date: r.date.toISOString(), totalRefund: r.totalRefund, reason: r.reason })),
-    prescription: s.prescriptions[0] ? mapPrescription(s.prescriptions[0]) : null,
+    prescriptions: s.prescriptions.map(mapPrescription),
     subtotal: s.subtotal,
     discount: s.discount,
     tax: s.tax,
