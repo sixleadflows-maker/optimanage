@@ -19,7 +19,7 @@ import {
 import { firstImage } from "@/lib/utils/images";
 import { LensLoader } from "@/components/ui/LensLoader";
 import { RxPowerInput } from "@/components/ui/RxPowerInput";
-import { isPowerField, parseRxText, rxFieldText } from "@/lib/utils/rx";
+import { isPowerField, parseRxText, rxFieldText, rxFormTexts, type RxTextColumns } from "@/lib/utils/rx";
 import { ThermalReceipt, A4Invoice, lensNote, type InvoiceData, type ShopDetails } from "@/components/invoice/InvoiceDocuments";
 
 interface CartItem {
@@ -34,7 +34,7 @@ interface CartItem {
   discount: number;
 }
 
-export interface POSRx {
+export interface POSRx extends RxTextColumns {
   id: string;
   date: string;
   label: string;
@@ -517,6 +517,7 @@ export function POSClient({
   const rxValues = (entry: RxEntry) => ({
     rightSph: num(entry.rightSph), rightCyl: num(entry.rightCyl), rightAxis: num(entry.rightAxis), rightPd: num(entry.rightPd), rightAdd: num(entry.rightAdd),
     leftSph: num(entry.leftSph), leftCyl: num(entry.leftCyl), leftAxis: num(entry.leftAxis), leftPd: num(entry.leftPd), leftAdd: num(entry.leftAdd),
+    ...rxFormTexts(entry),
     notes: entry.notes,
     label: entry.label.trim(),
     isOwnPrescription: entry.isOwn,
@@ -530,12 +531,12 @@ export function POSClient({
     if (!last) return blankRx();
     return {
       ...blankRx(),
-      rightSph: rxFieldText("Sph", last.rightSph), rightCyl: rxFieldText("Cyl", last.rightCyl),
+      rightSph: rxFieldText("Sph", last.rightSph, last.rightSphText), rightCyl: rxFieldText("Cyl", last.rightCyl, last.rightCylText),
       rightAxis: rxFieldText("Axis", last.rightAxis), rightPd: rxFieldText("Pd", last.rightPd),
-      rightAdd: rxFieldText("Add", last.rightAdd),
-      leftSph: rxFieldText("Sph", last.leftSph), leftCyl: rxFieldText("Cyl", last.leftCyl),
+      rightAdd: rxFieldText("Add", last.rightAdd, last.rightAddText),
+      leftSph: rxFieldText("Sph", last.leftSph, last.leftSphText), leftCyl: rxFieldText("Cyl", last.leftCyl, last.leftCylText),
       leftAxis: rxFieldText("Axis", last.leftAxis), leftPd: rxFieldText("Pd", last.leftPd),
-      leftAdd: rxFieldText("Add", last.leftAdd),
+      leftAdd: rxFieldText("Add", last.leftAdd, last.leftAddText),
       label: last.label,
       notes: last.notes,
       isOwn: last.isOwn,

@@ -99,6 +99,15 @@ model Prescription {
   leftPd     Float    @default(0)
   leftAdd    Float    @default(0)
 
+  // A power written as words instead of a number ("Plano", "BAL") -- the
+  // number beside it is then 0 and the words are what's shown.
+  rightSphText String @default("")
+  rightCylText String @default("")
+  rightAddText String @default("")
+  leftSphText  String @default("")
+  leftCylText  String @default("")
+  leftAddText  String @default("")
+
   // Whose eyes this is for, when one order carries several prescriptions under
   // the same customer -- a family member's name, or "distance" / "reading".
   label      String   @default("")

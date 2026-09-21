@@ -55,6 +55,10 @@ export interface EyeRx {
   axis: number;
   pd: number;
   add: number;
+  // A power written as words ("Plano") -- shown instead of the number.
+  sphText: string;
+  cylText: string;
+  addText: string;
 }
 
 export interface SaleItem {

@@ -2,6 +2,7 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import type { Prisma } from "@/generated/prisma/client";
 import { trashPrescriptionRows } from "@/lib/trash/snapshots";
+import { rxTextColumns, type RxTextColumns } from "@/lib/utils/rx";
 
 export interface SaleCoreItem {
   // Left out for an item typed in at the till that isn't in the inventory --
@@ -16,7 +17,7 @@ export interface SaleCoreItem {
   discount: number;
 }
 
-export interface SalePrescriptionInput {
+export interface SalePrescriptionInput extends Partial<RxTextColumns> {
   rightSph: number; rightCyl: number; rightAxis: number; rightPd: number; rightAdd: number;
   leftSph: number; leftCyl: number; leftAxis: number; leftPd: number; leftAdd: number;
   notes: string;
@@ -440,6 +441,7 @@ function prescriptionFields(p: SalePrescriptionInput) {
     label: (p.label ?? "").trim(),
     rightSph: p.rightSph, rightCyl: p.rightCyl, rightAxis: p.rightAxis, rightPd: p.rightPd, rightAdd: p.rightAdd,
     leftSph: p.leftSph, leftCyl: p.leftCyl, leftAxis: p.leftAxis, leftPd: p.leftPd, leftAdd: p.leftAdd,
+    ...rxTextColumns(p),
     notes: p.notes,
     isOwnPrescription: p.isOwnPrescription ?? false,
   };

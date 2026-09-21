@@ -8,7 +8,7 @@ import { useApp } from "@/lib/context";
 import { deleteCustomer } from "@/lib/actions/customers";
 import { setPrescriptionNotesHidden } from "@/lib/actions/prescriptions";
 import { paymentStatusChipClass } from "@/lib/constants";
-import { formatRxValue } from "@/lib/utils/rx";
+import { formatEyeValue } from "@/lib/utils/rx";
 import { EditInvoiceModal, type EditorCustomer, type EditorStaff } from "@/app/dashboard/sales/InvoiceEditor";
 import { ArrowLeft, MessageCircle, Bell, Eye, EyeOff, RefreshCw, Phone, Mail, MapPin, Trash2, Loader2, Pencil } from "lucide-react";
 import Link from "next/link";
@@ -160,7 +160,7 @@ export function CustomerProfileClient({
                           {(["Sph", "Cyl", "Axis", "Pd", "Add"] as const).map((f) => (
                             <div key={f} className="text-center">
                               <p className="text-[9px] text-muted-foreground">{f.toUpperCase()}</p>
-                              <p className="font-medium">{formatRxValue(f, rx.rightEye[f.toLowerCase() as keyof typeof rx.rightEye])}</p>
+                              <p className="font-medium">{formatEyeValue(f, rx.rightEye)}</p>
                             </div>
                           ))}
                         </div>
@@ -171,7 +171,7 @@ export function CustomerProfileClient({
                           {(["Sph", "Cyl", "Axis", "Pd", "Add"] as const).map((f) => (
                             <div key={f} className="text-center">
                               <p className="text-[9px] text-muted-foreground">{f.toUpperCase()}</p>
-                              <p className="font-medium">{formatRxValue(f, rx.leftEye[f.toLowerCase() as keyof typeof rx.leftEye])}</p>
+                              <p className="font-medium">{formatEyeValue(f, rx.leftEye)}</p>
                             </div>
                           ))}
                         </div>

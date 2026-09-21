@@ -250,7 +250,7 @@ export async function trashPrescriptionRows(tx: Tx, ids: string[], deletedById: 
     await store(tx, "prescription", p.id, `Prescription — ${customer.name}`,
       [
         p.date.toLocaleDateString("en-GB"),
-        `OD ${formatRxPower(p.rightSph)}/${formatRxPower(p.rightCyl)} · OS ${formatRxPower(p.leftSph)}/${formatRxPower(p.leftCyl)}`,
+        `OD ${formatRxPower(p.rightSph, p.rightSphText)}/${formatRxPower(p.rightCyl, p.rightCylText)} · OS ${formatRxPower(p.leftSph, p.leftSphText)}/${formatRxPower(p.leftCyl, p.leftCylText)}`,
       ].join(" · "),
       { prescription: row }, deletedById);
     await tx.prescription.delete({ where: { id } });
