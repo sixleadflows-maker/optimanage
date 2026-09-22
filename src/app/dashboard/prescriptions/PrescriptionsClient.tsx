@@ -20,24 +20,40 @@ const empty = {
   notes: "",
 };
 
+/** The form filled from a saved prescription, ready to correct. */
+const formFromRx = (rx: PrescriptionView) => ({
+  rightSph: rxFieldText("Sph", rx.rightEye.sph, rx.rightEye.sphText), rightCyl: rxFieldText("Cyl", rx.rightEye.cyl, rx.rightEye.cylText),
+  rightAxis: rxFieldText("Axis", rx.rightEye.axis), rightPd: rxFieldText("Pd", rx.rightEye.pd),
+  rightAdd: rxFieldText("Add", rx.rightEye.add, rx.rightEye.addText),
+  leftSph: rxFieldText("Sph", rx.leftEye.sph, rx.leftEye.sphText), leftCyl: rxFieldText("Cyl", rx.leftEye.cyl, rx.leftEye.cylText),
+  leftAxis: rxFieldText("Axis", rx.leftEye.axis), leftPd: rxFieldText("Pd", rx.leftEye.pd),
+  leftAdd: rxFieldText("Add", rx.leftEye.add, rx.leftEye.addText),
+  label: rx.label,
+  notes: rx.notes,
+});
+
 export function PrescriptionsClient({
   prescriptions,
   customers,
   canDelete,
+  initialEditId,
 }: {
   prescriptions: PrescriptionView[];
   customers: RxCustomer[];
   canDelete: boolean;
+  // Opened from a customer's history to correct this one.
+  initialEditId?: string;
 }) {
   const { showToast } = useApp();
   const router = useRouter();
-  const [selectedCustomer, setSelectedCustomer] = useState("");
-  const [customerSearch, setCustomerSearch] = useState("");
+  const initialEdit = initialEditId ? prescriptions.find((p) => p.id === initialEditId) ?? null : null;
+  const [selectedCustomer, setSelectedCustomer] = useState(initialEdit?.customerId ?? "");
+  const [customerSearch, setCustomerSearch] = useState(initialEdit?.customerName ?? "");
   const [saving, setSaving] = useState(false);
-  const [isOwn, setIsOwn] = useState(false);
-  const [form, setForm] = useState({ ...empty });
+  const [isOwn, setIsOwn] = useState(initialEdit?.isOwnPrescription ?? false);
+  const [form, setForm] = useState(() => (initialEdit ? formFromRx(initialEdit) : { ...empty }));
   // Set while the form is correcting an existing prescription.
-  const [editing, setEditing] = useState<PrescriptionView | null>(null);
+  const [editing, setEditing] = useState<PrescriptionView | null>(initialEdit);
   const [deleting, setDeleting] = useState<PrescriptionView | null>(null);
   const [removing, setRemoving] = useState(false);
   const [listSearch, setListSearch] = useState("");
@@ -93,6 +109,8 @@ export function PrescriptionsClient({
     setSelectedCustomer("");
     setCustomerSearch("");
     setEditing(null);
+    // Opened from a customer's history: drop ?edit= so a reload doesn't reopen it.
+    if (initialEditId) router.replace("/dashboard/prescriptions", { scroll: false });
   };
 
   const startEdit = (rx: PrescriptionView) => {
@@ -100,16 +118,7 @@ export function PrescriptionsClient({
     setSelectedCustomer(rx.customerId);
     setCustomerSearch(rx.customerName);
     setIsOwn(rx.isOwnPrescription);
-    setForm({
-      rightSph: rxFieldText("Sph", rx.rightEye.sph, rx.rightEye.sphText), rightCyl: rxFieldText("Cyl", rx.rightEye.cyl, rx.rightEye.cylText),
-      rightAxis: rxFieldText("Axis", rx.rightEye.axis), rightPd: rxFieldText("Pd", rx.rightEye.pd),
-      rightAdd: rxFieldText("Add", rx.rightEye.add, rx.rightEye.addText),
-      leftSph: rxFieldText("Sph", rx.leftEye.sph, rx.leftEye.sphText), leftCyl: rxFieldText("Cyl", rx.leftEye.cyl, rx.leftEye.cylText),
-      leftAxis: rxFieldText("Axis", rx.leftEye.axis), leftPd: rxFieldText("Pd", rx.leftEye.pd),
-      leftAdd: rxFieldText("Add", rx.leftEye.add, rx.leftEye.addText),
-      label: rx.label,
-      notes: rx.notes,
-    });
+    setForm(formFromRx(rx));
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 

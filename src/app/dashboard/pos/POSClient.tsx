@@ -7,7 +7,7 @@ import { useApp } from "@/lib/context";
 import { DISCOUNT_PERCENTAGES, LENS_COLORS, PAYMENT_TYPE_LABEL } from "@/lib/constants";
 import { createSale, updateTillSale, type CreateSaleInput } from "@/lib/actions/sales";
 import { createCustomer } from "@/lib/actions/customers";
-import { createPrescription } from "@/lib/actions/prescriptions";
+import { createPrescription, updatePrescription } from "@/lib/actions/prescriptions";
 import { getDrafts, addDraft, replaceDraft, removeDraft, markDraftFailed, makeOfflineRef, type OfflineDraft } from "@/lib/offlineDrafts";
 import { useRouter } from "next/navigation";
 import {
@@ -79,10 +79,13 @@ interface RxEntry {
   rightSph: string; rightCyl: string; rightAxis: string; rightPd: string; rightAdd: string;
   leftSph: string; leftCyl: string; leftAxis: string; leftPd: string; leftAdd: string;
   notes: string;
-  // The record it was filled in from, or saved to from here — attached to the
-  // sale instead of storing the same numbers again.
+  // The record it was filled in from (attached as it is if left unchanged), and
+  // the one it was saved to from here -- which stays the one record for this
+  // prescription however often it's changed and saved again.
   fromRecordId?: string;
   savedId?: string;
+  // Changed since it was last saved to the record.
+  savedChanged?: boolean;
   // The record holding it on the invoice once the bill is saved, so saving a
   // corrected bill changes that record instead of adding another.
   onBillId?: string;
@@ -554,7 +557,7 @@ export function POSClient({
   }, [selectedCustomer, recordRx]);
 
   const editRx = (key: string, patch: Partial<RxEntry>) => {
-    setRxList((prev) => prev.map((e) => (e.key === key ? { ...e, ...patch, savedId: undefined } : e)));
+    setRxList((prev) => prev.map((e) => (e.key === key ? { ...e, ...patch, savedChanged: !!e.savedId } : e)));
     setRxTouched(true);
   };
 
@@ -573,8 +576,16 @@ export function POSClient({
     if (customer.local) { showToast(`${customer.name} isn't on the system yet — the prescription is saved with the bill`, "info"); return; }
     setSavingRx(entry.key);
     try {
+      // Saved once already: that record is updated, not joined by a second one.
+      if (entry.savedId) {
+        const res = await updatePrescription(entry.savedId, rxValues(entry));
+        if (!res.ok) { showToast(res.error, "error"); return; }
+        setRxList((prev) => prev.map((e) => (e.key === entry.key ? { ...e, savedChanged: false } : e)));
+        showToast(`${customer.name}'s prescription record updated`, "success");
+        return;
+      }
       const res = await createPrescription({ customerId: customer.id, ...rxValues(entry) });
-      setRxList((prev) => prev.map((e) => (e.key === entry.key ? { ...e, savedId: res.id } : e)));
+      setRxList((prev) => prev.map((e) => (e.key === entry.key ? { ...e, savedId: res.id, savedChanged: false } : e)));
       showToast(`Saved to ${customer.name}'s prescription record`, "success");
     } catch {
       showToast("Couldn't save it right now — it will be saved with the sale", "error");
@@ -779,14 +790,13 @@ export function POSClient({
       fittingCharges,
       createdById: orderTakenBy || currentUserId,
       receivedById: billGeneratedBy || currentUserId,
+      // Each carries the record it already is (saved from here, or on the bill
+      // being corrected), so the sale finishes that record instead of copying it.
       prescriptions: recordRx
-        ? rxList.map((e) => (editingBill ? { ...rxValues(e), id: e.onBillId ?? e.savedId } : rxValues(e)))
+        ? rxList.map((e) => ({ ...rxValues(e), id: (editingBill ? e.onBillId : undefined) ?? e.savedId }))
         : undefined,
-      // Don't save the same numbers twice: attach the record the first one came
-      // from (saved from here, or the customer's last one left unchanged).
-      existingPrescriptionId: recordRx && rxList[0]
-        ? rxList[0].savedId ?? (!rxTouched && rxPrefilledFrom ? rxList[0].fromRecordId : undefined)
-        : undefined,
+      // The customer's last prescription, left exactly as it was: attached, not copied.
+      existingPrescriptionId: recordRx && rxList[0] && !rxTouched && rxPrefilledFrom ? rxList[0].fromRecordId : undefined,
       date: billDateValue ? billDateValue.toISOString() : undefined,
       deductStock: isOldBill ? deductOldStock : undefined,
       clientRef: clientRef.current,
@@ -1477,14 +1487,15 @@ export function POSClient({
                           className="w-full px-3 py-1.5 glass-input text-[10px]" placeholder="Rx notes (optional)..." />
 
                         {customer && !customer.local && (
-                          entry.savedId ? (
+                          entry.savedId && !entry.savedChanged ? (
                             <p className="flex items-center justify-center gap-1 text-[10px] text-success font-medium">
                               <Check className="w-3 h-3" /> On {customer.name}&apos;s record — the sale will use this one
                             </p>
                           ) : (
                             <button onClick={() => saveRxNow(entry)} disabled={savingRx !== null}
                               className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-surface hover:bg-surface-hover text-[10px] font-medium disabled:opacity-60 cursor-pointer">
-                              {savingRx === entry.key ? <LensLoader /> : <Save className="w-3 h-3" />} Save to {customer.name}&apos;s record now
+                              {savingRx === entry.key ? <LensLoader /> : <Save className="w-3 h-3" />}
+                              {entry.savedId ? `Update ${customer.name}'s record now` : `Save to ${customer.name}'s record now`}
                             </button>
                           )
                         )}

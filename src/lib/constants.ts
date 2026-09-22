@@ -78,6 +78,16 @@ export const PURCHASE_PAYMENT_METHODS = [
   "Cash", "Cheque", "Bank Transfer", "JazzCash", "EasyPaisa", "Card", "Pay Later (Credit)", "Other",
 ] as const;
 
+/**
+ * What's still owed to the supplier on a purchase order. A payment by cheque
+ * is recorded but not taken off the balance (the owner's rule); cash and the
+ * other methods are.
+ */
+export function poBalanceDue(po: { total: number; amountPaid: number; paymentMethod: string }) {
+  const counted = po.paymentMethod === "Cheque" ? 0 : po.amountPaid || 0;
+  return Math.max(0, po.total - counted);
+}
+
 export const BRAND_TAGS = ["Original", "Copy", "Branded", "Unbranded"] as const;
 
 export const DAMAGE_TYPES = [

@@ -480,7 +480,7 @@ export function SalesClient({
                           <Wallet className="w-3.5 h-3.5 text-success" />
                         </button>
                       )}
-                      {canEdit && sale.source === "POS" && !sale.hasReturn && (
+                      {canEdit && sale.source === "POS" && (
                         <button onClick={() => setEditingSale(sale)} title="Edit invoice"
                           className="p-1.5 rounded-lg hover:bg-surface-hover cursor-pointer">
                           <Pencil className="w-3.5 h-3.5 text-muted-foreground" />
@@ -556,7 +556,7 @@ export function SalesClient({
                 className="flex-1 min-w-[140px] flex items-center justify-center gap-2 py-2.5 glass-card text-sm font-medium cursor-pointer disabled:opacity-60">
                 <Printer className="w-4 h-4" /> Print A4
               </button>
-              {canEdit && viewingSale.source === "POS" && !viewingSale.hasReturn && (
+              {canEdit && viewingSale.source === "POS" && (
                 <button onClick={() => { const sale = viewingSale; setViewingSale(null); setEditingSale(sale); }}
                   className="flex-1 min-w-[140px] flex items-center justify-center gap-2 py-2.5 glass-card text-sm font-medium cursor-pointer">
                   <Pencil className="w-4 h-4" /> Edit invoice

@@ -151,6 +151,10 @@ export function CustomerProfileClient({
                       <div className="flex items-center gap-1.5">
                         {rx.isOwnPrescription && <span className="chip bg-warning/10 text-warning">Own Rx</span>}
                         <span className="chip bg-primary/10 text-primary">Rx</span>
+                        <Link href={`/dashboard/prescriptions?edit=${rx.id}`} title="Edit prescription"
+                          className="p-1 rounded-md hover:bg-surface-hover">
+                          <Pencil className="w-3.5 h-3.5 text-muted-foreground" />
+                        </Link>
                       </div>
                     </div>
                     <div className="grid grid-cols-2 gap-4">
@@ -225,7 +229,7 @@ export function CustomerProfileClient({
                         <p className="text-sm font-semibold">{formatCurrency(sale.total)}</p>
                         <span className={`chip ${paymentStatusChipClass(sale.paymentStatus)}`}>{sale.paymentStatus}</span>
                       </div>
-                      {canEdit && sale.source === "POS" && !sale.hasReturn && (
+                      {canEdit && sale.source === "POS" && (
                         <button onClick={() => setEditingSale(sale)} title="Edit invoice"
                           className="p-1.5 rounded-lg hover:bg-surface-hover cursor-pointer">
                           <Pencil className="w-3.5 h-3.5 text-muted-foreground" />

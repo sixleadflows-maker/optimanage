@@ -6,7 +6,7 @@ import type { Supplier, PurchaseOrder } from "@/lib/mock/types";
 import type { Product } from "@/lib/mock/types";
 import { formatCurrency, formatDate } from "@/lib/utils/format";
 import { useApp } from "@/lib/context";
-import { PURCHASE_TYPES, PURCHASE_PAYMENT_METHODS } from "@/lib/constants";
+import { PURCHASE_TYPES, PURCHASE_PAYMENT_METHODS, poBalanceDue } from "@/lib/constants";
 import {
   createSupplier, updateSupplier, createPurchaseOrder, updatePurchaseOrderDetails, receiveStock,
   deleteSupplier, deletePurchaseOrder,
@@ -52,6 +52,9 @@ function referenceLabel(method: string) {
 
 const needsBank = (d: PODetailsInput) => d.paymentMethod === "Cheque" || d.paymentMethod === "Bank Transfer" || d.purchaseType === "Cheque";
 
+// The methods behind "Other" on the Paid by row.
+const OTHER_PAYMENT_METHODS = PURCHASE_PAYMENT_METHODS.filter((m) => m !== "Cash" && m !== "Cheque");
+
 /** Order details and payment details — shared by "Create" and "Edit details". */
 function PODetailsFields({ details, onChange, total }: {
   details: PODetailsInput;
@@ -61,7 +64,9 @@ function PODetailsFields({ details, onChange, total }: {
   // Functional updates, so two quick changes in a row can't overwrite each other.
   const set = <K extends keyof PODetailsInput>(key: K, value: PODetailsInput[K]) =>
     onChange((prev) => ({ ...prev, [key]: value }));
-  const balance = Math.max(0, total - (details.amountPaid || 0));
+  const balance = poBalanceDue({ total, amountPaid: details.amountPaid, paymentMethod: details.paymentMethod });
+  const byCheque = details.paymentMethod === "Cheque";
+  const otherMethod = !!details.paymentMethod && details.paymentMethod !== "Cash" && !byCheque;
 
   return (
     <>
@@ -111,14 +116,30 @@ function PODetailsFields({ details, onChange, total }: {
               className="w-full mt-2 px-3 py-2 glass-input text-sm" placeholder="Specify, e.g. credit, exchange, consignment" />
           )}
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div>
-            <label className="text-[11px] font-medium text-muted-foreground mb-1 block">Payment Method</label>
-            <select value={details.paymentMethod} onChange={(e) => set("paymentMethod", e.target.value)} className="w-full px-3 py-2 glass-input text-sm">
-              <option value="">Not paid yet</option>
-              {PURCHASE_PAYMENT_METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
-            </select>
+        <div>
+          <label className="text-[11px] font-medium text-muted-foreground mb-1 block">Paid by</label>
+          <div className="grid grid-cols-4 gap-1.5">
+            {([["", "Not paid yet"], ["Cash", "Cash"], ["Cheque", "Cheque"], ["other", "Other"]] as const).map(([value, label]) => {
+              const active = value === "other" ? otherMethod : details.paymentMethod === value;
+              return (
+                <button key={value} type="button"
+                  onClick={() => set("paymentMethod", value === "other" ? (otherMethod ? details.paymentMethod : "Bank Transfer") : value)}
+                  className={`py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${active ? "bg-primary text-white" : "bg-surface hover:bg-surface-hover"}`}>
+                  {label}
+                </button>
+              );
+            })}
           </div>
+          {otherMethod && (
+            <select value={details.paymentMethod} onChange={(e) => set("paymentMethod", e.target.value)} className="w-full mt-2 px-3 py-2 glass-input text-sm">
+              {OTHER_PAYMENT_METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
+            </select>
+          )}
+          {byCheque && (
+            <p className="text-[11px] text-warning mt-1.5">A cheque is recorded here but not taken off the balance due.</p>
+          )}
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label className="text-[11px] font-medium text-muted-foreground mb-1 block">{referenceLabel(details.paymentMethod)}</label>
             <input type="text" value={details.paymentReference} onChange={(e) => set("paymentReference", e.target.value)} className="w-full px-3 py-2 glass-input text-sm" />
@@ -137,7 +158,7 @@ function PODetailsFields({ details, onChange, total }: {
           </div>
           <div>
             <label className="text-[11px] font-medium text-muted-foreground mb-1 flex items-center justify-between">
-              Amount Paid
+              {byCheque ? "Cheque Amount" : "Amount Paid"}
               {total > 0 && (
                 <button type="button" onClick={() => set("amountPaid", total)} className="text-primary font-semibold cursor-pointer">Paid in full</button>
               )}
@@ -148,7 +169,11 @@ function PODetailsFields({ details, onChange, total }: {
         </div>
         {total > 0 && (
           <div className="flex justify-between text-xs pt-2 border-t border-border">
-            <span className="text-muted-foreground">Order total {formatCurrency(total)} · Paid {formatCurrency(details.amountPaid || 0)}</span>
+            <span className="text-muted-foreground">
+              {byCheque
+                ? `Order total ${formatCurrency(total)} · Cheque ${formatCurrency(details.amountPaid || 0)} (not deducted)`
+                : `Order total ${formatCurrency(total)} · Paid ${formatCurrency(details.amountPaid || 0)}`}
+            </span>
             <span className={`font-semibold ${balance > 0 ? "text-destructive" : "text-success"}`}>
               {balance > 0 ? `Balance due ${formatCurrency(balance)}` : "Fully paid"}
             </span>
@@ -414,7 +439,7 @@ export function SuppliersClient({
         <div className="space-y-4">
           {purchaseOrders.map((po) => {
             const supplier = supplierById.get(po.supplierId);
-            const balance = Math.max(0, po.total - po.amountPaid);
+            const balance = poBalanceDue(po);
             const purchaseType = po.purchaseType === "Other" && po.purchaseTypeNote ? `Other — ${po.purchaseTypeNote}` : po.purchaseType;
             return (
             <div key={po.id} className="glass-card p-5">
@@ -446,7 +471,11 @@ export function SuppliersClient({
                 <div><p className="text-muted-foreground">Supplier bill no.</p><p className="font-medium">{po.supplierInvoiceNo || "—"}</p></div>
                 <div><p className="text-muted-foreground">Expected delivery</p><p className="font-medium">{po.expectedDate ? formatDate(po.expectedDate) : "—"}</p></div>
                 <div><p className="text-muted-foreground">Payment</p><p className="font-medium">{po.paymentMethod || "Not paid yet"}</p></div>
-                <div><p className="text-muted-foreground">Paid</p><p className="font-medium">{formatCurrency(po.amountPaid)}{po.paymentDate ? ` · ${formatDate(po.paymentDate)}` : ""}</p></div>
+                <div>
+                  <p className="text-muted-foreground">{po.paymentMethod === "Cheque" ? "Cheque" : "Paid"}</p>
+                  <p className="font-medium">{formatCurrency(po.amountPaid)}{po.paymentDate ? ` · ${formatDate(po.paymentDate)}` : ""}</p>
+                  {po.paymentMethod === "Cheque" && po.amountPaid > 0 && <p className="text-warning">Not taken off the balance</p>}
+                </div>
                 {(po.paymentReference || po.bankName) && (
                   <div className="col-span-2 sm:col-span-4">
                     <p className="text-muted-foreground">{referenceLabel(po.paymentMethod)}</p>
@@ -505,8 +534,7 @@ export function SuppliersClient({
                   className="flex items-center gap-2 px-4 py-2 glass-card text-xs font-medium cursor-pointer">
                   <Pencil className="w-3.5 h-3.5" /> Edit Details &amp; Payment
                 </button>
-                {/* Once stock has come in against an order it's part of the shelf count's history. */}
-                {canDelete && po.items.every((i) => i.received === 0) && (
+                {canDelete && (
                   <button onClick={() => setEditingPOItems(po)}
                     className="flex items-center gap-2 px-4 py-2 glass-card text-xs font-medium cursor-pointer">
                     <Pencil className="w-3.5 h-3.5" /> Edit Items

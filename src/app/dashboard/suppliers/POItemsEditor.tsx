@@ -10,6 +10,10 @@ import { Loader2, Plus, Search, Trash2, X, Pencil } from "lucide-react";
 
 interface DraftItem {
   key: string;
+  // The order line this already is (left out for one added here).
+  itemId?: string;
+  // Already received: the line stays, with at least this many.
+  received: number;
   productId: string;
   name: string;
   description: string;
@@ -17,7 +21,7 @@ interface DraftItem {
   unitCost: number;
 }
 
-/** Corrects the lines on a purchase order, while nothing has been received. */
+/** Corrects the lines on a purchase order, before or after stock has come in. */
 export function POItemsEditor({
   order,
   onClose,
@@ -31,6 +35,8 @@ export function POItemsEditor({
   const [items, setItems] = useState<DraftItem[]>(
     order.items.map((i) => ({
       key: i.id,
+      itemId: i.id,
+      received: i.received,
       productId: i.productId,
       name: i.productName,
       description: i.description,
@@ -79,8 +85,8 @@ export function POItemsEditor({
       order.id,
       items.map((i) =>
         i.productId
-          ? { productId: i.productId, description: i.description, quantity: i.quantity, unitCost: i.unitCost }
-          : { name: i.name.trim(), description: i.description, quantity: i.quantity, unitCost: i.unitCost }
+          ? { id: i.itemId, productId: i.productId, description: i.description, quantity: i.quantity, unitCost: i.unitCost }
+          : { id: i.itemId, name: i.name.trim(), description: i.description, quantity: i.quantity, unitCost: i.unitCost }
       )
     );
     setSaving(false);
@@ -100,7 +106,9 @@ export function POItemsEditor({
               <Pencil className="w-4 h-4 text-primary" /> Edit items — {order.poNumber}
             </h3>
             <p className="text-xs text-muted-foreground mt-0.5">
-              {order.supplierName} · nothing received yet, so these lines can still be changed.
+              {order.items.some((i) => i.received > 0)
+                ? `${order.supplierName} · lines with stock received stay on the order, with at least what's come in.`
+                : `${order.supplierName} · nothing received yet.`}
             </p>
           </div>
           <button onClick={onClose} className="cursor-pointer"><X className="w-5 h-5" /></button>
@@ -121,15 +129,20 @@ export function POItemsEditor({
                     placeholder="Details (optional)" className="w-full mt-1.5 px-2.5 py-1.5 glass-input text-[11px]" />
                 </div>
                 <button onClick={() => setItems((prev) => prev.filter((i) => i.key !== item.key))}
-                  title="Remove this line" className="p-1.5 rounded-lg hover:bg-surface-hover cursor-pointer flex-shrink-0">
+                  disabled={item.received > 0}
+                  title={item.received > 0 ? "Stock has been received against this line, so it stays" : "Remove this line"}
+                  className="p-1.5 rounded-lg hover:bg-surface-hover cursor-pointer flex-shrink-0 disabled:opacity-30 disabled:cursor-not-allowed">
                   <Trash2 className="w-3.5 h-3.5 text-destructive" />
                 </button>
               </div>
+              {item.received > 0 && (
+                <p className="text-[10px] text-warning mt-1.5">{`${item.received} received — this line stays, with at least ${item.received}.`}</p>
+              )}
               <div className="grid grid-cols-3 gap-2 mt-2">
                 <div>
                   <label className="text-[10px] text-muted-foreground block mb-1">Quantity</label>
-                  <input type="number" min={1} value={item.quantity}
-                    onChange={(e) => setItem(item.key, { quantity: Math.max(1, Math.floor(Number(e.target.value) || 1)) })}
+                  <input type="number" min={Math.max(1, item.received)} value={item.quantity}
+                    onChange={(e) => setItem(item.key, { quantity: Math.max(1, item.received, Math.floor(Number(e.target.value) || 1)) })}
                     className="w-full px-2 py-1.5 glass-input text-xs" />
                 </div>
                 <div>
@@ -159,7 +172,7 @@ export function POItemsEditor({
               onClick={() => {
                 manualCounter.current += 1;
                 setItems((prev) => [...prev, {
-                  key: `manual-${manualCounter.current}-${Date.now()}`,
+                  key: `manual-${manualCounter.current}-${Date.now()}`, received: 0,
                   productId: "", name: "", description: "", quantity: 1, unitCost: 0,
                 }]);
               }}
@@ -179,7 +192,7 @@ export function POItemsEditor({
                   <button key={hit.id}
                     onClick={() => {
                       setItems((prev) => [...prev, {
-                        key: `new-${hit.id}-${Date.now()}`, productId: hit.id, name: hit.label,
+                        key: `new-${hit.id}-${Date.now()}`, received: 0, productId: hit.id, name: hit.label,
                         description: "", quantity: 1, unitCost: 0,
                       }]);
                       setSearch("");

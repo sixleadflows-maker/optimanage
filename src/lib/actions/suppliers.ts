@@ -64,6 +64,8 @@ export async function deletePurchaseOrder(id: string) {
 }
 
 export interface POItemInput {
+  // Correcting an order: the line this already is, so it's changed in place.
+  id?: string;
   // Left out for an item that isn't in the inventory yet.
   productId?: string;
   name?: string;
@@ -228,8 +230,10 @@ export async function receiveStock(poId: string, receipts: ReceiveInput[]) {
 }
 
 /**
- * Replaces the lines on a purchase order. Only while nothing has been received
- * against it — after that the order is part of how the shelf count was reached.
+ * Corrects the lines on a purchase order, before or after stock has come in.
+ * Lines are changed in place. One with stock already received against it
+ * stays on the order, as the same item, with at least that many ordered --
+ * those units are already on the shelf and in the stock count.
  */
 export async function updatePurchaseOrderItems(poId: string, items: POItemInput[]) {
   const session = await requireAuth();
@@ -237,10 +241,26 @@ export async function updatePurchaseOrderItems(poId: string, items: POItemInput[
 
   const po = await db.purchaseOrder.findUnique({ where: { id: poId }, include: { items: true } });
   if (!po) return { ok: false as const, error: "This purchase order has been deleted" };
-  if (po.items.some((i) => i.received > 0)) {
-    return { ok: false as const, error: `${po.poNumber} has stock received against it, so its items can't be changed` };
-  }
   if (items.length === 0) return { ok: false as const, error: "A purchase order needs at least one item" };
+
+  const existingById = new Map(po.items.map((i) => [i.id, i]));
+  const keptIds = new Set<string>();
+  const lineIdFor = items.map((i) => {
+    if (!i.id || !existingById.has(i.id) || keptIds.has(i.id)) return null;
+    keptIds.add(i.id);
+    return i.id;
+  });
+  for (const line of po.items) {
+    if (line.received <= 0) continue;
+    const next = items[lineIdFor.indexOf(line.id)];
+    if (!next) return { ok: false as const, error: `${line.productName} has ${line.received} received already, so it stays on the order` };
+    if ((next.productId || null) !== (line.productId || null)) {
+      return { ok: false as const, error: `${line.productName} has stock received already, so it can't be swapped for another item` };
+    }
+    if (Math.floor(next.quantity) < line.received) {
+      return { ok: false as const, error: `${line.productName} can't go below the ${line.received} already received` };
+    }
+  }
 
   const productIds = items.flatMap((i) => (i.productId ? [i.productId] : []));
   const products = await db.product.findMany({ where: { id: { in: productIds } }, select: { id: true, brand: true, name: true } });
@@ -256,16 +276,28 @@ export async function updatePurchaseOrderItems(poId: string, items: POItemInput[
       quantity,
       unitCost,
       total: quantity * unitCost,
-      received: 0,
     };
   });
   if (lines.some((l) => !l.productName)) return { ok: false as const, error: "Give every typed-in item a name" };
 
+  // Where the order stands once quantities change: ordering fewer can finish it.
+  const receivedFor = (idx: number) => existingById.get(lineIdFor[idx] ?? "")?.received ?? 0;
+  const allReceived = lines.every((l, idx) => receivedFor(idx) >= l.quantity);
+  const anyReceived = lines.some((_, idx) => receivedFor(idx) > 0);
+
   await db.$transaction(async (tx) => {
-    await tx.purchaseOrderItem.deleteMany({ where: { orderId: poId } });
+    await tx.purchaseOrderItem.deleteMany({ where: { orderId: poId, id: { notIn: [...keptIds] } } });
+    for (const [idx, line] of lines.entries()) {
+      const id = lineIdFor[idx];
+      if (id) await tx.purchaseOrderItem.update({ where: { id }, data: line });
+      else await tx.purchaseOrderItem.create({ data: { ...line, orderId: poId, received: 0 } });
+    }
     await tx.purchaseOrder.update({
       where: { id: poId },
-      data: { total: lines.reduce((sum, l) => sum + l.total, 0), items: { create: lines } },
+      data: {
+        total: lines.reduce((sum, l) => sum + l.total, 0),
+        ...(anyReceived ? { status: allReceived ? ("RECEIVED" as const) : ("PARTIAL" as const) } : {}),
+      },
     });
   });
 

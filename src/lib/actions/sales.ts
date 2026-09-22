@@ -14,6 +14,8 @@ import {
 import { trashInvoice, TrashError } from "@/lib/trash/snapshots";
 
 export interface CartItemInput {
+  // Correcting an invoice: the line this already is, so it's changed in place.
+  id?: string;
   // Left out for an item typed in at the till that isn't in the inventory.
   productId?: string;
   name?: string;

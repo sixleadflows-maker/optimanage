@@ -139,6 +139,10 @@ export function CollectPaymentModal({
 
 interface EditLine {
   key: string;
+  // The invoice line this already is (left out for one added here).
+  saleItemId?: string;
+  // Units returned against it: the line stays, with at least this many.
+  returned: number;
   productId: string;
   name: string;
   description: string;
@@ -166,6 +170,8 @@ export function EditInvoiceModal({
   const [lines, setLines] = useState<EditLine[]>(
     sale.items.map((it) => ({
       key: it.id,
+      saleItemId: it.id,
+      returned: it.returnedQuantity,
       productId: it.productId,
       name: it.productName,
       description: it.description,
@@ -236,7 +242,7 @@ export function EditInvoiceModal({
   const addProduct = (hit: ProductSearchHit) => {
     setLines((prev) => [
       ...prev,
-      { key: `new-${hit.id}-${Date.now()}`, productId: hit.id, name: hit.label, description: "", quantity: 1, unitPrice: hit.salePrice, discount: 0 },
+      { key: `new-${hit.id}-${Date.now()}`, returned: 0, productId: hit.id, name: hit.label, description: "", quantity: 1, unitPrice: hit.salePrice, discount: 0 },
     ]);
     setSearch("");
     setHits([]);
@@ -246,7 +252,7 @@ export function EditInvoiceModal({
     manualCounter.current += 1;
     setLines((prev) => [
       ...prev,
-      { key: `manual-${manualCounter.current}-${Date.now()}`, productId: "", name: "", description: "", quantity: 1, unitPrice: 0, discount: 0 },
+      { key: `manual-${manualCounter.current}-${Date.now()}`, returned: 0, productId: "", name: "", description: "", quantity: 1, unitPrice: 0, discount: 0 },
     ]);
   };
 
@@ -272,8 +278,8 @@ export function EditInvoiceModal({
       receivedById: billedBy || undefined,
       items: lines.map((l) =>
         l.productId
-          ? { productId: l.productId, description: l.description, quantity: l.quantity, unitPrice: l.unitPrice, discount: l.discount }
-          : { name: l.name.trim(), description: l.description, quantity: l.quantity, unitPrice: l.unitPrice, discount: l.discount }
+          ? { id: l.saleItemId, productId: l.productId, description: l.description, quantity: l.quantity, unitPrice: l.unitPrice, discount: l.discount }
+          : { id: l.saleItemId, name: l.name.trim(), description: l.description, quantity: l.quantity, unitPrice: l.unitPrice, discount: l.discount }
       ),
       invoiceDiscount,
       // Keep the catalogue lens tied to the invoice only while its line is still on it.
@@ -403,16 +409,23 @@ export function EditInvoiceModal({
                 </div>
                 <button
                   onClick={() => setLines((prev) => prev.filter((l) => l.key !== line.key))}
-                  title="Remove this line" className="p-1.5 rounded-lg hover:bg-surface-hover cursor-pointer flex-shrink-0"
+                  disabled={line.returned > 0}
+                  title={line.returned > 0 ? "Returned items stay on the invoice — undo the return to take this off" : "Remove this line"}
+                  className="p-1.5 rounded-lg hover:bg-surface-hover cursor-pointer flex-shrink-0 disabled:opacity-30 disabled:cursor-not-allowed"
                 >
                   <Trash2 className="w-3.5 h-3.5 text-destructive" />
                 </button>
               </div>
+              {line.returned > 0 && (
+                <p className="text-[10px] text-warning mt-1.5">
+                  {`${line.returned} returned — this line stays, with at least ${line.returned}.`}
+                </p>
+              )}
               <div className="grid grid-cols-4 gap-2 mt-2">
                 <div>
                   <label className="text-[10px] text-muted-foreground block mb-1">Qty</label>
-                  <input type="number" min={1} value={line.quantity}
-                    onChange={(e) => setLine(line.key, { quantity: Math.max(1, Number(e.target.value)) })}
+                  <input type="number" min={Math.max(1, line.returned)} value={line.quantity}
+                    onChange={(e) => setLine(line.key, { quantity: Math.max(1, line.returned, Number(e.target.value)) })}
                     className="w-full px-2 py-1.5 glass-input text-xs" />
                 </div>
                 <div>

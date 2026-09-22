@@ -15,6 +15,9 @@ export interface SaleCoreItem {
   quantity: number;
   unitPrice: number;
   discount: number;
+  // An invoice being corrected: the line this already is, so it's changed in
+  // place. A return points at the line it came back against.
+  id?: string;
 }
 
 export interface SalePrescriptionInput extends Partial<RxTextColumns> {
@@ -25,8 +28,9 @@ export interface SalePrescriptionInput extends Partial<RxTextColumns> {
   // Whose eyes, when one slip carries several: a family member's name, or
   // "distance" / "reading".
   label?: string;
-  // A bill corrected from the till: the record already holding this one on
-  // the invoice, so saving again changes it instead of adding another.
+  // The record this one already is -- saved to the customer's record from the
+  // till, or already on the invoice being corrected. Saving changes that
+  // record to the final numbers instead of adding another.
   id?: string;
 }
 
@@ -345,25 +349,37 @@ export async function persistSale(input: PersistSaleInput, meta: PersistSaleMeta
       });
     }
 
-    // Already saved from the till before the sale was finished: attach it.
-    const linked = input.existingPrescriptionId && input.customerId
-      ? await tx.prescription.updateMany({
-          where: { id: input.existingPrescriptionId, customerId: input.customerId, saleId: null },
-          data: { saleId: created.id },
-        })
-      : { count: 0 };
-
-    // The attached one (linked above) covers the first prescription when it was
-    // saved from the till already; the rest are recorded here. Their ids go
-    // back to the till in the same order, so correcting the bill afterwards
-    // changes these records instead of adding more.
+    // One record per prescription on the slip, never a second copy. One saved
+    // to the customer's record from the till while the sale was rung up becomes
+    // the final one, with whatever was changed since; the customer's earlier
+    // prescription left untouched is attached as it is. Their ids go back to
+    // the till in order, so correcting the bill later changes these records.
     prescriptionIds.length = 0;
-    if (linked.count > 0) prescriptionIds.push(input.existingPrescriptionId!);
-    const toCreate = (input.prescriptions ?? []).slice(linked.count > 0 ? 1 : 0);
     if (input.customerId) {
-      for (const p of toCreate) {
+      const customerId = input.customerId;
+      for (const [idx, p] of (input.prescriptions ?? []).entries()) {
+        if (p.id) {
+          const saved = await tx.prescription.updateMany({
+            where: { id: p.id, customerId, saleId: null },
+            data: { ...prescriptionFields(p), saleId: created.id },
+          });
+          if (saved.count) {
+            prescriptionIds.push(p.id);
+            continue;
+          }
+        }
+        if (idx === 0 && input.existingPrescriptionId) {
+          const linked = await tx.prescription.updateMany({
+            where: { id: input.existingPrescriptionId, customerId, saleId: null },
+            data: { saleId: created.id },
+          });
+          if (linked.count) {
+            prescriptionIds.push(input.existingPrescriptionId);
+            continue;
+          }
+        }
         const rx = await tx.prescription.create({
-          data: { customerId: input.customerId, saleId: created.id, date: saleDate, ...prescriptionFields(p) },
+          data: { customerId, saleId: created.id, date: saleDate, ...prescriptionFields(p) },
           select: { id: true },
         });
         prescriptionIds.push(rx.id);
@@ -447,14 +463,9 @@ function prescriptionFields(p: SalePrescriptionInput) {
   };
 }
 
-function samePrescription(row: ReturnType<typeof prescriptionFields>, p: SalePrescriptionInput) {
-  const next = prescriptionFields(p);
-  return (Object.keys(next) as (keyof typeof next)[]).every((k) => row[k] === next[k]);
-}
-
 // A record made within this long before the invoice was made for this visit
 // (saved from the till moments before the sale was finished). Anything older
-// is the customer's history from an earlier visit and is never rewritten.
+// is the customer's prescription from an earlier visit.
 const SAME_VISIT_MS = 60 * 60_000;
 
 export interface ReviseSaleInput {
@@ -494,13 +505,33 @@ export interface ReviseSaleInput {
 export async function reviseSale(saleId: string, input: ReviseSaleInput) {
   const sale = await db.sale.findUnique({
     where: { id: saleId },
-    include: { items: true, returns: { select: { returnNo: true } } },
+    include: { items: true, returns: { select: { returnNo: true, items: { select: { saleItemId: true } } } } },
   });
   if (!sale) throw new SaleError("Invoice not found");
-  if (sale.returns.length > 0) {
-    throw new SaleError(
-      `This invoice has a return against it (${sale.returns[0].returnNo}). Undo that return before changing the invoice.`
-    );
+
+  // Lines are matched to the ones already on the invoice by id. One with units
+  // returned against it stays on the invoice, as the same item, with at least
+  // that many -- the return is its own record of what came back.
+  const existingById = new Map(sale.items.map((i) => [i.id, i]));
+  const lineIds = new Set<string>();
+  const lineIdFor = input.items.map((i) => {
+    if (!i.id || !existingById.has(i.id) || lineIds.has(i.id)) return null;
+    lineIds.add(i.id);
+    return i.id;
+  });
+  for (const item of sale.items) {
+    if (item.returnedQuantity <= 0) continue;
+    const returnNo = sale.returns.find((r) => r.items.some((ri) => ri.saleItemId === item.id))?.returnNo ?? "a return";
+    const next = input.items[lineIdFor.indexOf(item.id)];
+    if (!next) {
+      throw new SaleError(`${item.productName} was returned (${returnNo}), so it stays on the invoice — undo the return to take it off`);
+    }
+    if ((next.productId || null) !== (item.productId || null)) {
+      throw new SaleError(`${item.productName} was returned (${returnNo}), so it can't be swapped for another item`);
+    }
+    if (next.quantity < item.returnedQuantity) {
+      throw new SaleError(`${item.productName} can't go below ${item.returnedQuantity} — that many were returned (${returnNo})`);
+    }
   }
 
   const date = input.date ?? sale.date;
@@ -567,7 +598,13 @@ export async function reviseSale(saleId: string, input: ReviseSaleInput) {
       }
     }
 
-    await tx.saleItem.deleteMany({ where: { saleId } });
+    // Changed in place rather than replaced, so returns keep their lines.
+    await tx.saleItem.deleteMany({ where: { saleId, id: { notIn: [...lineIds] } } });
+    for (const [idx, line] of priced.saleItems.entries()) {
+      const id = lineIdFor[idx];
+      if (id) await tx.saleItem.update({ where: { id }, data: line });
+      else await tx.saleItem.create({ data: { ...line, saleId } });
+    }
     await tx.sale.update({
       where: { id: saleId },
       data: {
@@ -593,7 +630,6 @@ export async function reviseSale(saleId: string, input: ReviseSaleInput) {
         fittingCharges: priced.fittingCharges,
         totalCost: priced.totalCost,
         profit: priced.profit,
-        items: { create: priced.saleItems },
       },
     });
 
@@ -648,11 +684,11 @@ export async function reviseSale(saleId: string, input: ReviseSaleInput) {
 }
 
 /**
- * Makes the prescriptions on a corrected bill match what the till now shows,
- * changing the records already on it rather than adding copies. A record made
- * for this visit is changed in place (or trashed if it came off the bill); one
- * from an earlier visit that was only attached is never rewritten — a changed
- * version is saved as a new record and the old one just comes off the bill.
+ * Makes the prescriptions on a corrected bill match what the till now shows.
+ * Every record already on the bill is changed in place to the final numbers --
+ * an edit never leaves an older version behind. One taken off the bill goes to
+ * the trash if it was made for this visit; the customer's earlier prescription
+ * that was only attached just comes off the bill and stays on their record.
  */
 async function replaceBillPrescriptions(
   tx: Prisma.TransactionClient,
@@ -673,24 +709,26 @@ async function replaceBillPrescriptions(
   for (const p of bill.prescriptions) {
     const customerId = bill.customerId!;
     const row = p.id ? onBill.find((r) => r.id === p.id && !kept.has(r.id)) : undefined;
-    if (row && thisVisit(row)) {
-      await tx.prescription.update({ where: { id: row.id }, data: { customerId, date: bill.date, ...prescriptionFields(p) } });
-      kept.add(row.id);
-      ids.push(row.id);
-      continue;
-    }
-    if (row && row.customerId === customerId && samePrescription(row, p)) {
+    // Only another customer's earlier prescription (left from before the bill
+    // was moved to this customer) isn't theirs to change -- it comes off below.
+    if (row && (thisVisit(row) || row.customerId === customerId)) {
+      await tx.prescription.update({
+        where: { id: row.id },
+        data: { customerId, ...(thisVisit(row) ? { date: bill.date } : {}), ...prescriptionFields(p) },
+      });
       kept.add(row.id);
       ids.push(row.id);
       continue;
     }
     // Saved to the customer's record from the till while the bill was being
-    // corrected: attach that record instead of storing the numbers twice.
+    // corrected: that record becomes the final one.
     if (!row && p.id) {
-      const saved = await tx.prescription.findFirst({ where: { id: p.id, customerId, saleId: null } });
-      if (saved && samePrescription(saved, p)) {
-        await tx.prescription.update({ where: { id: saved.id }, data: { saleId: bill.saleId } });
-        ids.push(saved.id);
+      const saved = await tx.prescription.updateMany({
+        where: { id: p.id, customerId, saleId: null },
+        data: { ...prescriptionFields(p), saleId: bill.saleId },
+      });
+      if (saved.count) {
+        ids.push(p.id);
         continue;
       }
     }
