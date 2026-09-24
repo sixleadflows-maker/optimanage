@@ -138,6 +138,9 @@ export interface PurchaseOrder {
   bankName: string;
   paymentDate: string;
   amountPaid: number;
+  // A cheque only comes off the balance once it has cleared.
+  chequeCleared: boolean;
+  chequeClearedDate: string;
 }
 
 export interface LabOrder {

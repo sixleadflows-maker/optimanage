@@ -88,6 +88,9 @@ export interface PODetailsInput {
   bankName: string;
   paymentDate: string;
   amountPaid: number;
+  // A cheque handed to the supplier only comes off the balance once it clears.
+  chequeCleared: boolean;
+  chequeClearedDate: string;
 }
 
 export interface CreatePOInput extends PODetailsInput {
@@ -110,7 +113,31 @@ function detailsData(input: PODetailsInput) {
     bankName: input.bankName.trim(),
     paymentDate: toDate(input.paymentDate),
     amountPaid: Math.max(0, Number(input.amountPaid) || 0),
+    // Only a cheque can be waiting to clear; anything else is money gone already.
+    chequeCleared: input.paymentMethod === "Cheque" ? !!input.chequeCleared : false,
+    chequeClearedDate: input.paymentMethod === "Cheque" && input.chequeCleared ? toDate(input.chequeClearedDate) : null,
   };
+}
+
+/**
+ * Ticks a cheque off as cleared (or back to waiting) from the order itself,
+ * which is the whole job most days — the money has left the bank, so it now
+ * comes off what's owed to the supplier.
+ */
+export async function setChequeCleared(poId: string, cleared: boolean, clearedDate?: string) {
+  const session = await requireAuth();
+  if (session.user.role === "CASHIER") return { ok: false as const, error: "Only managers and owners can change a purchase order" };
+
+  const po = await db.purchaseOrder.findUnique({ where: { id: poId }, select: { paymentMethod: true } });
+  if (!po) return { ok: false as const, error: "This purchase order no longer exists" };
+  if (po.paymentMethod !== "Cheque") return { ok: false as const, error: "This order wasn't paid by cheque" };
+
+  await db.purchaseOrder.update({
+    where: { id: poId },
+    data: { chequeCleared: cleared, chequeClearedDate: cleared ? toDate(clearedDate || "") ?? new Date() : null },
+  });
+  revalidatePath("/dashboard/suppliers");
+  return { ok: true as const };
 }
 
 export async function createPurchaseOrder(input: CreatePOInput) {

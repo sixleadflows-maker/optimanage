@@ -82,12 +82,12 @@ export const PURCHASE_PAYMENT_METHODS = [
 
 /**
  * What's still owed to the supplier on a purchase order. A payment by cheque
- * is recorded but not taken off the balance (the owner's rule); cash and the
- * other methods are.
+ * is recorded but only comes off the balance once the cheque has cleared (the
+ * owner's rule); cash and the other methods come off straight away.
  */
-export function poBalanceDue(po: { total: number; amountPaid: number; paymentMethod: string }) {
-  const counted = po.paymentMethod === "Cheque" ? 0 : po.amountPaid || 0;
-  return Math.max(0, po.total - counted);
+export function poBalanceDue(po: { total: number; amountPaid: number; paymentMethod: string; chequeCleared?: boolean }) {
+  const pendingCheque = po.paymentMethod === "Cheque" && !po.chequeCleared;
+  return Math.max(0, po.total - (pendingCheque ? 0 : po.amountPaid || 0));
 }
 
 export const BRAND_TAGS = ["Original", "Copy", "Branded", "Unbranded"] as const;

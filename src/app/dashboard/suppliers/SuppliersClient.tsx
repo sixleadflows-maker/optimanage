@@ -9,7 +9,7 @@ import { useApp } from "@/lib/context";
 import { PURCHASE_TYPES, PURCHASE_PAYMENT_METHODS, poBalanceDue } from "@/lib/constants";
 import {
   createSupplier, updateSupplier, createPurchaseOrder, updatePurchaseOrderDetails, receiveStock,
-  deleteSupplier, deletePurchaseOrder,
+  deleteSupplier, deletePurchaseOrder, setChequeCleared,
   type PODetailsInput,
 } from "@/lib/actions/suppliers";
 import { Truck, CheckCircle, FileText, Plus, X, Loader2, Search, Trash2, Pencil, PenLine, Wallet, ClipboardList, Building2 } from "lucide-react";
@@ -24,6 +24,7 @@ const emptyDetails = (): PODetailsInput => ({
   supplierInvoiceNo: "", date: todayStr(), expectedDate: "", notes: "",
   purchaseType: "Cash", purchaseTypeNote: "",
   paymentMethod: "Cash", paymentReference: "", bankName: "", paymentDate: "", amountPaid: 0,
+  chequeCleared: false, chequeClearedDate: "",
 });
 
 const detailsFromPO = (po: PurchaseOrder): PODetailsInput => ({
@@ -31,6 +32,7 @@ const detailsFromPO = (po: PurchaseOrder): PODetailsInput => ({
   purchaseType: po.purchaseType || "Cash", purchaseTypeNote: po.purchaseTypeNote,
   paymentMethod: po.paymentMethod, paymentReference: po.paymentReference, bankName: po.bankName,
   paymentDate: po.paymentDate, amountPaid: po.amountPaid,
+  chequeCleared: po.chequeCleared, chequeClearedDate: po.chequeClearedDate,
 });
 
 interface DraftPOItem {
@@ -64,7 +66,9 @@ function PODetailsFields({ details, onChange, total }: {
   // Functional updates, so two quick changes in a row can't overwrite each other.
   const set = <K extends keyof PODetailsInput>(key: K, value: PODetailsInput[K]) =>
     onChange((prev) => ({ ...prev, [key]: value }));
-  const balance = poBalanceDue({ total, amountPaid: details.amountPaid, paymentMethod: details.paymentMethod });
+  const balance = poBalanceDue({
+    total, amountPaid: details.amountPaid, paymentMethod: details.paymentMethod, chequeCleared: details.chequeCleared,
+  });
   const byCheque = details.paymentMethod === "Cheque";
   const otherMethod = !!details.paymentMethod && details.paymentMethod !== "Cash" && !byCheque;
 
@@ -136,7 +140,32 @@ function PODetailsFields({ details, onChange, total }: {
             </select>
           )}
           {byCheque && (
-            <p className="text-[11px] text-warning mt-1.5">A cheque is recorded here but not taken off the balance due.</p>
+            <div className="mt-2 p-2.5 rounded-xl border border-border space-y-2">
+              <label className="flex items-start gap-2 text-[11px] cursor-pointer">
+                <input type="checkbox" checked={details.chequeCleared}
+                  onChange={(e) => onChange((prev) => ({
+                    ...prev,
+                    chequeCleared: e.target.checked,
+                    chequeClearedDate: e.target.checked ? prev.chequeClearedDate || todayStr() : "",
+                  }))}
+                  className="mt-0.5 rounded" />
+                <span>
+                  <span className="font-medium">Cheque has cleared</span>
+                  <span className="block text-muted-foreground">
+                    {details.chequeCleared
+                      ? "The money has left the bank, so it comes off the balance due."
+                      : "Until this is ticked the cheque is recorded but not taken off the balance due."}
+                  </span>
+                </span>
+              </label>
+              {details.chequeCleared && (
+                <div>
+                  <label className="text-[11px] font-medium text-muted-foreground mb-1 block">Cleared On</label>
+                  <input type="date" value={details.chequeClearedDate} onChange={(e) => set("chequeClearedDate", e.target.value)}
+                    className="w-full px-3 py-2 glass-input text-sm" />
+                </div>
+              )}
+            </div>
           )}
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -171,7 +200,7 @@ function PODetailsFields({ details, onChange, total }: {
           <div className="flex justify-between text-xs pt-2 border-t border-border">
             <span className="text-muted-foreground">
               {byCheque
-                ? `Order total ${formatCurrency(total)} · Cheque ${formatCurrency(details.amountPaid || 0)} (not deducted)`
+                ? `Order total ${formatCurrency(total)} · Cheque ${formatCurrency(details.amountPaid || 0)}${details.chequeCleared ? " (cleared)" : " (not deducted)"}`
                 : `Order total ${formatCurrency(total)} · Paid ${formatCurrency(details.amountPaid || 0)}`}
             </span>
             <span className={`font-semibold ${balance > 0 ? "text-destructive" : "text-success"}`}>
@@ -336,6 +365,26 @@ export function SuppliersClient({
   };
 
   // Receive stock
+  // Ticking a cheque off from the order card itself.
+  const [clearingCheque, setClearingCheque] = useState<string | null>(null);
+
+  const markCheque = async (po: PurchaseOrder, cleared: boolean) => {
+    setClearingCheque(po.id);
+    try {
+      const res = await setChequeCleared(po.id, cleared);
+      if (!res.ok) {
+        showToast(res.error, "error");
+        return;
+      }
+      showToast(cleared ? `${po.poNumber} — cheque cleared, taken off the balance` : `${po.poNumber} — cheque back to waiting to clear`, "success");
+      router.refresh();
+    } catch {
+      showToast("Could not update the cheque — check the connection and try again", "error");
+    } finally {
+      setClearingCheque(null);
+    }
+  };
+
   const [receivingPO, setReceivingPO] = useState<PurchaseOrder | null>(null);
   const [receiveQtys, setReceiveQtys] = useState<Record<string, number>>({});
   const [savingReceive, setSavingReceive] = useState(false);
@@ -474,7 +523,11 @@ export function SuppliersClient({
                 <div>
                   <p className="text-muted-foreground">{po.paymentMethod === "Cheque" ? "Cheque" : "Paid"}</p>
                   <p className="font-medium">{formatCurrency(po.amountPaid)}{po.paymentDate ? ` · ${formatDate(po.paymentDate)}` : ""}</p>
-                  {po.paymentMethod === "Cheque" && po.amountPaid > 0 && <p className="text-warning">Not taken off the balance</p>}
+                  {po.paymentMethod === "Cheque" && po.amountPaid > 0 && (
+                    po.chequeCleared
+                      ? <p className="text-success">{`Cleared${po.chequeClearedDate ? ` ${formatDate(po.chequeClearedDate)}` : ""}`}</p>
+                      : <p className="text-warning">Not taken off the balance</p>
+                  )}
                 </div>
                 {(po.paymentReference || po.bankName) && (
                   <div className="col-span-2 sm:col-span-4">
@@ -534,6 +587,16 @@ export function SuppliersClient({
                   className="flex items-center gap-2 px-4 py-2 glass-card text-xs font-medium cursor-pointer">
                   <Pencil className="w-3.5 h-3.5" /> Edit Details &amp; Payment
                 </button>
+                {canDelete && po.paymentMethod === "Cheque" && po.amountPaid > 0 && (
+                  <button onClick={() => markCheque(po, !po.chequeCleared)} disabled={clearingCheque === po.id}
+                    title={po.chequeCleared ? "Put it back to waiting to clear" : "The cheque has cleared the bank"}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-medium transition-colors cursor-pointer disabled:opacity-60 ${
+                      po.chequeCleared ? "glass-card" : "bg-success/10 text-success hover:bg-success/20"
+                    }`}>
+                    {clearingCheque === po.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle className="w-3.5 h-3.5" />}
+                    {po.chequeCleared ? "Cheque not cleared" : "Cheque cleared"}
+                  </button>
+                )}
                 {canDelete && (
                   <button onClick={() => setEditingPOItems(po)}
                     className="flex items-center gap-2 px-4 py-2 glass-card text-xs font-medium cursor-pointer">

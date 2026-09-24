@@ -383,6 +383,10 @@ model PurchaseOrder {
   bankName          String         @default("")
   paymentDate       DateTime?
   amountPaid        Float          @default(0)
+  // A cheque is recorded when it's handed over but only comes off the balance
+  // once it has cleared the bank.
+  chequeCleared     Boolean        @default(false)
+  chequeClearedDate DateTime?
 
   createdAt    DateTime            @default(now())
 

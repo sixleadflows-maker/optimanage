@@ -336,6 +336,8 @@ export async function getPurchaseOrders(): Promise<PurchaseOrder[]> {
     bankName: po.bankName,
     paymentDate: iso(po.paymentDate),
     amountPaid: po.amountPaid,
+    chequeCleared: po.chequeCleared,
+    chequeClearedDate: iso(po.chequeClearedDate),
   }));
 }
 
