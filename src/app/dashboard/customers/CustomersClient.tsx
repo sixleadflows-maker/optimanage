@@ -87,7 +87,7 @@ export function CustomersClient({ customers, canDelete }: { customers: CustomerV
       <div className="glass-card p-4">
         <div className="relative mb-4">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-          <input type="text" placeholder="Search by name, phone, or email..." value={search}
+          <input type="text" placeholder="Search by serial, name, phone or email..." value={search}
             onChange={(e) => setSearch(e.target.value)} className="w-full pl-10 pr-4 py-2 glass-input text-sm" />
         </div>
 

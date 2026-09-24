@@ -305,6 +305,7 @@ export function SalesClient({
         s.invoiceNo.toLowerCase().includes(q) ||
         (s.offlineRef && s.offlineRef.toLowerCase().includes(q)) ||
         s.customerPhone.includes(q) ||
+        (s.customerSerial && s.customerSerial.toLowerCase().includes(q)) ||
         s.items.some((i) => i.productName.toLowerCase().includes(q) || i.description.toLowerCase().includes(q));
       const matchesStatus = statusFilter === "All" || s.paymentStatus === statusFilter;
       const matchesSource = sourceFilter === "All" || s.source === sourceFilter;
@@ -390,7 +391,7 @@ export function SalesClient({
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <input
               type="text"
-              placeholder="Search invoice no., customer, phone or item..."
+              placeholder="Search invoice no., customer, serial, phone or item..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="w-full pl-10 pr-4 py-2 glass-input text-sm"

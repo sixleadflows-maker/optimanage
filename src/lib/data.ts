@@ -135,6 +135,8 @@ export type SaleView = Sale & {
   // Everything needed to reopen and reprint a past invoice exactly as it was billed.
   dateTime: string;
   customerPhone: string;
+  // The customer's own serial number, so an invoice can be found by it.
+  customerSerial: string;
   customLensName: string;
   customLensPrice: number;
   customLensQty: number;
@@ -197,6 +199,7 @@ function mapSale(s: SaleRow): SaleView {
     customerId: s.customerId ?? "",
     customerName: s.customer?.name ?? "Walk-in",
     customerPhone: s.customer?.phone ?? "",
+    customerSerial: s.customer?.serialNumber ?? "",
     items: s.items.map((it) => ({
       id: it.id,
       productId: it.productId ?? "",

@@ -5,9 +5,11 @@ import { SHOP_NAME } from "@/lib/constants";
 import { logout } from "@/lib/actions/auth";
 import { clearOfflinePages } from "@/components/layout/ServiceWorker";
 import { lookupProductByBarcode, type BarcodeLookupResult } from "@/lib/actions/products";
+import { searchCustomers, type CustomerSearchHit } from "@/lib/actions/customers";
+import Link from "next/link";
 import type { BranchView } from "@/lib/data";
 import { formatCurrency } from "@/lib/utils/format";
-import { Menu, Search, Moon, Sun, Wifi, WifiOff, ChevronDown, LogOut, Loader2 } from "lucide-react";
+import { Menu, Search, Moon, Sun, Wifi, WifiOff, ChevronDown, LogOut, Loader2, User } from "lucide-react";
 import { useState } from "react";
 
 interface TopbarUser {
@@ -29,15 +31,23 @@ export function Topbar({ user, branches }: { user: TopbarUser; branches: BranchV
 
   const [scanValue, setScanValue] = useState("");
   const [checking, setChecking] = useState(false);
-  const [lookupResult, setLookupResult] = useState<BarcodeLookupResult | "not-found" | null>(null);
+  const [lookupResult, setLookupResult] = useState<BarcodeLookupResult | "not-found" | "failed" | null>(null);
+  // The same box finds a customer by serial number, name or phone -- a serial
+  // written on a case or an old bill is enough to pull them up.
+  const [customerHits, setCustomerHits] = useState<CustomerSearchHit[]>([]);
 
   const checkStock = async () => {
-    const barcode = scanValue.trim();
-    if (!barcode) return;
+    const query = scanValue.trim();
+    if (!query) return;
     setChecking(true);
     try {
-      const result = await lookupProductByBarcode(barcode);
-      setLookupResult(result ?? "not-found");
+      const [product, customers] = await Promise.all([lookupProductByBarcode(query), searchCustomers(query)]);
+      setCustomerHits(customers);
+      setLookupResult(product ?? (customers.length ? null : "not-found"));
+    } catch {
+      // Signed out, or no connection -- say so rather than looking broken.
+      setCustomerHits([]);
+      setLookupResult("failed");
     } finally {
       setChecking(false);
     }
@@ -45,6 +55,7 @@ export function Topbar({ user, branches }: { user: TopbarUser; branches: BranchV
 
   const closeLookup = () => {
     setLookupResult(null);
+    setCustomerHits([]);
     setScanValue("");
   };
 
@@ -100,19 +111,42 @@ export function Topbar({ user, branches }: { user: TopbarUser; branches: BranchV
           )}
           <input
             type="text"
-            placeholder="Scan or type a barcode to check stock..."
+            placeholder="Scan a barcode, or search a customer by serial, name or phone..."
             value={scanValue}
             onChange={(e) => setScanValue(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") checkStock(); }}
             className="w-full pl-9 pr-4 py-2 glass-input text-sm"
           />
-          {lookupResult && (
+          {(lookupResult || customerHits.length > 0) && (
             <>
               <div className="fixed inset-0 z-10" onClick={closeLookup} />
-              <div className="absolute top-full left-0 right-0 mt-2 glass rounded-xl p-3 z-20 animate-fade-in">
-                {lookupResult === "not-found" ? (
-                  <p className="text-sm text-muted-foreground">No product found for barcode &quot;{scanValue}&quot;.</p>
-                ) : (
+              <div className="absolute top-full left-0 right-0 mt-2 glass rounded-xl p-3 z-20 animate-fade-in space-y-2">
+                {customerHits.length > 0 && (
+                  <div className="space-y-1">
+                    {customerHits.map((c) => (
+                      <Link key={c.id} href={`/dashboard/customers/${c.id}`} onClick={closeLookup}
+                        className="flex items-center justify-between gap-3 px-2 py-1.5 rounded-lg hover:bg-surface-hover">
+                        <span className="min-w-0">
+                          <span className="text-sm font-medium flex items-center gap-1.5">
+                            <User className="w-3.5 h-3.5 text-primary flex-shrink-0" /> {c.name}
+                          </span>
+                          <span className="block text-[11px] text-muted-foreground truncate">
+                            {[c.serialNumber && `Serial ${c.serialNumber}`, c.phone, c.prescriptionCount > 0 && `${c.prescriptionCount} prescription${c.prescriptionCount === 1 ? "" : "s"}`]
+                              .filter(Boolean).join(" · ")}
+                          </span>
+                        </span>
+                        <span className="text-[11px] text-muted-foreground flex-shrink-0">
+                          {c.visitCount} visit{c.visitCount === 1 ? "" : "s"}
+                        </span>
+                      </Link>
+                    ))}
+                  </div>
+                )}
+                {lookupResult === "failed" ? (
+                  <p className="text-sm text-muted-foreground">Couldn&apos;t search just now — check the connection, or sign in again, and try once more.</p>
+                ) : lookupResult === "not-found" ? (
+                  <p className="text-sm text-muted-foreground">Nothing found for &quot;{scanValue}&quot; — no product with that barcode and no customer by that serial, name or phone.</p>
+                ) : lookupResult && (
                   <div className="flex items-center justify-between gap-3">
                     <div className="min-w-0">
                       <p className="text-sm font-semibold truncate">{lookupResult.name}</p>

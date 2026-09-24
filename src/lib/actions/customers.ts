@@ -18,6 +18,54 @@ async function requireAuth() {
   if (!session?.user) throw new Error("Unauthorized");
 }
 
+export interface CustomerSearchHit {
+  id: string;
+  name: string;
+  phone: string;
+  serialNumber: string;
+  lastVisit: string;
+  visitCount: number;
+  totalSpend: number;
+  prescriptionCount: number;
+}
+
+/**
+ * Finds a customer from the search box at the top of every screen -- by serial
+ * number, name or phone, so a serial written on a case or an old bill is
+ * enough to pull the customer up.
+ */
+export async function searchCustomers(query: string): Promise<CustomerSearchHit[]> {
+  const session = await auth();
+  if (!session?.user) return [];
+  const q = query.trim();
+  if (q.length < 2) return [];
+
+  const rows = await db.customer.findMany({
+    where: {
+      active: true,
+      OR: [
+        { serialNumber: { contains: q, mode: "insensitive" } },
+        { name: { contains: q, mode: "insensitive" } },
+        { phone: { contains: q } },
+      ],
+    },
+    orderBy: { lastVisit: "desc" },
+    take: 6,
+    include: { _count: { select: { prescriptions: true } } },
+  });
+
+  return rows.map((c) => ({
+    id: c.id,
+    name: c.name,
+    phone: c.phone ?? "",
+    serialNumber: c.serialNumber,
+    lastVisit: c.lastVisit ? c.lastVisit.toISOString().slice(0, 10) : "",
+    visitCount: c.visitCount,
+    totalSpend: c.totalSpend,
+    prescriptionCount: c._count.prescriptions,
+  }));
+}
+
 export type CreateCustomerResult =
   | { ok: true; id: string }
   // `existing` is set when the phone number already belongs to a customer, so

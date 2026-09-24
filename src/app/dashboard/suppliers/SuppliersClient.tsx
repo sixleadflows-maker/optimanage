@@ -6,7 +6,7 @@ import type { Supplier, PurchaseOrder } from "@/lib/mock/types";
 import type { Product } from "@/lib/mock/types";
 import { formatCurrency, formatDate } from "@/lib/utils/format";
 import { useApp } from "@/lib/context";
-import { PURCHASE_TYPES, PURCHASE_PAYMENT_METHODS, poBalanceDue } from "@/lib/constants";
+import { PURCHASE_TYPES, PURCHASE_PAYMENT_METHODS, poBalanceDue, poPaymentState } from "@/lib/constants";
 import {
   createSupplier, updateSupplier, createPurchaseOrder, updatePurchaseOrderDetails, receiveStock,
   deleteSupplier, deletePurchaseOrder, setChequeCleared,
@@ -489,6 +489,7 @@ export function SuppliersClient({
           {purchaseOrders.map((po) => {
             const supplier = supplierById.get(po.supplierId);
             const balance = poBalanceDue(po);
+            const payment = poPaymentState(po);
             const purchaseType = po.purchaseType === "Other" && po.purchaseTypeNote ? `Other — ${po.purchaseTypeNote}` : po.purchaseType;
             return (
             <div key={po.id} className="glass-card p-5">
@@ -502,6 +503,7 @@ export function SuppliersClient({
                       po.status === "Partial" ? "chip-balance" : "bg-surface text-muted-foreground"
                     }`}>{po.status}</span>
                     {purchaseType && <span className="chip bg-primary/10 text-primary">{purchaseType}</span>}
+                    <span className={`chip ${payment.tone}`}>{payment.label}</span>
                   </h3>
                   <p className="text-xs text-muted-foreground mt-0.5">{po.supplierName} · {formatDate(po.date)}</p>
                   {supplier && (supplier.contact || supplier.phone) && (
@@ -522,7 +524,9 @@ export function SuppliersClient({
                 <div><p className="text-muted-foreground">Payment</p><p className="font-medium">{po.paymentMethod || "Not paid yet"}</p></div>
                 <div>
                   <p className="text-muted-foreground">{po.paymentMethod === "Cheque" ? "Cheque" : "Paid"}</p>
-                  <p className="font-medium">{formatCurrency(po.amountPaid)}{po.paymentDate ? ` · ${formatDate(po.paymentDate)}` : ""}</p>
+                  <p className="font-medium">
+                    {`${formatCurrency(po.amountPaid)} of ${formatCurrency(po.total)}`}{po.paymentDate ? ` · ${formatDate(po.paymentDate)}` : ""}
+                  </p>
                   {po.paymentMethod === "Cheque" && po.amountPaid > 0 && (
                     po.chequeCleared
                       ? <p className="text-success">{`Cleared${po.chequeClearedDate ? ` ${formatDate(po.chequeClearedDate)}` : ""}`}</p>

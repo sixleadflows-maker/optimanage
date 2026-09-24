@@ -90,6 +90,16 @@ export function poBalanceDue(po: { total: number; amountPaid: number; paymentMet
   return Math.max(0, po.total - (pendingCheque ? 0 : po.amountPaid || 0));
 }
 
+/** How an order stands on payment, for the chip on its card. */
+export function poPaymentState(po: { total: number; amountPaid: number; paymentMethod: string; chequeCleared?: boolean }) {
+  if (po.paymentMethod === "Cheque" && po.amountPaid > 0 && !po.chequeCleared) {
+    return { label: "Cheque pending", tone: "bg-warning/10 text-warning" };
+  }
+  if (!po.amountPaid) return { label: "Unpaid", tone: "bg-destructive/10 text-destructive" };
+  if (poBalanceDue(po) > 0) return { label: "Part paid", tone: "bg-warning/10 text-warning" };
+  return { label: "Paid", tone: "bg-success/10 text-success" };
+}
+
 export const BRAND_TAGS = ["Original", "Copy", "Branded", "Unbranded"] as const;
 
 export const DAMAGE_TYPES = [

@@ -11,7 +11,7 @@ import { RxPowerInput } from "@/components/ui/RxPowerInput";
 import { formatEyeValue, isPowerField, parseRxText, rxFieldText, rxFormTexts } from "@/lib/utils/rx";
 import { Eye, Save, Search, Loader2, Pencil, Trash2, X, EyeOff } from "lucide-react";
 
-interface RxCustomer { id: string; name: string; phone: string; }
+interface RxCustomer { id: string; name: string; phone: string; serialNumber: string; }
 
 const empty = {
   rightSph: "", rightCyl: "", rightAxis: "", rightPd: "", rightAdd: "",
@@ -79,22 +79,27 @@ export function PrescriptionsClient({
     }
   };
 
-  const phoneById = useMemo(() => new Map(customers.map((c) => [c.id, c.phone])), [customers]);
+  const customerById = useMemo(() => new Map(customers.map((c) => [c.id, c])), [customers]);
 
   const filteredCustomers = customerSearch
-    ? customers.filter((c) => c.name.toLowerCase().includes(customerSearch.toLowerCase()) || c.phone.includes(customerSearch)).slice(0, 5)
+    ? customers.filter((c) => {
+        const q = customerSearch.toLowerCase();
+        return c.name.toLowerCase().includes(q) || c.phone.includes(customerSearch) || c.serialNumber.toLowerCase().includes(q);
+      }).slice(0, 5)
     : [];
 
-  // Find a customer's prescription by name (or phone), newest first.
+  // Find a customer's prescription by name, serial number or phone, newest first.
   const shown = useMemo(() => {
     const q = listSearch.trim().toLowerCase();
     if (!q) return prescriptions;
     const digits = q.replace(/[^0-9]/g, "");
-    return prescriptions.filter((rx) =>
-      rx.customerName.toLowerCase().includes(q) ||
-      (digits.length >= 3 && (phoneById.get(rx.customerId) ?? "").replace(/[^0-9]/g, "").includes(digits))
-    );
-  }, [prescriptions, listSearch, phoneById]);
+    return prescriptions.filter((rx) => {
+      const c = customerById.get(rx.customerId);
+      return rx.customerName.toLowerCase().includes(q) ||
+        (!!c?.serialNumber && c.serialNumber.toLowerCase().includes(q)) ||
+        (digits.length >= 3 && (c?.phone ?? "").replace(/[^0-9]/g, "").includes(digits));
+    });
+  }, [prescriptions, listSearch, customerById]);
 
   const num = parseRxText;
   const values = () => ({
@@ -211,7 +216,7 @@ export function PrescriptionsClient({
             <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Customer</label>
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-              <input type="text" placeholder="Search customer..." value={customerSearch} disabled={!!editing}
+              <input type="text" placeholder="Search by name, serial or phone..." value={customerSearch} disabled={!!editing}
                 onChange={(e) => { setCustomerSearch(e.target.value); setSelectedCustomer(""); }}
                 className="w-full pl-9 pr-4 py-2 glass-input text-sm disabled:opacity-70" />
             </div>
@@ -286,7 +291,7 @@ export function PrescriptionsClient({
           <div className="relative mb-3">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
             <input type="text" value={listSearch} onChange={(e) => setListSearch(e.target.value)}
-              placeholder="Find by customer name or phone..." className="w-full pl-9 pr-9 py-2 glass-input text-sm" />
+              placeholder="Find by customer name, serial or phone..." className="w-full pl-9 pr-9 py-2 glass-input text-sm" />
             {listSearch && (
               <button onClick={() => setListSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 cursor-pointer">
                 <X className="w-3.5 h-3.5 text-muted-foreground" />
@@ -308,7 +313,11 @@ export function PrescriptionsClient({
                       {rx.label && <span className="text-muted-foreground font-normal"> · {rx.label}</span>}
                     </p>
                     <p className="text-[10px] text-muted-foreground">
-                      {formatDate(rx.date)}{phoneById.get(rx.customerId) ? ` · ${phoneById.get(rx.customerId)}` : ""}
+                      {[
+                        formatDate(rx.date),
+                        customerById.get(rx.customerId)?.serialNumber && `Serial ${customerById.get(rx.customerId)!.serialNumber}`,
+                        customerById.get(rx.customerId)?.phone,
+                      ].filter(Boolean).join(" · ")}
                     </p>
                   </div>
                   <div className="flex items-center gap-1 flex-shrink-0">
