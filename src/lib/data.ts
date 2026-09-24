@@ -349,6 +349,7 @@ export async function getExpenses(): Promise<Expense[]> {
     description: e.description,
     amount: e.amount,
     paidBy: e.paidBy,
+    paymentMethod: e.paymentMethod || "Cash",
   }));
 }
 
@@ -398,6 +399,13 @@ export async function getLabs(): Promise<LabVendorView[]> {
 
 // ─── Prescriptions (flat, with customer name) ───────────────
 export type PrescriptionView = Prescription & { customerId: string; customerName: string };
+
+/** Just enough about an invoice to add a prescription to it later. */
+export async function getSaleBrief(id: string) {
+  const sale = await db.sale.findUnique({ where: { id }, select: { id: true, invoiceNo: true, customerId: true, customer: { select: { name: true } } } });
+  if (!sale) return null;
+  return { id: sale.id, invoiceNo: sale.invoiceNo, customerId: sale.customerId ?? "", customerName: sale.customer?.name ?? "" };
+}
 
 export async function getPrescriptions(): Promise<PrescriptionView[]> {
   const rows = await db.prescription.findMany({
@@ -838,9 +846,15 @@ export interface CashCollectionData {
   bankTransfer: number;
   jazzCash: number;
   totalCollection: number;
+  // Cash expenses only -- they come out of the drawer. Anything paid by card or
+  // cheque is counted separately and leaves the drawer alone.
   expenses: number;
+  otherExpenses: number;
   invoiceCount: number;
   saved: { openingCash: number; closingCash: number; notes: string; closedBy: string } | null;
+  // What the drawer should open with: the last close, plus the cash taken (less
+  // cash spent) on any day since that hasn't been closed off.
+  opening: { amount: number; closedOn: string; sinceLastClose: number } | null;
 }
 
 function dayRange(dateStr: string) {
@@ -874,6 +888,7 @@ export async function getCashCollection(dateStr: string, branchId?: string): Pro
 
   const byMethod = (m: string) => collected.filter((c) => c.method === m).reduce((sum, c) => sum + c.amount, 0);
   const totalCollection = collected.reduce((sum, c) => sum + c.amount, 0);
+  const cashExpenses = expenses.filter((e) => (e.paymentMethod || "Cash") === "Cash");
 
   return {
     date: dateStr,
@@ -882,9 +897,48 @@ export async function getCashCollection(dateStr: string, branchId?: string): Pro
     bankTransfer: byMethod("Bank Transfer"),
     jazzCash: byMethod("JazzCash"),
     totalCollection,
-    expenses: expenses.reduce((sum, e) => sum + e.amount, 0),
+    expenses: cashExpenses.reduce((sum, e) => sum + e.amount, 0),
+    otherExpenses: expenses.filter((e) => (e.paymentMethod || "Cash") !== "Cash").reduce((sum, e) => sum + e.amount, 0),
     invoiceCount: sales.length,
     saved: saved ? { openingCash: saved.openingCash, closingCash: saved.closingCash, notes: saved.notes, closedBy: saved.closedBy } : null,
+    opening: await openingCashFor(start, branchId),
+  };
+}
+
+/**
+ * What the drawer should start the day with, so nobody types it in: the cash
+ * counted at the last close, plus the cash taken (less cash spent) on any day
+ * in between that was never closed off.
+ */
+async function openingCashFor(start: Date, branchId?: string) {
+  const lastClose = await db.cashCollection.findFirst({
+    where: { date: { lt: start }, ...(branchId ? { branchId } : {}) },
+    orderBy: { date: "desc" },
+  });
+  if (!lastClose) return null;
+
+  const gap = { gte: new Date(lastClose.date.getTime() + 24 * 60 * 60 * 1000), lt: start };
+  const [sales, laterPayments, expenses] = await Promise.all([
+    db.sale.findMany({
+      where: { date: gap, ...(branchId ? { branchId } : {}) },
+      select: { paid: true, paymentMethod: true, payments: { select: { amount: true } } },
+    }),
+    db.salePayment.findMany({
+      where: { date: gap, ...(branchId ? { sale: { branchId } } : {}) },
+      select: { amount: true, method: true },
+    }),
+    db.expense.findMany({ where: { date: gap }, select: { amount: true, paymentMethod: true } }),
+  ]);
+
+  const takenAtTill = sales.map((s) => ({ method: s.paymentMethod, amount: s.paid - s.payments.reduce((sum, p) => sum + p.amount, 0) }));
+  const cashIn = [...takenAtTill, ...laterPayments].filter((c) => c.method === "Cash").reduce((sum, c) => sum + c.amount, 0);
+  const cashOut = expenses.filter((e) => (e.paymentMethod || "Cash") === "Cash").reduce((sum, e) => sum + e.amount, 0);
+  const sinceLastClose = Math.round((cashIn - cashOut) * 100) / 100;
+
+  return {
+    amount: Math.max(0, Math.round((lastClose.closingCash + sinceLastClose) * 100) / 100),
+    closedOn: lastClose.date.toISOString().slice(0, 10),
+    sinceLastClose,
   };
 }
 

@@ -32,7 +32,9 @@ export async function saveCashCollection(input: CashCollectionInput) {
   const bankTransfer = byMethod("Bank Transfer");
   const jazzCash = byMethod("JazzCash");
   const totalCollection = sales.reduce((sum, s) => sum + s.paid, 0);
-  const expensesTotal = expenses.reduce((sum, e) => sum + e.amount, 0);
+  // Only cash leaves the drawer; card and cheque expenses are recorded but
+  // don't change the day's cash.
+  const expensesTotal = expenses.filter((e) => (e.paymentMethod || "Cash") === "Cash").reduce((sum, e) => sum + e.amount, 0);
 
   const data = {
     date: start,

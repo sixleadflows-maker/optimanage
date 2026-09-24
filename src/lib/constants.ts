@@ -73,6 +73,8 @@ export function typesForCategory(category: string): readonly string[] {
 // Categories whose types are worth filtering by on the inventory screen.
 export const CATEGORIES_WITH_TYPE_FILTER: readonly string[] = ["Contact Lenses", "Lens Kit"];
 
+export const EXPENSE_PAYMENT_METHODS = ["Cash", "Card", "Cheque"] as const;
+
 export const PURCHASE_TYPES = ["Cash", "Cheque", "Other"] as const;
 export const PURCHASE_PAYMENT_METHODS = [
   "Cash", "Cheque", "Bank Transfer", "JazzCash", "EasyPaisa", "Card", "Pay Later (Credit)", "Other",

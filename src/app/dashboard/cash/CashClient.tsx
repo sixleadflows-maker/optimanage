@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { CashCollectionData } from "@/lib/data";
-import { formatCurrency } from "@/lib/utils/format";
+import { formatCurrency, formatDate } from "@/lib/utils/format";
 import { useApp } from "@/lib/context";
 import { saveCashCollection } from "@/lib/actions/cash";
 import { Banknote, CreditCard, Building2, Smartphone, Save, Loader2, CheckCircle } from "lucide-react";
@@ -11,7 +11,9 @@ import { Banknote, CreditCard, Building2, Smartphone, Save, Loader2, CheckCircle
 export function CashClient({ data, date }: { data: CashCollectionData; date: string }) {
   const { showToast } = useApp();
   const router = useRouter();
-  const [openingCash, setOpeningCash] = useState(data.saved?.openingCash ?? 0);
+  // The float carries itself over from the last close -- nobody types yesterday's
+  // closing in again. It stays editable for the odd day cash is put in or taken out.
+  const [openingCash, setOpeningCash] = useState(data.saved?.openingCash ?? data.opening?.amount ?? 0);
   const [closingCash, setClosingCash] = useState(data.saved?.closingCash ?? 0);
   const [notes, setNotes] = useState(data.saved?.notes ?? "");
   const [saving, setSaving] = useState(false);
@@ -76,6 +78,22 @@ export function CashClient({ data, date }: { data: CashCollectionData; date: str
               <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Opening Cash (float)</label>
               <input type="number" value={openingCash || ""} onChange={(e) => setOpeningCash(Number(e.target.value))}
                 className="w-full px-4 py-2.5 glass-input text-sm" />
+              {data.opening ? (
+                <p className="text-[11px] text-muted-foreground mt-1.5">
+                  {`Carried over from the ${formatDate(data.opening.closedOn)} close${
+                    data.opening.sinceLastClose ? ` and ${formatCurrency(data.opening.sinceLastClose)} cash since` : ""
+                  }.`}
+                  {openingCash !== data.opening.amount && (
+                    <button type="button" onClick={() => setOpeningCash(data.opening!.amount)} className="text-primary font-semibold ml-1 cursor-pointer">
+                      Use {formatCurrency(data.opening.amount)}
+                    </button>
+                  )}
+                </p>
+              ) : (
+                <p className="text-[11px] text-muted-foreground mt-1.5">
+                  Counted for the first close; after that it carries over by itself.
+                </p>
+              )}
             </div>
             <div>
               <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Closing Cash (counted)</label>
@@ -113,7 +131,13 @@ export function CashClient({ data, date }: { data: CashCollectionData; date: str
           <div className="space-y-2.5 text-sm">
             <div className="flex justify-between"><span className="text-muted-foreground">Invoices</span><span className="font-medium">{data.invoiceCount}</span></div>
             <div className="flex justify-between"><span className="text-muted-foreground">Total collected</span><span className="font-medium">{formatCurrency(data.totalCollection)}</span></div>
-            <div className="flex justify-between"><span className="text-muted-foreground">Expenses</span><span className="font-medium text-destructive">{formatCurrency(data.expenses)}</span></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">Cash expenses</span><span className="font-medium text-destructive">{formatCurrency(data.expenses)}</span></div>
+            {data.otherExpenses > 0 && (
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Card / cheque expenses</span>
+                <span className="font-medium">{formatCurrency(data.otherExpenses)}</span>
+              </div>
+            )}
             <div className="flex justify-between border-t border-border pt-2.5 font-semibold">
               <span>Net cash flow</span><span>{formatCurrency(data.totalCollection - data.expenses)}</span>
             </div>

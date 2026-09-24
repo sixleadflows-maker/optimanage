@@ -462,6 +462,9 @@ model Expense {
   description String   @default("")
   amount      Float    @default(0)
   paidBy      String   @default("")
+  // Cash / Card / Cheque -- only cash leaves the drawer, so only cash counts
+  // against the day's closing cash.
+  paymentMethod String @default("Cash")
   createdAt   DateTime @default(now())
 }
 

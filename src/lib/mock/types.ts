@@ -173,6 +173,8 @@ export interface Expense {
   description: string;
   amount: number;
   paidBy: string;
+  // Cash / Card / Cheque.
+  paymentMethod: string;
 }
 
 export interface ShopSettings {

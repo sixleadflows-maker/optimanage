@@ -8,6 +8,7 @@ import { useApp } from "@/lib/context";
 import { createExpense, deleteExpense, updateExpense } from "@/lib/actions/expenses";
 import { Plus, Search, X, Loader2, Wallet, Pencil, Trash2 } from "lucide-react";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { EXPENSE_PAYMENT_METHODS } from "@/lib/constants";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
 const EXPENSE_CATEGORIES = ["Rent", "Utilities", "Salaries", "Supplies", "Marketing", "Maintenance", "Transport", "Other"];
@@ -18,6 +19,7 @@ const blankForm = () => ({
   description: "",
   amount: 0,
   paidBy: "",
+  paymentMethod: "Cash",
 });
 
 export function ExpensesClient({ expenses, canManage }: { expenses: Expense[]; canManage: boolean }) {
@@ -40,7 +42,7 @@ export function ExpensesClient({ expenses, canManage }: { expenses: Expense[]; c
   };
   const openEdit = (e: Expense) => {
     setEditingId(e.id);
-    setForm({ date: e.date.slice(0, 10), category: e.category, description: e.description, amount: e.amount, paidBy: e.paidBy });
+    setForm({ date: e.date.slice(0, 10), category: e.category, description: e.description, amount: e.amount, paidBy: e.paidBy, paymentMethod: e.paymentMethod || "Cash" });
     setShowAdd(true);
   };
 
@@ -163,13 +165,14 @@ export function ExpensesClient({ expenses, canManage }: { expenses: Expense[]; c
                 <th className="text-left py-3 px-3 text-xs font-medium text-muted-foreground">Category</th>
                 <th className="text-left py-3 px-3 text-xs font-medium text-muted-foreground">Description</th>
                 <th className="text-right py-3 px-3 text-xs font-medium text-muted-foreground">Amount</th>
+                <th className="text-center py-3 px-3 text-xs font-medium text-muted-foreground">Paid With</th>
                 <th className="text-center py-3 px-3 text-xs font-medium text-muted-foreground">Paid By</th>
                 {canManage && <th className="text-center py-3 px-3 text-xs font-medium text-muted-foreground">Actions</th>}
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 && (
-                <tr><td colSpan={canManage ? 6 : 5}>
+                <tr><td colSpan={canManage ? 7 : 6}>
                   <EmptyState icon={Wallet} title="No expenses recorded" hint="Track rent, utilities, and daily shop costs here — they feed the cash day-close and analytics." />
                 </td></tr>
               )}
@@ -179,6 +182,11 @@ export function ExpensesClient({ expenses, canManage }: { expenses: Expense[]; c
                   <td className="py-3 px-3"><span className="chip bg-surface text-muted-foreground">{e.category}</span></td>
                   <td className="py-3 px-3">{e.description}</td>
                   <td className="py-3 px-3 text-right font-medium text-destructive">{formatCurrency(e.amount)}</td>
+                  <td className="py-3 px-3 text-center">
+                    <span className={`chip ${e.paymentMethod === "Cash" ? "bg-success/10 text-success" : "bg-primary/10 text-primary"}`}>
+                      {e.paymentMethod || "Cash"}
+                    </span>
+                  </td>
                   <td className="py-3 px-3 text-center text-xs text-muted-foreground">{e.paidBy}</td>
                   {canManage && (
                     <td className="py-3 px-3">
@@ -232,6 +240,22 @@ export function ExpensesClient({ expenses, canManage }: { expenses: Expense[]; c
                   <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Paid By</label>
                   <input type="text" value={form.paidBy} onChange={(e) => setForm({ ...form, paidBy: e.target.value })} className="w-full px-4 py-2.5 glass-input text-sm" placeholder="Optional" />
                 </div>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Paid With</label>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {EXPENSE_PAYMENT_METHODS.map((m) => (
+                    <button key={m} type="button" onClick={() => setForm({ ...form, paymentMethod: m })}
+                      className={`py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${form.paymentMethod === m ? "bg-primary text-white" : "bg-surface hover:bg-surface-hover"}`}>
+                      {m}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[11px] text-muted-foreground mt-1.5">
+                  {form.paymentMethod === "Cash"
+                    ? "Comes out of the till's cash for the day."
+                    : `Paid by ${form.paymentMethod.toLowerCase()} — it doesn't come out of the till's cash.`}
+                </p>
               </div>
               <button onClick={handleAdd} disabled={saving}
                 className="w-full py-2.5 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-primary-hover transition-colors disabled:opacity-60 flex items-center justify-center gap-2">

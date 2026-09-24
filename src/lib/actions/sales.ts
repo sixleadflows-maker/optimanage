@@ -192,6 +192,9 @@ export interface UpdateSaleInput {
   saleId: string;
   items: CartItemInput[];
   invoiceDiscount: number;
+  // What was taken at the counter on the day of the sale. Left out, the
+  // invoice keeps what it has; money collected later is never touched here.
+  paidAtTill?: number;
   // The invoice's own details (ISO date), all correctable.
   date?: string;
   customerId?: string | null;
@@ -218,7 +221,11 @@ export async function updateSale(input: UpdateSaleInput) {
   }
 
   try {
-    return await reviseSale(input.saleId, { ...input, date: input.date ? new Date(input.date) : undefined });
+    return await reviseSale(input.saleId, {
+      ...input,
+      date: input.date ? new Date(input.date) : undefined,
+      payment: input.paidAtTill === undefined ? undefined : { atTill: input.paidAtTill },
+    });
   } catch (e) {
     if (e instanceof SaleError) return { ok: false as const, error: e.message };
     throw e;
@@ -272,7 +279,7 @@ export async function updateTillSale(input: CreateSaleInput) {
       customLensQty: input.customLensQty,
       lensColor: input.lensColor,
       lensDescription: input.lensDescription,
-      payment: { type: input.paymentType, advanceAmount: input.advanceAmount },
+      payment: { atTill: input.paymentType === "Full" ? "full" : input.paymentType === "Advance" ? input.advanceAmount : 0 },
       prescriptions: input.prescriptions ?? [],
       revisedById: session.user.id,
     });

@@ -37,18 +37,21 @@ export function PrescriptionsClient({
   customers,
   canDelete,
   initialEditId,
+  addToSale,
 }: {
   prescriptions: PrescriptionView[];
   customers: RxCustomer[];
   canDelete: boolean;
   // Opened from a customer's history to correct this one.
   initialEditId?: string;
+  // Opened from an invoice to put a prescription on it after the event.
+  addToSale?: { id: string; invoiceNo: string; customerId: string; customerName: string } | null;
 }) {
   const { showToast } = useApp();
   const router = useRouter();
   const initialEdit = initialEditId ? prescriptions.find((p) => p.id === initialEditId) ?? null : null;
-  const [selectedCustomer, setSelectedCustomer] = useState(initialEdit?.customerId ?? "");
-  const [customerSearch, setCustomerSearch] = useState(initialEdit?.customerName ?? "");
+  const [selectedCustomer, setSelectedCustomer] = useState(initialEdit?.customerId ?? addToSale?.customerId ?? "");
+  const [customerSearch, setCustomerSearch] = useState(initialEdit?.customerName ?? addToSale?.customerName ?? "");
   const [saving, setSaving] = useState(false);
   const [isOwn, setIsOwn] = useState(initialEdit?.isOwnPrescription ?? false);
   const [form, setForm] = useState(() => (initialEdit ? formFromRx(initialEdit) : { ...empty }));
@@ -109,8 +112,8 @@ export function PrescriptionsClient({
     setSelectedCustomer("");
     setCustomerSearch("");
     setEditing(null);
-    // Opened from a customer's history: drop ?edit= so a reload doesn't reopen it.
-    if (initialEditId) router.replace("/dashboard/prescriptions", { scroll: false });
+    // Opened from elsewhere: drop the link's ?edit= / ?addTo= so a reload is a clean form.
+    if (initialEditId || addToSale) router.replace("/dashboard/prescriptions", { scroll: false });
   };
 
   const startEdit = (rx: PrescriptionView) => {
@@ -137,8 +140,9 @@ export function PrescriptionsClient({
         }
         showToast(`${editing.customerName}'s prescription updated`, "success");
       } else {
-        await createPrescription({ customerId: selectedCustomer, ...values() });
-        showToast("Prescription saved", "success");
+        // Added to an invoice that already exists, when that's where this started.
+        await createPrescription({ customerId: selectedCustomer, saleId: addToSale?.id, ...values() });
+        showToast(addToSale ? `Prescription added to ${addToSale.invoiceNo}` : "Prescription saved", "success");
       }
       resetForm();
       router.refresh();
@@ -181,14 +185,27 @@ export function PrescriptionsClient({
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-sm font-semibold flex items-center gap-2">
               {editing ? <Pencil className="w-4 h-4 text-primary" /> : <Eye className="w-4 h-4 text-primary" />}
-              {editing ? `Editing ${editing.customerName}'s prescription (${formatDate(editing.date)})` : "New Prescription"}
+              {editing
+                ? `Editing ${editing.customerName}'s prescription (${formatDate(editing.date)})`
+                : addToSale
+                  ? `New prescription for ${addToSale.invoiceNo}`
+                  : "New Prescription"}
             </h3>
-            {editing && (
+            {(editing || addToSale) && (
               <button onClick={resetForm} className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 cursor-pointer">
                 <X className="w-3.5 h-3.5" /> Cancel
               </button>
             )}
           </div>
+
+          {!editing && addToSale && (
+            <div className="mb-4 p-3 rounded-xl border border-primary/30 bg-primary/5 text-xs">
+              <p className="font-medium">{`Adding to ${addToSale.invoiceNo} — ${addToSale.customerName}`}</p>
+              <p className="text-muted-foreground mt-0.5">
+                The invoice keeps its own number and totals; this goes onto it and onto the customer&apos;s record.
+              </p>
+            </div>
+          )}
 
           <div className="mb-4">
             <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Customer</label>

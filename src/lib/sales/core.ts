@@ -485,10 +485,10 @@ export interface ReviseSaleInput {
   customLensQty?: number;
   lensColor?: string;
   lensDescription?: string;
-  // Corrections made at the till carry these too. The payment taken at the
-  // counter is worked out again from the till's Full / Advance / Balance choice
-  // (payments received on a later day stay as they are).
-  payment?: { type: "Full" | "Advance" | "Balance"; advanceAmount: number };
+  // What was taken at the counter, when the correction says: an amount, or
+  // "full" for whatever settles the bill. Payments received on a later day stay
+  // as they are. Left out, the invoice keeps what it has.
+  payment?: { atTill: number | "full" };
   // The prescriptions the bill carries now. Left out, they're left alone.
   prescriptions?: SalePrescriptionInput[];
   // Who made the change, for a prescription it moves to the trash.
@@ -554,12 +554,14 @@ export async function reviseSale(saleId: string, input: ReviseSaleInput) {
         `${formatRs(laterPaid)} has been received on this invoice since the sale — more than the new ${formatRs(priced.total)} total. Refund the difference through Return & Refund instead.`
       );
     }
-    const { type, advanceAmount } = input.payment;
-    if (type === "Advance" && !(advanceAmount > 0)) throw new SaleError("Enter the advance amount received");
-    const atCounter = type === "Full" ? priced.total - laterPaid : type === "Advance" ? advanceAmount : 0;
+    const { atTill } = input.payment;
+    const atCounter = atTill === "full" ? Math.max(0, priced.total - laterPaid) : atTill;
+    if (!(atCounter >= 0)) throw new SaleError("Check the amount taken at the till");
     paid = Math.round((atCounter + laterPaid) * 100) / 100;
     if (paid > priced.total + 0.01) {
-      throw new SaleError(`The advance is more than the ${formatRs(priced.total)} bill — choose Full Payment instead`);
+      throw new SaleError(
+        `${formatRs(paid)} paid is more than the ${formatRs(priced.total)} bill — lower the amount taken at the till`
+      );
     }
   } else if (priced.total < sale.paid) {
     throw new SaleError(

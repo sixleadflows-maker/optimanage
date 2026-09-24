@@ -11,6 +11,8 @@ export interface ExpenseInput {
   description: string;
   amount: number;
   paidBy: string;
+  // Cash / Card / Cheque.
+  paymentMethod: string;
 }
 
 export async function createExpense(input: ExpenseInput) {
@@ -25,9 +27,11 @@ export async function createExpense(input: ExpenseInput) {
       description: input.description,
       amount: input.amount,
       paidBy: input.paidBy || session.user.name,
+      paymentMethod: input.paymentMethod || "Cash",
     },
   });
   revalidatePath("/dashboard/expenses");
+  revalidatePath("/dashboard/cash");
   return { ok: true };
 }
 
@@ -45,6 +49,7 @@ export async function updateExpense(id: string, input: ExpenseInput) {
       description: input.description,
       amount: input.amount,
       paidBy: input.paidBy,
+      paymentMethod: input.paymentMethod || "Cash",
     },
   });
   if (updated.count === 0) return { ok: false as const, error: "This expense has been deleted" };

@@ -8,6 +8,9 @@ import { rxTextColumns, type RxTextColumns } from "@/lib/utils/rx";
 
 export interface PrescriptionInput extends Partial<RxTextColumns> {
   customerId: string;
+  // Put it on an invoice that already exists -- the eye test often happens
+  // after the order has been rung up.
+  saleId?: string;
   label?: string;
   rightSph: number; rightCyl: number; rightAxis: number; rightPd: number; rightAdd: number;
   leftSph: number; leftCyl: number; leftAxis: number; leftPd: number; leftAdd: number;
@@ -20,9 +23,16 @@ export async function createPrescription(input: PrescriptionInput) {
   if (!session?.user) throw new Error("Unauthorized");
   if (!input.customerId) throw new Error("Select a customer");
 
+  if (input.saleId) {
+    const sale = await db.sale.findUnique({ where: { id: input.saleId }, select: { customerId: true } });
+    if (!sale) throw new Error("That invoice no longer exists");
+    if (sale.customerId !== input.customerId) throw new Error("That invoice belongs to a different customer");
+  }
+
   const created = await db.prescription.create({
     data: {
       customerId: input.customerId,
+      saleId: input.saleId || null,
       rightSph: input.rightSph, rightCyl: input.rightCyl, rightAxis: input.rightAxis, rightPd: input.rightPd, rightAdd: input.rightAdd,
       leftSph: input.leftSph, leftCyl: input.leftCyl, leftAxis: input.leftAxis, leftPd: input.leftPd, leftAdd: input.leftAdd,
       ...rxTextColumns(input),
@@ -33,6 +43,7 @@ export async function createPrescription(input: PrescriptionInput) {
   });
   revalidatePath("/dashboard/prescriptions");
   revalidatePath(`/dashboard/customers/${input.customerId}`);
+  if (input.saleId) revalidatePath("/dashboard/sales");
   return { ok: true, id: created.id, date: created.date.toISOString() };
 }
 

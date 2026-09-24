@@ -4,7 +4,9 @@ import { useState, useMemo, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import type { SaleView } from "@/lib/data";
 import { formatCurrency, formatDate } from "@/lib/utils/format";
-import { Search, Download, Receipt, RotateCcw, X, Loader2, Trash2, Eye, Printer, MessageCircle, CalendarRange, Wallet, Pencil, Undo2, WifiOff, History } from "lucide-react";
+import { Search, Download, Receipt, RotateCcw, X, Loader2, Trash2, Eye, Printer, MessageCircle, CalendarRange, Wallet, Pencil, Undo2, WifiOff, History, Glasses, Plus } from "lucide-react";
+import Link from "next/link";
+import { formatEyeValue } from "@/lib/utils/rx";
 import { useApp } from "@/lib/context";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { PrintPortal } from "@/components/ui/PrintPortal";
@@ -46,10 +48,12 @@ function InvoiceHistory({
   onEditReturn: (ret: SaleView["returns"][number]) => void;
 }) {
   const laterTotal = sale.payments.reduce((sum, p) => sum + p.amount, 0);
+  const rxFields = ["Sph", "Cyl", "Axis", "Pd", "Add"] as const;
   const takenAtTill = sale.paid - laterTotal;
   // An invoice keyed in well after its own date is an old record from paper.
   const enteredLater = new Date(sale.enteredAt).getTime() - new Date(sale.dateTime).getTime() > 60 * 60_000 && !sale.offlineRef;
-  const hasHistory = sale.payments.length > 0 || sale.returns.length > 0 || enteredLater || !!sale.offlineRef;
+  const hasHistory = sale.payments.length > 0 || sale.returns.length > 0 || enteredLater || !!sale.offlineRef
+    || sale.prescriptions.length > 0 || !!sale.customerId;
   if (!hasHistory) return null;
 
   return (
@@ -99,6 +103,43 @@ function InvoiceHistory({
               <span>{sale.balance > 0 ? "Still owed" : "Paid in full"}</span>
               <span>{formatCurrency(sale.balance > 0 ? sale.balance : sale.paid)}</span>
             </div>
+          </div>
+        </div>
+      )}
+
+      {(sale.prescriptions.length > 0 || !!sale.customerId) && (
+        <div>
+          <p className="text-muted-foreground mb-1 flex items-center gap-1.5"><Glasses className="w-3.5 h-3.5" /> Prescriptions</p>
+          <div className="space-y-1.5">
+            {sale.prescriptions.map((rx) => (
+              <div key={rx.id} className="flex items-start justify-between gap-3">
+                <span className="min-w-0">
+                  {formatDate(rx.date)}
+                  {rx.label && <span className="text-muted-foreground"> · {rx.label}</span>}
+                  <span className="block text-muted-foreground">
+                    {`OD ${rxFields.map((f) => formatEyeValue(f, rx.rightEye)).join(" / ")}`}
+                  </span>
+                  <span className="block text-muted-foreground">
+                    {`OS ${rxFields.map((f) => formatEyeValue(f, rx.leftEye)).join(" / ")}`}
+                  </span>
+                </span>
+                <Link href={`/dashboard/prescriptions?edit=${rx.id}`} title="Edit prescription"
+                  className="flex items-center gap-1 px-2 py-1 rounded-lg bg-surface hover:bg-surface-hover font-medium flex-shrink-0">
+                  <Pencil className="w-3 h-3" /> Edit
+                </Link>
+              </div>
+            ))}
+            {sale.prescriptions.length === 0 && (
+              <p className="text-muted-foreground">None on this invoice yet — the eye test can be added later.</p>
+            )}
+            {sale.customerId ? (
+              <Link href={`/dashboard/prescriptions?addTo=${sale.id}`}
+                className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-primary/10 text-primary font-medium">
+                <Plus className="w-3 h-3" /> Add prescription
+              </Link>
+            ) : (
+              <p className="text-muted-foreground">Put the invoice on a customer first to add one.</p>
+            )}
           </div>
         </div>
       )}

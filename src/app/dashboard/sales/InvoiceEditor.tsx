@@ -256,12 +256,18 @@ export function EditInvoiceModal({
     ]);
   };
 
+  // Money taken later (an advance settled) isn't touched here; what was taken
+  // at the counter can be corrected along with the rest of the invoice.
+  const laterPaid = sale.payments.reduce((sum, p) => sum + p.amount, 0);
+  const [paidAtTill, setPaidAtTill] = useState(Math.max(0, sale.paid - laterPaid));
+
   const lensColor = lensColorChoice === "Other" ? lensColorOther.trim() : lensColorChoice;
   const itemsTotal = lines.reduce((sum, l) => sum + l.unitPrice * l.quantity - l.discount, 0);
   const subtotal = itemsTotal + Math.max(0, customLensPrice) * customLensQty;
   const total = Math.max(0, subtotal - invoiceDiscount);
-  const newBalance = total - sale.paid;
-  const belowPaid = total < sale.paid;
+  const paid = paidAtTill + laterPaid;
+  const newBalance = total - paid;
+  const overPaid = paid > total + 0.01;
 
   const submit = async () => {
     if (lines.some((l) => !l.productId && !l.name.trim())) {
@@ -282,6 +288,7 @@ export function EditInvoiceModal({
           : { id: l.saleItemId, name: l.name.trim(), description: l.description, quantity: l.quantity, unitPrice: l.unitPrice, discount: l.discount }
       ),
       invoiceDiscount,
+      paidAtTill,
       // Keep the catalogue lens tied to the invoice only while its line is still on it.
       lensProductId: lines.some((l) => l.productId === sale.lensProductId) ? sale.lensProductId : undefined,
       customLensName,
@@ -555,7 +562,23 @@ export function EditInvoiceModal({
           <div className="flex justify-between font-semibold text-sm border-t border-border pt-1.5 mt-1.5">
             <span>New total</span><span>{formatCurrency(total)}</span>
           </div>
-          <div className="flex justify-between"><span className="text-muted-foreground">Already paid</span><span>{formatCurrency(sale.paid)}</span></div>
+          <div className="flex items-center justify-between">
+            <span className="text-muted-foreground flex items-center gap-1.5">
+              Taken at the till
+              {total > 0 && (
+                <button type="button" onClick={() => setPaidAtTill(Math.max(0, total - laterPaid))}
+                  className="text-primary font-semibold cursor-pointer">Paid in full</button>
+              )}
+              <button type="button" onClick={() => setPaidAtTill(0)} className="text-primary font-semibold cursor-pointer">Nothing</button>
+            </span>
+            <input type="number" min={0} value={paidAtTill || ""} onChange={(e) => setPaidAtTill(Math.max(0, Number(e.target.value)))}
+              className="w-28 px-2 py-1 glass-input text-xs text-right" />
+          </div>
+          {laterPaid > 0 && (
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">+ Paid later ({sale.payments.length})</span><span>{formatCurrency(laterPaid)}</span>
+            </div>
+          )}
           <div className="flex justify-between font-semibold">
             <span>{newBalance > 0 ? "Balance owed" : "Balance"}</span>
             <span className={newBalance > 0 ? "text-destructive" : "text-success"}>
@@ -564,11 +587,19 @@ export function EditInvoiceModal({
           </div>
         </div>
 
-        {belowPaid && (
+        {paidAtTill < sale.paid - laterPaid && (
+          <div className="mt-3 p-3 rounded-xl bg-warning/10 text-warning text-xs flex gap-2">
+            <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+            <p>
+              {`The till took ${formatCurrency(sale.paid - laterPaid)} on this invoice — saving records ${formatCurrency(paidAtTill)} instead, so the day's takings change. Hand back ${formatCurrency(sale.paid - laterPaid - paidAtTill)} if the customer has already paid it.`}
+            </p>
+          </div>
+        )}
+        {overPaid && (
           <div className="mt-3 p-3 rounded-xl bg-destructive/10 text-destructive text-xs flex gap-2">
             <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
             <p>
-              {`The new total is less than the ${formatCurrency(sale.paid)} already paid. Money owed back to a customer goes through Return & Refund, so this can't be saved.`}
+              {`${formatCurrency(paid)} paid is more than the ${formatCurrency(total)} total — lower the amount taken at the till.`}
             </p>
           </div>
         )}
@@ -576,7 +607,7 @@ export function EditInvoiceModal({
         <div className="flex gap-2 mt-5">
           <button onClick={onClose} className="flex-1 py-2.5 glass-card text-sm font-medium cursor-pointer">Cancel</button>
           <button
-            onClick={submit} disabled={saving || belowPaid || lines.length === 0}
+            onClick={submit} disabled={saving || overPaid || lines.length === 0}
             className="flex-1 py-2.5 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-primary-hover transition-colors disabled:opacity-60 flex items-center justify-center gap-2 cursor-pointer"
           >
             {saving && <Loader2 className="w-4 h-4 animate-spin" />} Save invoice
