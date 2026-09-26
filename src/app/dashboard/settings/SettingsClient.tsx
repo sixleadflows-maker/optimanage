@@ -40,7 +40,8 @@ export function SettingsClient({ settings, users, branches, canManage, isOwner, 
     }
     setSavingUser(true);
     try {
-      await createUser(newUser);
+      const res = await createUser(newUser);
+      if (!res.ok) { showToast(res.error, "error"); return; }
       showToast("User created", "success");
       setShowAddUser(false);
       setNewUser({ ...EMPTY_NEW_USER });

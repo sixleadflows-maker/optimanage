@@ -4,6 +4,7 @@ import { hash } from "bcryptjs";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { auth, forgetAccount } from "@/lib/auth";
+import { userHoldingEmail } from "@/lib/trash/heldValues";
 
 // User management (creating accounts, deactivating, resetting passwords) is
 // deliberately Owner-only -- stricter than the Owner+Manager "canManage"
@@ -22,27 +23,39 @@ export interface CreateUserInput {
   role: "OWNER" | "MANAGER" | "CASHIER";
 }
 
+// Refusals come back as { ok: false, error } -- production replaces a thrown
+// error's message with a generic one, so staff would never see the reason.
 export async function createUser(input: CreateUserInput) {
-  const session = await requireOwner();
-  if (!input.name.trim()) throw new Error("Name is required");
-  if (!input.email.trim()) throw new Error("Email is required");
-  if (input.password.length < 6) throw new Error("Password must be at least 6 characters");
+  const session = await auth();
+  if (!session?.user || session.user.role !== "OWNER") return { ok: false as const, error: "Only the owner can manage users" };
+  const email = input.email.trim();
+  if (!input.name.trim()) return { ok: false as const, error: "Name is required" };
+  if (!email) return { ok: false as const, error: "Email is required" };
+  if (input.password.length < 6) return { ok: false as const, error: "Password must be at least 6 characters" };
 
-  const existing = await db.user.findUnique({ where: { email: input.email } });
-  if (existing) throw new Error("A user with this email already exists");
+  // An account deleted for good no longer holds its email.
+  const existing = await userHoldingEmail(email);
+  if (existing) {
+    return {
+      ok: false as const,
+      error: existing.active
+        ? `${existing.name} already signs in with this email`
+        : `${existing.name} used this email and is in the Trash — restore them from there, or delete them there for good first`,
+    };
+  }
 
   const hashedPassword = await hash(input.password, 12);
   await db.user.create({
     data: {
       name: input.name,
-      email: input.email,
+      email,
       hashedPassword,
       role: input.role,
       branchId: session.user.branchId || undefined,
     },
   });
   revalidatePath("/dashboard/settings");
-  return { ok: true };
+  return { ok: true as const };
 }
 
 export async function setUserActive(id: string, active: boolean) {
@@ -90,8 +103,15 @@ export async function updateUser(id: string, input: UpdateUserInput) {
 
   const target = await db.user.findUnique({ where: { id } });
   if (!target) return { ok: false as const, error: "That account no longer exists" };
-  const clash = await db.user.findUnique({ where: { email } });
-  if (clash && clash.id !== id) return { ok: false as const, error: `${clash.name} already signs in with that email` };
+  const clash = await userHoldingEmail(email);
+  if (clash && clash.id !== id) {
+    return {
+      ok: false as const,
+      error: clash.active
+        ? `${clash.name} already signs in with that email`
+        : `${clash.name} used that email and is in the Trash — restore them from there, or delete them there for good first`,
+    };
+  }
 
   // Never leave the shop without an owner who can sign in.
   if (target.role === "OWNER" && input.role !== "OWNER" && target.active) {

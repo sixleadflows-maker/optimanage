@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { auth } from "@/lib/auth";
+import { customerHoldingPhone } from "@/lib/trash/heldValues";
 
 export interface CustomerInput {
   name: string;
@@ -79,9 +80,13 @@ export async function createCustomer(input: CustomerInput): Promise<CreateCustom
   // Phone is optional now; only dedupe on it when one was actually entered.
   const phone = input.phone.trim();
   if (phone) {
-    const existing = await db.customer.findUnique({ where: { phone } });
+    // A customer deleted for good no longer holds the number.
+    const existing = await customerHoldingPhone(phone);
     if (existing && !existing.active) {
-      return { ok: false, error: `${existing.name} already has this phone number but is in the Trash — restore them from there` };
+      return {
+        ok: false,
+        error: `${existing.name} already has this phone number and is in the Trash — restore them from there, or delete them there for good first`,
+      };
     }
     if (existing) {
       return {
@@ -112,7 +117,7 @@ export async function updateCustomer(id: string, input: CustomerInput) {
 
   const phone = input.phone.trim();
   if (phone) {
-    const existing = await db.customer.findUnique({ where: { phone } });
+    const existing = await customerHoldingPhone(phone);
     if (existing && existing.id !== id) {
       return {
         ok: false as const,

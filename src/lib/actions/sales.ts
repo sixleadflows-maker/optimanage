@@ -13,6 +13,7 @@ import {
 } from "@/lib/sales/core";
 import { trashInvoice, TrashError } from "@/lib/trash/snapshots";
 import type { PaymentPart } from "@/lib/sales/paymentSplit";
+import { liveCustomerWithPhone } from "@/lib/trash/heldValues";
 
 export interface CartItemInput {
   // Correcting an invoice: the line this already is, so it's changed in place.
@@ -76,7 +77,7 @@ const BACKDATE_AFTER_MS = 10 * 60_000;
 async function customerForOfflineBill(c: { name: string; phone: string }) {
   const phone = c.phone.trim();
   if (phone) {
-    const existing = await db.customer.findUnique({ where: { phone } });
+    const existing = await liveCustomerWithPhone(phone);
     if (existing) return existing.id;
   }
   const created = await db.customer.create({ data: { name: c.name.trim() || "Customer", phone: phone || null } });

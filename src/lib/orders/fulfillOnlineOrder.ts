@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
 import { persistSale, type SaleCoreItem } from "@/lib/sales/core";
+import { liveCustomerWithPhone } from "@/lib/trash/heldValues";
 
 interface CartItemSnapshot {
   productId: string;
@@ -27,7 +28,7 @@ export async function fulfillOnlineOrder(checkoutSessionId: string) {
     discount: 0,
   }));
 
-  let customer = await db.customer.findUnique({ where: { phone: session.customerPhone } });
+  let customer = session.customerPhone ? await liveCustomerWithPhone(session.customerPhone) : null;
   if (!customer) {
     customer = await db.customer.create({
       data: { name: session.customerName, phone: session.customerPhone, email: session.customerEmail },
