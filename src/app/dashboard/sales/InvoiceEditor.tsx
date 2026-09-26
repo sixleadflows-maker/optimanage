@@ -699,7 +699,7 @@ export function EditPaymentModal({
     }
     onDone(
       remove
-        ? `Payment removed — ${res.balance > 0 ? `${formatCurrency(res.balance)} now owed` : "paid in full"}`
+        ? `Payment moved to the Trash — ${res.balance > 0 ? `${formatCurrency(res.balance)} now owed` : "paid in full"}. Restore it from there if that was a mistake.`
         : `Payment updated — ${res.balance > 0 ? `${formatCurrency(res.balance)} still owed` : "paid in full"}`
     );
   };

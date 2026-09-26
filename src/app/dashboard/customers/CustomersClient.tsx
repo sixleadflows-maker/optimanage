@@ -5,18 +5,18 @@ import { useRouter } from "next/navigation";
 import type { CustomerView } from "@/lib/data";
 import { formatCurrency, formatDate } from "@/lib/utils/format";
 import { useApp } from "@/lib/context";
-import { createCustomer, deleteCustomer } from "@/lib/actions/customers";
-import { Search, Users, Plus, X, Loader2, Trash2, FilePlus } from "lucide-react";
+import { deleteCustomer } from "@/lib/actions/customers";
+import { Search, Users, Plus, X, Loader2, Trash2, FilePlus, Pencil } from "lucide-react";
 import Link from "next/link";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { CustomerFormModal } from "./CustomerFormModal";
 
 export function CustomersClient({ customers, canDelete }: { customers: CustomerView[]; canDelete: boolean }) {
   const router = useRouter();
   const { showToast } = useApp();
   const [search, setSearch] = useState("");
-  const [showAdd, setShowAdd] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ name: "", phone: "", serialNumber: "", email: "", address: "", lastVisit: "" });
+  // Adding a new customer, or editing the one picked.
+  const [formFor, setFormFor] = useState<CustomerView | "new" | null>(null);
 
   const [deletingCustomer, setDeletingCustomer] = useState<CustomerView | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -48,29 +48,6 @@ export function CustomersClient({ customers, canDelete }: { customers: CustomerV
     );
   }, [customers, search]);
 
-  const handleAdd = async () => {
-    if (!form.name.trim()) {
-      showToast("Customer name is required", "error");
-      return;
-    }
-    setSaving(true);
-    try {
-      const res = await createCustomer(form);
-      if (!res.ok) {
-        showToast(res.error || "Could not add customer", "error");
-        return;
-      }
-      showToast("Customer added", "success");
-      setShowAdd(false);
-      setForm({ name: "", phone: "", serialNumber: "", email: "", address: "", lastVisit: "" });
-      router.refresh();
-    } catch {
-      showToast("Something went wrong", "error");
-    } finally {
-      setSaving(false);
-    }
-  };
-
   return (
     <div className="space-y-6 animate-fade-in">
       <div className="flex items-center justify-between">
@@ -78,7 +55,7 @@ export function CustomersClient({ customers, canDelete }: { customers: CustomerV
           <h1 className="text-2xl font-bold">Customers</h1>
           <p className="text-sm text-muted-foreground mt-0.5">{customers.length} customers registered</p>
         </div>
-        <button onClick={() => setShowAdd(true)}
+        <button onClick={() => setFormFor("new")}
           className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-xl text-sm font-medium hover:bg-primary-hover transition-colors">
           <Plus className="w-4 h-4" /> Add Customer
         </button>
@@ -138,6 +115,10 @@ export function CustomersClient({ customers, canDelete }: { customers: CustomerV
                       className="inline-flex p-1.5 rounded-lg hover:bg-primary/10">
                       <FilePlus className="w-3.5 h-3.5 text-primary" />
                     </Link>
+                    <button onClick={() => setFormFor(c)} title="Edit customer details"
+                      className="p-1.5 rounded-lg hover:bg-surface-hover cursor-pointer">
+                      <Pencil className="w-3.5 h-3.5 text-muted-foreground" />
+                    </button>
                     {canDelete && (
                       <button onClick={() => setDeletingCustomer(c)} title="Delete customer"
                         className="p-1.5 rounded-lg hover:bg-destructive/10 cursor-pointer">
@@ -152,49 +133,8 @@ export function CustomersClient({ customers, canDelete }: { customers: CustomerV
         </div>
       </div>
 
-      {showAdd && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowAdd(false)}>
-          <div className="glass-modal p-6 w-full max-w-md animate-rise" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold">Add Customer</h3>
-              <button onClick={() => setShowAdd(false)}><X className="w-5 h-5" /></button>
-            </div>
-            <div className="space-y-3">
-              <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Name *</label>
-                <input type="text" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="w-full px-4 py-2.5 glass-input text-sm" />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Phone</label>
-                  <input type="text" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} className="w-full px-4 py-2.5 glass-input text-sm" placeholder="+92 3XX XXXXXXX" />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Serial Number</label>
-                  <input type="text" value={form.serialNumber} onChange={(e) => setForm({ ...form, serialNumber: e.target.value })} className="w-full px-4 py-2.5 glass-input text-sm" placeholder="e.g. SN-0142" />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Email</label>
-                  <input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className="w-full px-4 py-2.5 glass-input text-sm" />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Last Visit Date</label>
-                  <input type="date" value={form.lastVisit} onChange={(e) => setForm({ ...form, lastVisit: e.target.value })} className="w-full px-4 py-2.5 glass-input text-sm" />
-                </div>
-              </div>
-              <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Address</label>
-                <input type="text" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} className="w-full px-4 py-2.5 glass-input text-sm" />
-              </div>
-              <button onClick={handleAdd} disabled={saving}
-                className="w-full py-2.5 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-primary-hover transition-colors disabled:opacity-60 flex items-center justify-center gap-2">
-                {saving && <Loader2 className="w-4 h-4 animate-spin" />} Save Customer
-              </button>
-            </div>
-          </div>
-        </div>
+      {formFor && (
+        <CustomerFormModal customer={formFor === "new" ? null : formFor} onClose={() => setFormFor(null)} />
       )}
 
       {deletingCustomer && (

@@ -325,6 +325,7 @@ export async function updateSalePayment(input: UpdatePaymentInput) {
       note: input.note,
       date: input.date ? new Date(input.date) : undefined,
       remove: input.remove,
+      removedById: session.user.id,
     });
   } catch (e) {
     if (e instanceof SaleError) return { ok: false as const, error: e.message };

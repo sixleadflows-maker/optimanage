@@ -10,6 +10,7 @@ import { setPrescriptionNotesHidden } from "@/lib/actions/prescriptions";
 import { paymentStatusChipClass } from "@/lib/constants";
 import { formatEyeValue } from "@/lib/utils/rx";
 import { EditInvoiceModal, type EditorCustomer, type EditorStaff } from "@/app/dashboard/sales/InvoiceEditor";
+import { CustomerFormModal } from "../CustomerFormModal";
 import { ArrowLeft, MessageCircle, Bell, Eye, EyeOff, RefreshCw, Phone, Mail, MapPin, Trash2, Loader2, Pencil, FilePlus } from "lucide-react";
 import Link from "next/link";
 
@@ -29,6 +30,7 @@ export function CustomerProfileClient({
   const [deleting, setDeleting] = useState(false);
   const [togglingNotes, setTogglingNotes] = useState<string | null>(null);
   const [editingSale, setEditingSale] = useState<SaleView | null>(null);
+  const [editingDetails, setEditingDetails] = useState(false);
 
   // Hiding a note applies everywhere, so the customer's own screen at the
   // counter never shows it until someone chooses to.
@@ -89,6 +91,10 @@ export function CustomerProfileClient({
           className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-xl text-sm font-medium hover:bg-primary-hover transition-colors">
           <FilePlus className="w-4 h-4" /> New Invoice
         </Link>
+        <button onClick={() => setEditingDetails(true)} title="Edit name, phone, serial number, email or address"
+          className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium hover:bg-surface-hover transition-colors cursor-pointer">
+          <Pencil className="w-4 h-4" /> Edit
+        </button>
         {canDelete && (
           <button onClick={handleDelete} disabled={deleting}
             className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-60 cursor-pointer">
@@ -263,6 +269,8 @@ export function CustomerProfileClient({
           }}
         />
       )}
+
+      {editingDetails && <CustomerFormModal customer={customer} onClose={() => setEditingDetails(false)} />}
     </div>
   );
 }

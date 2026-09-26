@@ -11,11 +11,12 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import {
   Trash2, RotateCcw, Package, MapPin, UserRound, Users, Loader2, Truck, FlaskConical,
-  Receipt, Undo2, Wallet, Eye, ClipboardList, XCircle, Boxes,
+  Receipt, Undo2, Wallet, Eye, ClipboardList, XCircle, Boxes, Banknote,
 } from "lucide-react";
 
 const kindMeta: Record<TrashKind, { icon: typeof Package; label: string; plural: string; color: string }> = {
   invoice: { icon: Receipt, label: "Invoice", plural: "Invoices", color: "bg-primary/10 text-primary" },
+  payment: { icon: Banknote, label: "Payment", plural: "Payments", color: "bg-success/10 text-success" },
   return: { icon: Undo2, label: "Return", plural: "Returns", color: "bg-warning/10 text-warning" },
   product: { icon: Package, label: "Product", plural: "Products", color: "bg-primary/10 text-primary" },
   customer: { icon: Users, label: "Customer", plural: "Customers", color: "bg-success/10 text-success" },

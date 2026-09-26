@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import type { SettingsView, UserView, BranchView } from "@/lib/data";
 import { useApp } from "@/lib/context";
 import { updateShopSettings, setAnalyticsPin } from "@/lib/actions/settings";
-import { createUser, setUserActive, resetUserPassword } from "@/lib/actions/users";
+import { createUser, setUserActive, resetUserPassword, updateUser } from "@/lib/actions/users";
 import { createBranch, updateBranch, setBranchActive } from "@/lib/actions/branches";
 import { Store, Shield, Users, Save, Lock, Loader2, CheckCircle, Plus, X, KeyRound, UserX, UserCheck, MapPin, Pencil, Ban, RotateCcw } from "lucide-react";
 
@@ -15,7 +15,9 @@ const roleColors: Record<string, string> = {
   Cashier: "bg-success/10 text-success",
 };
 
-const EMPTY_NEW_USER = { name: "", email: "", password: "", role: "CASHIER" as "OWNER" | "MANAGER" | "CASHIER" };
+type UserRole = "OWNER" | "MANAGER" | "CASHIER";
+const EMPTY_NEW_USER = { name: "", email: "", password: "", role: "CASHIER" as UserRole };
+const EMPTY_USER_FORM = { name: "", email: "", role: "CASHIER" as UserRole, branchId: "" };
 const EMPTY_BRANCH_FORM = { name: "", address: "", phone: "" };
 
 export function SettingsClient({ settings, users, branches, canManage, isOwner, currentUserId }: { settings: SettingsView; users: UserView[]; branches: BranchView[]; canManage: boolean; isOwner: boolean; currentUserId: string }) {
@@ -60,6 +62,33 @@ export function SettingsClient({ settings, users, branches, canManage, isOwner, 
       showToast(e instanceof Error ? e.message : "Could not update user", "error");
     } finally {
       setTogglingId(null);
+    }
+  };
+
+  const [editingUser, setEditingUser] = useState<UserView | null>(null);
+  const [userForm, setUserForm] = useState({ ...EMPTY_USER_FORM });
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  const openEditUser = (u: UserView) => {
+    setEditingUser(u);
+    setUserForm({ name: u.name, email: u.email, role: u.role.toUpperCase() as UserRole, branchId: u.branchId });
+  };
+
+  const saveEditUser = async () => {
+    if (!editingUser) return;
+    if (editingUser.id === currentUserId && userForm.role !== "OWNER"
+      && !confirm("You're taking away your own owner access — you won't be able to manage staff or settings afterwards. Continue?")) return;
+    setSavingEdit(true);
+    try {
+      const res = await updateUser(editingUser.id, { ...userForm, branchId: userForm.branchId || null });
+      if (!res.ok) { showToast(res.error, "error"); return; }
+      showToast(`${userForm.name.trim()}'s account updated`, "success");
+      setEditingUser(null);
+      router.refresh();
+    } catch {
+      showToast("Couldn't save — check the connection and try again", "error");
+    } finally {
+      setSavingEdit(false);
     }
   };
 
@@ -312,6 +341,10 @@ export function SettingsClient({ settings, users, branches, canManage, isOwner, 
                     {isOwner && (
                       <td className="py-3 px-3">
                         <div className="flex items-center justify-center gap-1.5">
+                          <button onClick={() => openEditUser(u)} title="Edit name, email, role or location"
+                            className="p-1.5 rounded-lg hover:bg-surface-hover cursor-pointer">
+                            <Pencil className="w-3.5 h-3.5 text-muted-foreground" />
+                          </button>
                           <button onClick={() => { setResettingId(u.id); setNewPassword(""); }} title="Reset password"
                             className="p-1.5 rounded-lg hover:bg-surface-hover cursor-pointer">
                             <KeyRound className="w-3.5 h-3.5 text-muted-foreground" />
@@ -457,6 +490,51 @@ export function SettingsClient({ settings, users, branches, canManage, isOwner, 
               <button onClick={saveNewUser} disabled={savingUser}
                 className="w-full py-2.5 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-primary-hover transition-colors disabled:opacity-60 flex items-center justify-center gap-2 cursor-pointer">
                 {savingUser && <Loader2 className="w-4 h-4 animate-spin" />} Add User
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {editingUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setEditingUser(null)}>
+          <div className="glass-modal p-6 w-full max-w-md animate-rise" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold">Edit {editingUser.name}</h3>
+              <button onClick={() => setEditingUser(null)} className="cursor-pointer"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Name *</label>
+                <input type="text" value={userForm.name} onChange={(e) => setUserForm({ ...userForm, name: e.target.value })} className="w-full px-4 py-2.5 glass-input text-sm" />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Email * <span className="font-normal">(what they sign in with)</span></label>
+                <input type="email" value={userForm.email} onChange={(e) => setUserForm({ ...userForm, email: e.target.value })} className="w-full px-4 py-2.5 glass-input text-sm" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Role</label>
+                  <select value={userForm.role} onChange={(e) => setUserForm({ ...userForm, role: e.target.value as UserRole })} className="w-full px-4 py-2.5 glass-input text-sm">
+                    <option value="CASHIER">Cashier</option>
+                    <option value="MANAGER">Manager</option>
+                    <option value="OWNER">Owner</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Location</label>
+                  <select value={userForm.branchId} onChange={(e) => setUserForm({ ...userForm, branchId: e.target.value })} className="w-full px-4 py-2.5 glass-input text-sm">
+                    <option value="">—</option>
+                    {branches.filter((b) => b.active || b.id === userForm.branchId).map((b) => (
+                      <option key={b.id} value={b.id}>{b.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <p className="text-[11px] text-muted-foreground">Changes apply within a minute, even if they&apos;re signed in right now.</p>
+              <button onClick={saveEditUser} disabled={savingEdit}
+                className="w-full py-2.5 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-primary-hover transition-colors disabled:opacity-60 flex items-center justify-center gap-2 cursor-pointer">
+                {savingEdit && <Loader2 className="w-4 h-4 animate-spin" />} Save Changes
               </button>
             </div>
           </div>

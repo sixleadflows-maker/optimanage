@@ -1,7 +1,7 @@
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import type { Prisma } from "@/generated/prisma/client";
-import { trashPrescriptionRows } from "@/lib/trash/snapshots";
+import { trashPrescriptionRows, trashSalePaymentRow } from "@/lib/trash/snapshots";
 import { rxTextColumns, type RxTextColumns } from "@/lib/utils/rx";
 import { paymentFromParts, readSplit, splitTotal, type PaymentPart } from "@/lib/sales/paymentSplit";
 
@@ -829,11 +829,12 @@ export async function recordSalePayment(
  * Corrects a payment already taken against an invoice — a mistyped amount, the
  * wrong method, the wrong day. The invoice's paid total and balance are worked
  * out again from what's left, so the day's cash follows the correction.
- * Passing `remove` deletes the payment instead.
+ * Passing `remove` takes the payment off instead -- into the trash, from
+ * which it can be put back on the invoice.
  */
 export async function reviseSalePayment(
   paymentId: string,
-  change: { amount?: number; method?: string; note?: string; date?: Date; remove?: boolean },
+  change: { amount?: number; method?: string; note?: string; date?: Date; remove?: boolean; removedById?: string | null },
 ) {
   const payment = await db.salePayment.findUnique({ where: { id: paymentId }, include: { sale: true } });
   if (!payment) throw new SaleError("That payment has already been removed");
@@ -859,7 +860,7 @@ export async function reviseSalePayment(
 
   await db.$transaction(async (tx) => {
     if (change.remove) {
-      await tx.salePayment.delete({ where: { id: paymentId } });
+      await trashSalePaymentRow(tx, payment, sale.invoiceNo, change.removedById ?? null);
     } else {
       await tx.salePayment.update({
         where: { id: paymentId },

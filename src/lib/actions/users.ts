@@ -3,7 +3,7 @@
 import { hash } from "bcryptjs";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
-import { auth } from "@/lib/auth";
+import { auth, forgetAccount } from "@/lib/auth";
 
 // User management (creating accounts, deactivating, resetting passwords) is
 // deliberately Owner-only -- stricter than the Owner+Manager "canManage"
@@ -62,9 +62,60 @@ export async function setUserActive(id: string, active: boolean) {
     where: { id },
     data: { active, deletedAt: active ? null : new Date() },
   });
+  forgetAccount(id);
   revalidatePath("/dashboard/settings");
   revalidatePath("/dashboard/trash");
   return { ok: true };
+}
+
+export interface UpdateUserInput {
+  name: string;
+  email: string;
+  role: "OWNER" | "MANAGER" | "CASHIER";
+  branchId: string | null;
+}
+
+/**
+ * Corrects a staff account: name, the email they sign in with, role and
+ * location. Applies to them straight away, even while signed in.
+ */
+export async function updateUser(id: string, input: UpdateUserInput) {
+  const session = await auth();
+  if (!session?.user || session.user.role !== "OWNER") return { ok: false as const, error: "Only the owner can change staff accounts" };
+
+  const name = input.name.trim();
+  const email = input.email.trim();
+  if (!name) return { ok: false as const, error: "Enter a name" };
+  if (!email) return { ok: false as const, error: "Enter an email — it's what they sign in with" };
+
+  const target = await db.user.findUnique({ where: { id } });
+  if (!target) return { ok: false as const, error: "That account no longer exists" };
+  const clash = await db.user.findUnique({ where: { email } });
+  if (clash && clash.id !== id) return { ok: false as const, error: `${clash.name} already signs in with that email` };
+
+  // Never leave the shop without an owner who can sign in.
+  if (target.role === "OWNER" && input.role !== "OWNER" && target.active) {
+    const otherOwners = await db.user.count({ where: { role: "OWNER", active: true, id: { not: id } } });
+    if (otherOwners === 0) return { ok: false as const, error: "This is the only owner account — make someone else an owner first" };
+  }
+  if (input.branchId && !(await db.branch.findUnique({ where: { id: input.branchId }, select: { id: true } }))) {
+    return { ok: false as const, error: "That location no longer exists" };
+  }
+
+  await db.user.update({
+    where: { id },
+    data: {
+      name,
+      email,
+      role: input.role,
+      branchId: input.branchId || null,
+      // Initials follow the new name.
+      ...(name !== target.name ? { avatar: "" } : {}),
+    },
+  });
+  forgetAccount(id);
+  revalidatePath("/dashboard/settings");
+  return { ok: true as const };
 }
 
 export async function resetUserPassword(id: string, newPassword: string) {

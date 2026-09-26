@@ -108,12 +108,19 @@ export async function createCustomer(input: CustomerInput): Promise<CreateCustom
 
 export async function updateCustomer(id: string, input: CustomerInput) {
   await requireAuth();
-  if (!input.name.trim()) throw new Error("Name is required");
+  if (!input.name.trim()) return { ok: false as const, error: "Name is required" };
 
   const phone = input.phone.trim();
   if (phone) {
     const existing = await db.customer.findUnique({ where: { phone } });
-    if (existing && existing.id !== id) return { ok: false, error: "Another customer already uses this phone" };
+    if (existing && existing.id !== id) {
+      return {
+        ok: false as const,
+        error: existing.active
+          ? `${existing.name} already has this phone number`
+          : `${existing.name} already has this phone number but is in the Trash — restore or delete them there first`,
+      };
+    }
   }
 
   await db.customer.update({
@@ -129,9 +136,14 @@ export async function updateCustomer(id: string, input: CustomerInput) {
       ...(input.lastVisit ? { lastVisit: new Date(input.lastVisit) } : {}),
     },
   });
+  // The name and phone show on invoices, prescriptions and lab orders too.
   revalidatePath("/dashboard/customers");
   revalidatePath(`/dashboard/customers/${id}`);
-  return { ok: true };
+  revalidatePath("/dashboard/pos");
+  revalidatePath("/dashboard/sales");
+  revalidatePath("/dashboard/prescriptions");
+  revalidatePath("/dashboard/lab-orders");
+  return { ok: true as const };
 }
 
 // Moves the customer to the Trash rather than erasing them: their invoices,

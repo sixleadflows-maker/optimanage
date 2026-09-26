@@ -308,6 +308,45 @@ export async function trashStockAdjustment(id: string, deletedById: string | nul
   });
 }
 
+// ─── Payments taken against an invoice after the sale ───────
+
+/**
+ * Removing a payment inside the transaction that also takes it off the
+ * invoice's paid total, so it can be brought back from the trash.
+ */
+export async function trashSalePaymentRow(
+  tx: Tx,
+  p: { id: string; saleId: string; amount: number; method: string; note: string; date: Date; receivedById: string | null; createdAt: Date },
+  invoiceNo: string,
+  deletedById: string | null,
+) {
+  const payment = {
+    id: p.id, saleId: p.saleId, amount: p.amount, method: p.method, note: p.note,
+    date: p.date, receivedById: p.receivedById, createdAt: p.createdAt,
+  };
+  await store(tx, "payment", p.id, `Payment — ${invoiceNo}`,
+    [rs(p.amount), p.method, p.date.toLocaleDateString("en-GB")].join(" · "),
+    { payment }, deletedById);
+  await tx.salePayment.delete({ where: { id: p.id } });
+}
+
+async function restorePayment(tx: Tx, data: Row) {
+  const payment = revive(data.payment as Row, ["date", "createdAt"]);
+  const amount = payment.amount as number;
+  const sale = await tx.sale.findUnique({ where: { id: payment.saleId as string } });
+  if (!sale) throw new TrashError("Can't restore this payment: its invoice has been deleted");
+  if (amount > sale.balance + 0.01) {
+    throw new TrashError(
+      `Can't restore this payment: ${sale.invoiceNo} only has ${rs(sale.balance)} still owed now — correct the invoice or take a new payment instead`
+    );
+  }
+  const paid = Math.round((sale.paid + amount) * 100) / 100;
+  const balance = Math.max(0, sale.total - paid);
+  const paymentStatus = balance <= 0 ? ("PAID" as const) : paid > 0 ? ("ADVANCE" as const) : ("BALANCE" as const);
+  await tx.salePayment.create({ data: payment as Prisma.SalePaymentUncheckedCreateInput });
+  await tx.sale.update({ where: { id: sale.id }, data: { paid, balance, paymentStatus } });
+}
+
 // ─── Restore ────────────────────────────────────────────────
 
 export async function restoreSnapshot(entryId: string) {
@@ -322,6 +361,9 @@ export async function restoreSnapshot(entryId: string) {
         break;
       case "return":
         await restoreReturn(tx, data);
+        break;
+      case "payment":
+        await restorePayment(tx, data);
         break;
       case "expense":
         await tx.expense.create({ data: revive(data.expense as Row, ["date", "createdAt"]) as Prisma.ExpenseUncheckedCreateInput });

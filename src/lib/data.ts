@@ -575,6 +575,7 @@ const roleLabel = { OWNER: "Owner", MANAGER: "Manager", CASHIER: "Cashier" } as 
 
 export interface UserView {
   id: string; name: string; email: string; role: string; avatar: string; active: boolean;
+  branchId: string;
 }
 
 export async function getUsers(): Promise<UserView[]> {
@@ -586,6 +587,7 @@ export async function getUsers(): Promise<UserView[]> {
     role: roleLabel[u.role],
     avatar: u.avatar || u.name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase(),
     active: u.active,
+    branchId: u.branchId ?? "",
   }));
 }
 
