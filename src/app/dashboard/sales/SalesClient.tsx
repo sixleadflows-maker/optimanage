@@ -14,6 +14,7 @@ import { createReturn, deleteReturn, updateReturn } from "@/lib/actions/returns"
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { updateOnlineOrderStatus, deleteSale, type OnlineOrderStatusValue } from "@/lib/actions/sales";
 import { PAYMENT_STATUS, paymentStatusChipClass } from "@/lib/constants";
+import { primaryMethod } from "@/lib/sales/paymentSplit";
 import { ThermalReceipt, A4Invoice, invoiceFromSale, type ShopDetails } from "@/components/invoice/InvoiceDocuments";
 import { CollectPaymentModal, EditInvoiceModal, EditPaymentModal, type EditorCustomer, type EditorStaff } from "./InvoiceEditor";
 
@@ -77,10 +78,12 @@ function InvoiceHistory({
         <div>
           <p className="text-muted-foreground mb-1">Payments</p>
           <div className="space-y-1">
-            <div className="flex justify-between gap-3">
-              <span>{when(sale.dateTime)} · {sale.paymentMethod} · at the till</span>
-              <span className="font-medium">{formatCurrency(takenAtTill)}</span>
-            </div>
+            {(sale.paymentSplit.length ? sale.paymentSplit : [{ method: sale.paymentMethod, amount: takenAtTill }]).map((p) => (
+              <div key={p.method} className="flex justify-between gap-3">
+                <span>{when(sale.dateTime)} · {p.method} · at the till</span>
+                <span className="font-medium">{formatCurrency(p.amount)}</span>
+              </div>
+            ))}
             {sale.payments.map((p) => (
               <div key={p.id} className="flex justify-between gap-3 items-start">
                 <span className="min-w-0">
@@ -267,7 +270,7 @@ export function SalesClient({
   const openReturn = (sale: SaleView) => {
     setReturnQtys({});
     setReturnReason("");
-    setRefundMethod(sale.paymentMethod || "Cash");
+    setRefundMethod(primaryMethod(sale) || "Cash");
     setReturningSale(sale);
   };
 

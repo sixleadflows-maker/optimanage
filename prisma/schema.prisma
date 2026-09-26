@@ -201,6 +201,11 @@ model Sale {
 
   paymentMethod   String        @default("Cash")
   paymentStatus   PaymentStatus @default(PAID)
+  // When the money taken at the till was split across methods, e.g.
+  // [{"method":"Cash","amount":5000},{"method":"Card","amount":3000}], and
+  // paymentMethod reads "Cash + Card". Empty when it was all one method. The
+  // parts always add up to what was taken at the till (paid less later payments).
+  paymentSplit    Json          @default("[]")
 
   // Profitability tracking
   lensProductId   String?

@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import type { Prisma } from "@/generated/prisma/client";
 import { trashPrescriptionRows } from "@/lib/trash/snapshots";
 import { rxTextColumns, type RxTextColumns } from "@/lib/utils/rx";
+import { paymentFromParts, readSplit, splitTotal, type PaymentPart } from "@/lib/sales/paymentSplit";
 
 export interface SaleCoreItem {
   // Left out for an item typed in at the till that isn't in the inventory --
@@ -38,6 +39,9 @@ export interface PersistSaleInput {
   items: SaleCoreItem[];
   customerId?: string | null;
   paymentMethod: string;
+  // Paid partly by one method and partly by another: the parts add up to what
+  // is paid now (the whole total, or the advance).
+  paymentSplit?: PaymentPart[];
   paymentType: "Full" | "Advance" | "Balance";
   advanceAmount: number;
   invoiceDiscount: number;
@@ -260,6 +264,12 @@ export async function persistSale(input: PersistSaleInput, meta: PersistSaleMeta
   const paymentStatus = paymentStatusFor(input.paymentType);
   const paid = input.paymentType === "Full" ? total : input.paymentType === "Advance" ? input.advanceAmount : 0;
   const balance = Math.max(0, total - paid);
+  const payment = paymentFromParts(input.paymentSplit ?? [], input.paymentMethod);
+  if (payment.paymentSplit.length && Math.abs(splitTotal(payment.paymentSplit) - paid) > 0.01) {
+    throw new SaleError(
+      `The split payment comes to ${formatRs(splitTotal(payment.paymentSplit))} but ${formatRs(paid)} is being paid now — make the amounts match`
+    );
+  }
   const saleDate = meta.date ?? new Date();
   const deductStock = meta.deductStock ?? true;
   // Items an offline bill took below zero — reported back so someone can
@@ -308,7 +318,8 @@ export async function persistSale(input: PersistSaleInput, meta: PersistSaleMeta
         total,
         paid,
         balance,
-        paymentMethod: input.paymentMethod,
+        paymentMethod: payment.paymentMethod,
+        paymentSplit: payment.paymentSplit,
         paymentStatus,
         lensProductId: input.lensProductId || null,
         lensCost,
@@ -489,6 +500,9 @@ export interface ReviseSaleInput {
   // "full" for whatever settles the bill. Payments received on a later day stay
   // as they are. Left out, the invoice keeps what it has.
   payment?: { atTill: number | "full" };
+  // Given with `payment`: how that amount divides between methods. Two or more
+  // make a split; none or one means it was all one method.
+  paymentSplit?: PaymentPart[];
   // The prescriptions the bill carries now. Left out, they're left alone.
   prescriptions?: SalePrescriptionInput[];
   // Who made the change, for a prescription it moves to the trash.
@@ -546,6 +560,8 @@ export async function reviseSale(saleId: string, input: ReviseSaleInput) {
 
   const priced = await priceSale({ ...input, deliveryFee: sale.deliveryFee });
   let paid = sale.paid;
+  let paymentMethod = input.paymentMethod ?? sale.paymentMethod;
+  let paymentSplit = readSplit(sale.paymentSplit);
   if (input.payment) {
     const later = await db.salePayment.aggregate({ where: { saleId }, _sum: { amount: true } });
     const laterPaid = later._sum.amount ?? 0;
@@ -563,6 +579,13 @@ export async function reviseSale(saleId: string, input: ReviseSaleInput) {
         `${formatRs(paid)} paid is more than the ${formatRs(priced.total)} bill — lower the amount taken at the till`
       );
     }
+    const payment = paymentFromParts(input.paymentSplit ?? [], paymentMethod);
+    if (payment.paymentSplit.length && Math.abs(splitTotal(payment.paymentSplit) - atCounter) > 0.01) {
+      throw new SaleError(
+        `The split payment comes to ${formatRs(splitTotal(payment.paymentSplit))} but ${formatRs(atCounter)} was taken at the till — make the amounts match`
+      );
+    }
+    ({ paymentMethod, paymentSplit } = payment);
   } else if (priced.total < sale.paid) {
     throw new SaleError(
       `The new total (Rs.${priced.total.toLocaleString()}) is less than the Rs.${sale.paid.toLocaleString()} already paid. Refund the difference through Return & Refund instead.`
@@ -612,7 +635,8 @@ export async function reviseSale(saleId: string, input: ReviseSaleInput) {
       data: {
         date,
         customerId: customerId ?? null,
-        paymentMethod: input.paymentMethod ?? sale.paymentMethod,
+        paymentMethod,
+        paymentSplit,
         createdById: input.createdById === undefined ? sale.createdById : input.createdById || null,
         receivedById: input.receivedById === undefined ? sale.receivedById : input.receivedById || null,
         subtotal: priced.subtotal,

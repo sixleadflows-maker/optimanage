@@ -1,4 +1,5 @@
 import { formatCurrency } from "@/lib/utils/format";
+import type { PaymentPart } from "@/lib/sales/paymentSplit";
 
 // One description of a bill, shared by the till (straight after a sale) and
 // Sales history (reopening an old one), so a reprint matches the original.
@@ -36,6 +37,9 @@ export interface InvoiceData {
   discount: number;
   total: number;
   paymentMethod: string;
+  // Paid partly by one method, partly by another: each part, printed under
+  // the payment line.
+  paymentSplit?: PaymentPart[];
   paymentStatus: string;
   paid: number;
   balance: number;
@@ -142,6 +146,11 @@ export function ThermalReceipt({ invoice, shop }: { invoice: InvoiceData; shop: 
 
       <div className="space-y-0.5">
         <Row label="Payment" value={`${invoice.paymentMethod} · ${invoice.paymentStatus}`} />
+        {invoice.paymentSplit?.map((p) => (
+          <div key={p.method} className="flex justify-between pl-3 text-[10px]">
+            <span>{p.method}</span><span>{amt(p.amount)}</span>
+          </div>
+        ))}
         {laterPayments.length > 0 && (
           <>
             <Row label={`Paid at till (${invoice.paymentMethod})`} value={amt(takenAtTill)} />
@@ -240,6 +249,16 @@ export function A4Invoice({ invoice, shop }: { invoice: InvoiceData; shop: ShopD
           <div className="flex justify-between text-lg font-bold border-t-2 border-gray-800 pt-2 mt-2">
             <span>Total</span><span className="text-[#6d5ef0]">{formatCurrency(invoice.total)}</span>
           </div>
+          {(invoice.paymentSplit?.length ?? 0) > 0 && (
+            <div className="border-t border-gray-200 pt-1 mt-1 text-xs text-gray-600">
+              {invoice.paymentSplit!.map((p) => (
+                <div key={p.method} className="flex justify-between">
+                  <span>Paid by {p.method}</span>
+                  <span>{formatCurrency(p.amount)}</span>
+                </div>
+              ))}
+            </div>
+          )}
           {(invoice.payments?.length ?? 0) > 0 && (
             <div className="border-t border-gray-200 pt-1 mt-1 text-xs text-gray-600">
               <div className="flex justify-between">
@@ -299,7 +318,7 @@ export function invoiceFromSale(sale: {
   lensProductId: string; lensColor: string; lensDescription: string;
   offlineRef: string;
   subtotal: number; discount: number; total: number; paid: number; balance: number;
-  paymentMethod: string; paymentStatus: string;
+  paymentMethod: string; paymentSplit: PaymentPart[]; paymentStatus: string;
   payments: { date: string; amount: number; method: string }[];
 }): InvoiceData {
   // Colour and description belong to whichever lens was sold, so they print
@@ -332,6 +351,7 @@ export function invoiceFromSale(sale: {
     discount: sale.discount,
     total: sale.total,
     paymentMethod: sale.paymentMethod,
+    paymentSplit: sale.paymentSplit,
     paymentStatus: sale.paymentStatus,
     paid: sale.paid,
     balance: sale.balance,

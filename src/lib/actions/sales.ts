@@ -12,6 +12,7 @@ import {
   type SalePrescriptionInput,
 } from "@/lib/sales/core";
 import { trashInvoice, TrashError } from "@/lib/trash/snapshots";
+import type { PaymentPart } from "@/lib/sales/paymentSplit";
 
 export interface CartItemInput {
   // Correcting an invoice: the line this already is, so it's changed in place.
@@ -29,6 +30,8 @@ export interface CreateSaleInput {
   items: CartItemInput[];
   customerId?: string;
   paymentMethod: string;
+  // Part paid by one method, part by another; adds up to what's paid now.
+  paymentSplit?: PaymentPart[];
   paymentType: "Full" | "Advance" | "Balance";
   advanceAmount: number;
   invoiceDiscount: number;
@@ -195,6 +198,8 @@ export interface UpdateSaleInput {
   // What was taken at the counter on the day of the sale. Left out, the
   // invoice keeps what it has; money collected later is never touched here.
   paidAtTill?: number;
+  // How paidAtTill divides between methods, when more than one was used.
+  paymentSplit?: PaymentPart[];
   // The invoice's own details (ISO date), all correctable.
   date?: string;
   customerId?: string | null;
@@ -280,6 +285,7 @@ export async function updateTillSale(input: CreateSaleInput) {
       lensColor: input.lensColor,
       lensDescription: input.lensDescription,
       payment: { atTill: input.paymentType === "Full" ? "full" : input.paymentType === "Advance" ? input.advanceAmount : 0 },
+      paymentSplit: input.paymentSplit ?? [],
       prescriptions: input.prescriptions ?? [],
       revisedById: session.user.id,
     });

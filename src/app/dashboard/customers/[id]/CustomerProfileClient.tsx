@@ -10,7 +10,7 @@ import { setPrescriptionNotesHidden } from "@/lib/actions/prescriptions";
 import { paymentStatusChipClass } from "@/lib/constants";
 import { formatEyeValue } from "@/lib/utils/rx";
 import { EditInvoiceModal, type EditorCustomer, type EditorStaff } from "@/app/dashboard/sales/InvoiceEditor";
-import { ArrowLeft, MessageCircle, Bell, Eye, EyeOff, RefreshCw, Phone, Mail, MapPin, Trash2, Loader2, Pencil } from "lucide-react";
+import { ArrowLeft, MessageCircle, Bell, Eye, EyeOff, RefreshCw, Phone, Mail, MapPin, Trash2, Loader2, Pencil, FilePlus } from "lucide-react";
 import Link from "next/link";
 
 export function CustomerProfileClient({
@@ -84,6 +84,11 @@ export function CustomerProfileClient({
           <ArrowLeft className="w-5 h-5" />
         </Link>
         <h1 className="text-2xl font-bold flex-1">Customer Profile</h1>
+        <Link href={`/dashboard/pos?customer=${customer.id}`}
+          title={`Open the till with ${customer.name} already on the bill`}
+          className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-xl text-sm font-medium hover:bg-primary-hover transition-colors">
+          <FilePlus className="w-4 h-4" /> New Invoice
+        </Link>
         {canDelete && (
           <button onClick={handleDelete} disabled={deleting}
             className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-60 cursor-pointer">

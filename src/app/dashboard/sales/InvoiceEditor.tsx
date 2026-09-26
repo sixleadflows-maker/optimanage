@@ -8,6 +8,8 @@ import { collectSalePayment, updateSale, updateSalePayment } from "@/lib/actions
 import { searchProductsForSale, type ProductSearchHit } from "@/lib/actions/products";
 import { LENS_COLORS, PAYMENT_METHODS } from "@/lib/constants";
 import { Loader2, Plus, Search, Trash2, Wallet, X, Pencil, AlertTriangle, CalendarClock, User } from "lucide-react";
+import { SPLIT_METHOD, paymentFromParts, primaryMethod } from "@/lib/sales/paymentSplit";
+import { SplitPaymentFields, splitAmountsTotal, type SplitAmounts } from "@/components/invoice/SplitPaymentFields";
 
 export interface EditorCustomer { id: string; name: string; phone: string }
 export interface EditorStaff { id: string; name: string }
@@ -25,7 +27,7 @@ export function CollectPaymentModal({
 }) {
   const { showToast } = useApp();
   const [amount, setAmount] = useState(sale.balance);
-  const [method, setMethod] = useState(sale.paymentMethod || "Cash");
+  const [method, setMethod] = useState(primaryMethod(sale) || "Cash");
   const [note, setNote] = useState("");
   // When the money was actually taken — now, unless it's being written up later.
   const [takenAt, setTakenAt] = useState(() => toLocalInput(new Date()));
@@ -199,7 +201,11 @@ export function EditInvoiceModal({
   const [billDate, setBillDate] = useState(() => toLocalInput(new Date(sale.dateTime)));
   const [customerId, setCustomerId] = useState(sale.customerId);
   const [customerSearch, setCustomerSearch] = useState("");
-  const [paymentMethod, setPaymentMethod] = useState(sale.paymentMethod);
+  const [paymentMethod, setPaymentMethod] = useState(sale.paymentSplit.length ? SPLIT_METHOD : sale.paymentMethod);
+  const [splitAmounts, setSplitAmounts] = useState<SplitAmounts>(
+    () => Object.fromEntries(sale.paymentSplit.map((p) => [p.method, p.amount]))
+  );
+  const isSplit = paymentMethod === SPLIT_METHOD;
   const [orderTakenBy, setOrderTakenBy] = useState(staff.find((m) => m.name === sale.createdByName)?.id ?? "");
   const [billedBy, setBilledBy] = useState(staff.find((m) => m.name === sale.receivedByName)?.id ?? "");
 
@@ -265,7 +271,9 @@ export function EditInvoiceModal({
   const itemsTotal = lines.reduce((sum, l) => sum + l.unitPrice * l.quantity - l.discount, 0);
   const subtotal = itemsTotal + Math.max(0, customLensPrice) * customLensQty;
   const total = Math.max(0, subtotal - invoiceDiscount);
-  const paid = paidAtTill + laterPaid;
+  // Split across methods: what the till took is the parts added up.
+  const tillAmount = isSplit ? splitAmountsTotal(splitAmounts) : paidAtTill;
+  const paid = tillAmount + laterPaid;
   const newBalance = total - paid;
   const overPaid = paid > total + 0.01;
 
@@ -274,12 +282,16 @@ export function EditInvoiceModal({
       showToast("Give every typed-in item a name", "error");
       return;
     }
+    const payment = isSplit
+      ? paymentFromParts(Object.entries(splitAmounts).map(([method, amount]) => ({ method, amount })), "Cash")
+      : { paymentMethod, paymentSplit: [] };
     setSaving(true);
     const res = await updateSale({
       saleId: sale.id,
       date: canBackdate ? new Date(billDate).toISOString() : undefined,
       customerId: customerId || null,
-      paymentMethod,
+      paymentMethod: payment.paymentMethod,
+      paymentSplit: payment.paymentSplit,
       createdById: orderTakenBy || undefined,
       receivedById: billedBy || undefined,
       items: lines.map((l) =>
@@ -288,7 +300,7 @@ export function EditInvoiceModal({
           : { id: l.saleItemId, name: l.name.trim(), description: l.description, quantity: l.quantity, unitPrice: l.unitPrice, discount: l.discount }
       ),
       invoiceDiscount,
-      paidAtTill,
+      paidAtTill: tillAmount,
       // Keep the catalogue lens tied to the invoice only while its line is still on it.
       lensProductId: lines.some((l) => l.productId === sale.lensProductId) ? sale.lensProductId : undefined,
       customLensName,
@@ -339,9 +351,18 @@ export function EditInvoiceModal({
             </div>
             <div>
               <label className="text-[10px] text-muted-foreground block mb-1">Payment method</label>
-              <select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)}
+              <select value={paymentMethod}
+                onChange={(e) => {
+                  // Splitting what was one payment starts from that payment,
+                  // so only the other method's share needs typing.
+                  if (e.target.value === SPLIT_METHOD && !isSplit && !splitAmountsTotal(splitAmounts) && paidAtTill > 0) {
+                    setSplitAmounts({ [paymentMethod]: paidAtTill });
+                  }
+                  setPaymentMethod(e.target.value);
+                }}
                 className="w-full px-2.5 py-1.5 glass-input text-xs">
                 {PAYMENT_METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
+                <option value={SPLIT_METHOD}>Split (more than one)</option>
               </select>
             </div>
             <div className="col-span-2">
@@ -562,18 +583,34 @@ export function EditInvoiceModal({
           <div className="flex justify-between font-semibold text-sm border-t border-border pt-1.5 mt-1.5">
             <span>New total</span><span>{formatCurrency(total)}</span>
           </div>
-          <div className="flex items-center justify-between">
-            <span className="text-muted-foreground flex items-center gap-1.5">
-              Taken at the till
-              {total > 0 && (
-                <button type="button" onClick={() => setPaidAtTill(Math.max(0, total - laterPaid))}
-                  className="text-primary font-semibold cursor-pointer">Paid in full</button>
-              )}
-              <button type="button" onClick={() => setPaidAtTill(0)} className="text-primary font-semibold cursor-pointer">Nothing</button>
-            </span>
-            <input type="number" min={0} value={paidAtTill || ""} onChange={(e) => setPaidAtTill(Math.max(0, Number(e.target.value)))}
-              className="w-28 px-2 py-1 glass-input text-xs text-right" />
-          </div>
+          {isSplit ? (
+            <>
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">Taken at the till (split)</span>
+                <span>{formatCurrency(tillAmount)}</span>
+              </div>
+              <SplitPaymentFields
+                amounts={splitAmounts}
+                onChange={setSplitAmounts}
+                target={null}
+                total={Math.max(0, total - laterPaid)}
+                label="Taken at the till"
+              />
+            </>
+          ) : (
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground flex items-center gap-1.5">
+                Taken at the till
+                {total > 0 && (
+                  <button type="button" onClick={() => setPaidAtTill(Math.max(0, total - laterPaid))}
+                    className="text-primary font-semibold cursor-pointer">Paid in full</button>
+                )}
+                <button type="button" onClick={() => setPaidAtTill(0)} className="text-primary font-semibold cursor-pointer">Nothing</button>
+              </span>
+              <input type="number" min={0} value={paidAtTill || ""} onChange={(e) => setPaidAtTill(Math.max(0, Number(e.target.value)))}
+                className="w-28 px-2 py-1 glass-input text-xs text-right" />
+            </div>
+          )}
           {laterPaid > 0 && (
             <div className="flex justify-between">
               <span className="text-muted-foreground">+ Paid later ({sale.payments.length})</span><span>{formatCurrency(laterPaid)}</span>
@@ -587,11 +624,11 @@ export function EditInvoiceModal({
           </div>
         </div>
 
-        {paidAtTill < sale.paid - laterPaid && (
+        {tillAmount < sale.paid - laterPaid && (
           <div className="mt-3 p-3 rounded-xl bg-warning/10 text-warning text-xs flex gap-2">
             <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
             <p>
-              {`The till took ${formatCurrency(sale.paid - laterPaid)} on this invoice — saving records ${formatCurrency(paidAtTill)} instead, so the day's takings change. Hand back ${formatCurrency(sale.paid - laterPaid - paidAtTill)} if the customer has already paid it.`}
+              {`The till took ${formatCurrency(sale.paid - laterPaid)} on this invoice — saving records ${formatCurrency(tillAmount)} instead, so the day's takings change. Hand back ${formatCurrency(sale.paid - laterPaid - tillAmount)} if the customer has already paid it.`}
             </p>
           </div>
         )}

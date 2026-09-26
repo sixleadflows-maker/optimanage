@@ -3,6 +3,7 @@ import type { Prisma } from "@/generated/prisma/client";
 import type {
   Product, Customer, Sale, Supplier, Expense, LabOrder, Prescription,
 } from "@/lib/mock/types";
+import { readSplit, tillParts, type PaymentPart } from "@/lib/sales/paymentSplit";
 
 // ─── Enum mappers (DB enum → UI title-case) ─────────────────
 const brandTagLabel = { ORIGINAL: "Original", COPY: "Copy", BRANDED: "Branded", UNBRANDED: "Unbranded" } as const;
@@ -155,6 +156,9 @@ export type SaleView = Sale & {
   fittingCharges: number;
   // Money taken after the sale itself (an advance being settled), oldest first.
   payments: SalePaymentView[];
+  // Set when the till payment was split across methods (paymentMethod then
+  // reads "Cash + Card").
+  paymentSplit: PaymentPart[];
   hasReturn: boolean;
   returns: { id: string; returnNo: string; date: string; totalRefund: number; reason: string }[];
   // Every prescription taken with this sale, in the order they were entered.
@@ -242,6 +246,7 @@ function mapSale(s: SaleRow): SaleView {
     paid: s.paid,
     balance: s.balance,
     paymentMethod: s.paymentMethod,
+    paymentSplit: readSplit(s.paymentSplit),
     paymentStatus: paymentStatusLabel[s.paymentStatus],
     branchId: s.branchId ?? "",
     profit: s.profit,
@@ -884,11 +889,9 @@ export async function getCashCollection(dateStr: string, branchId?: string): Pro
   ]);
 
   // A sale's own `paid` is the running total including anything collected
-  // later, so take those back out here and count them on their own date.
-  const takenAtTill = sales.map((s) => ({
-    method: s.paymentMethod,
-    amount: s.paid - s.payments.reduce((sum, p) => sum + p.amount, 0),
-  }));
+  // later, so take those back out here and count them on their own date. A
+  // split payment counts each part under its own method.
+  const takenAtTill = sales.flatMap((s) => tillParts(s, s.paid - s.payments.reduce((sum, p) => sum + p.amount, 0)));
   const collected = [...takenAtTill, ...laterPayments];
 
   const byMethod = (m: string) => collected.filter((c) => c.method === m).reduce((sum, c) => sum + c.amount, 0);
@@ -926,7 +929,7 @@ async function openingCashFor(start: Date, branchId?: string) {
   const [sales, laterPayments, expenses] = await Promise.all([
     db.sale.findMany({
       where: { date: gap, ...(branchId ? { branchId } : {}) },
-      select: { paid: true, paymentMethod: true, payments: { select: { amount: true } } },
+      select: { paid: true, paymentMethod: true, paymentSplit: true, payments: { select: { amount: true } } },
     }),
     db.salePayment.findMany({
       where: { date: gap, ...(branchId ? { sale: { branchId } } : {}) },
@@ -935,7 +938,7 @@ async function openingCashFor(start: Date, branchId?: string) {
     db.expense.findMany({ where: { date: gap }, select: { amount: true, paymentMethod: true } }),
   ]);
 
-  const takenAtTill = sales.map((s) => ({ method: s.paymentMethod, amount: s.paid - s.payments.reduce((sum, p) => sum + p.amount, 0) }));
+  const takenAtTill = sales.flatMap((s) => tillParts(s, s.paid - s.payments.reduce((sum, p) => sum + p.amount, 0)));
   const cashIn = [...takenAtTill, ...laterPayments].filter((c) => c.method === "Cash").reduce((sum, c) => sum + c.amount, 0);
   const cashOut = expenses.filter((e) => (e.paymentMethod || "Cash") === "Cash").reduce((sum, e) => sum + e.amount, 0);
   const sinceLastClose = Math.round((cashIn - cashOut) * 100) / 100;

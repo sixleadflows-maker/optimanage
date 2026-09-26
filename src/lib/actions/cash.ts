@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { auth } from "@/lib/auth";
+import { getCashCollection } from "@/lib/data";
 
 export interface CashCollectionInput {
   date: string;        // YYYY-MM-DD
@@ -20,29 +21,21 @@ export async function saveCashCollection(input: CashCollectionInput) {
   const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
   const branchId = input.branchId || session.user.branchId || null;
 
-  // Recompute money figures server-side (source of truth) rather than trusting the client
-  const saleWhere = { date: { gte: start, lt: end }, ...(branchId ? { branchId } : {}) };
-  const [sales, expenses] = await Promise.all([
-    db.sale.findMany({ where: saleWhere }),
-    db.expense.findMany({ where: { date: { gte: start, lt: end } } }),
-  ]);
-  const byMethod = (m: string) => sales.filter((s) => s.paymentMethod === m).reduce((sum, s) => sum + s.paid, 0);
-  const cashSales = byMethod("Cash");
-  const cardSales = byMethod("Card");
-  const bankTransfer = byMethod("Bank Transfer");
-  const jazzCash = byMethod("JazzCash");
-  const totalCollection = sales.reduce((sum, s) => sum + s.paid, 0);
-  // Only cash leaves the drawer; card and cheque expenses are recorded but
-  // don't change the day's cash.
-  const expensesTotal = expenses.filter((e) => (e.paymentMethod || "Cash") === "Cash").reduce((sum, e) => sum + e.amount, 0);
+  // Recompute money figures server-side (source of truth) rather than trusting
+  // the client -- the same figures the Cash Collection screen shows, so split
+  // payments and balances collected later land on the right method and day.
+  const day = await getCashCollection(input.date, branchId ?? undefined);
 
   const data = {
     date: start,
     branchId,
     openingCash: input.openingCash,
-    cashSales, cardSales, bankTransfer, jazzCash,
-    totalCollection,
-    expenses: expensesTotal,
+    cashSales: day.cashSales,
+    cardSales: day.cardSales,
+    bankTransfer: day.bankTransfer,
+    jazzCash: day.jazzCash,
+    totalCollection: day.totalCollection,
+    expenses: day.expenses,
     closingCash: input.closingCash,
     notes: input.notes,
     closedBy: session.user.name,

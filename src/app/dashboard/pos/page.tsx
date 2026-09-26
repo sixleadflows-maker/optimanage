@@ -5,9 +5,9 @@ import { shopDetailsFromSettings } from "@/components/invoice/InvoiceDocuments";
 
 export const dynamic = "force-dynamic";
 
-export default async function POSPage() {
-  const [products, customers, users, settings, lastStaff, session] = await Promise.all([
-    getProducts(), getCustomers(), getUsers(), getSettings(), getLastInvoiceStaff(), auth(),
+export default async function POSPage({ searchParams }: { searchParams: Promise<{ customer?: string }> }) {
+  const [products, customers, users, settings, lastStaff, session, { customer: initialCustomerId }] = await Promise.all([
+    getProducts(), getCustomers(), getUsers(), getSettings(), getLastInvoiceStaff(), auth(), searchParams,
   ]);
   const posCustomers = customers.map((c) => {
     // Newest first (getCustomers orders them): the till starts a new Rx from it.
@@ -47,6 +47,7 @@ export default async function POSPage() {
       shop={shopDetailsFromSettings(settings)}
       canBackdate={!!session?.user && session.user.role !== "CASHIER"}
       canEditBill={!!session?.user && session.user.role !== "CASHIER"}
+      initialCustomerId={initialCustomerId}
     />
   );
 }

@@ -6,7 +6,7 @@ import type { CustomerView } from "@/lib/data";
 import { formatCurrency, formatDate } from "@/lib/utils/format";
 import { useApp } from "@/lib/context";
 import { createCustomer, deleteCustomer } from "@/lib/actions/customers";
-import { Search, Users, Plus, X, Loader2, Trash2 } from "lucide-react";
+import { Search, Users, Plus, X, Loader2, Trash2, FilePlus } from "lucide-react";
 import Link from "next/link";
 import { EmptyState } from "@/components/ui/EmptyState";
 
@@ -103,12 +103,12 @@ export function CustomersClient({ customers, canDelete }: { customers: CustomerV
                 <th className="text-left py-3 px-3 text-xs font-medium text-muted-foreground">Last Visit</th>
                 <th className="text-right py-3 px-3 text-xs font-medium text-muted-foreground">Total Spend</th>
                 <th className="text-center py-3 px-3 text-xs font-medium text-muted-foreground">Rx</th>
-                {canDelete && <th className="py-3 px-3" />}
+                <th className="py-3 px-3" />
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 && (
-                <tr><td colSpan={canDelete ? 9 : 8}>
+                <tr><td colSpan={9}>
                   <EmptyState icon={Users} title="No customers found" hint="Try a different name or phone number, or add the customer to start their history." />
                 </td></tr>
               )}
@@ -133,14 +133,18 @@ export function CustomersClient({ customers, canDelete }: { customers: CustomerV
                   <td className="py-3 px-3 text-center">
                     <span className="chip bg-surface text-muted-foreground">{c.prescriptions.length}</span>
                   </td>
-                  {canDelete && (
-                    <td className="py-3 px-3 text-right">
+                  <td className="py-3 px-3 text-right whitespace-nowrap">
+                    <Link href={`/dashboard/pos?customer=${c.id}`} title={`New invoice for ${c.name}`}
+                      className="inline-flex p-1.5 rounded-lg hover:bg-primary/10">
+                      <FilePlus className="w-3.5 h-3.5 text-primary" />
+                    </Link>
+                    {canDelete && (
                       <button onClick={() => setDeletingCustomer(c)} title="Delete customer"
                         className="p-1.5 rounded-lg hover:bg-destructive/10 cursor-pointer">
                         <Trash2 className="w-3.5 h-3.5 text-destructive" />
                       </button>
-                    </td>
-                  )}
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
