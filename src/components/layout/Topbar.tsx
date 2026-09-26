@@ -4,13 +4,13 @@ import { useApp } from "@/lib/context";
 import { SHOP_NAME } from "@/lib/constants";
 import { logout } from "@/lib/actions/auth";
 import { clearOfflinePages } from "@/components/layout/ServiceWorker";
-import { lookupProductByBarcode, type BarcodeLookupResult } from "@/lib/actions/products";
-import { searchCustomers, type CustomerSearchHit } from "@/lib/actions/customers";
+import { globalSearch, type ProductSearchResult } from "@/lib/actions/search";
+import type { CustomerSearchHit } from "@/lib/actions/customers";
 import Link from "next/link";
 import type { BranchView } from "@/lib/data";
 import { formatCurrency } from "@/lib/utils/format";
-import { Menu, Search, Moon, Sun, Wifi, WifiOff, ChevronDown, LogOut, Loader2, User } from "lucide-react";
-import { useState } from "react";
+import { Menu, Search, Moon, Sun, Wifi, WifiOff, ChevronDown, LogOut, Loader2, User, Package } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 interface TopbarUser {
   name: string;
@@ -23,41 +23,98 @@ function initials(name: string) {
   return name.split(" ").map((n) => n[0]).slice(0, 2).join("").toUpperCase();
 }
 
+/**
+ * Closes a menu on a click anywhere outside it, or on Escape. A full-screen
+ * click-catcher can't do this here: inside the blurred top bar, "fixed inset-0"
+ * only covers the bar itself, so clicks on the page never reached it.
+ */
+function useDismiss(open: boolean, close: () => void) {
+  const ref = useRef<HTMLDivElement>(null);
+  const closeRef = useRef(close);
+  useEffect(() => {
+    closeRef.current = close;
+  });
+  useEffect(() => {
+    if (!open) return;
+    const onPointer = (e: PointerEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) closeRef.current();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") closeRef.current();
+    };
+    document.addEventListener("pointerdown", onPointer);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onPointer);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+  return ref;
+}
+
+type SearchState = {
+  query: string;
+  status: "searching" | "done" | "failed";
+  error?: string;
+  products: ProductSearchResult[];
+  customers: CustomerSearchHit[];
+};
+
+function stockChip(p: { stock: number; lowStockThreshold: number }) {
+  if (p.stock <= 0) return { label: "Out of stock", tone: "bg-destructive/10 text-destructive" };
+  if (p.stock <= p.lowStockThreshold) return { label: `${p.stock} left`, tone: "bg-warning/10 text-warning" };
+  return { label: `${p.stock} in stock`, tone: "bg-success/10 text-success" };
+}
+
 export function Topbar({ user, branches }: { user: TopbarUser; branches: BranchView[] }) {
   const { activeBranch, setActiveBranch, darkMode, toggleDarkMode, isOnline, setSidebarOpen } = useApp();
   const [branchOpen, setBranchOpen] = useState(false);
   const [userOpen, setUserOpen] = useState(false);
   const currentBranch = branches.find((b) => b.id === activeBranch) ?? branches[0];
+  const branchRef = useDismiss(branchOpen, () => setBranchOpen(false));
+  const userRef = useDismiss(userOpen, () => setUserOpen(false));
 
+  // One box finds a product (scanned barcode, or name / brand / model) and a
+  // customer (serial number, name or phone). Results come up as you type.
   const [scanValue, setScanValue] = useState("");
-  const [checking, setChecking] = useState(false);
-  const [lookupResult, setLookupResult] = useState<BarcodeLookupResult | "not-found" | "failed" | null>(null);
-  // The same box finds a customer by serial number, name or phone -- a serial
-  // written on a case or an old bill is enough to pull them up.
-  const [customerHits, setCustomerHits] = useState<CustomerSearchHit[]>([]);
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState<SearchState | null>(null);
+  const latestRequest = useRef(0);
+  const searchRef = useDismiss(open, () => setOpen(false));
 
-  const checkStock = async () => {
-    const query = scanValue.trim();
-    if (!query) return;
-    setChecking(true);
+  const runSearch = useCallback(async (query: string) => {
+    const id = ++latestRequest.current;
+    // Keep what's showing while the next results load, so the list doesn't flash.
+    setSearch((prev) => ({ products: [], customers: [], ...prev, query, status: "searching", error: undefined }));
     try {
-      const [product, customers] = await Promise.all([lookupProductByBarcode(query), searchCustomers(query)]);
-      setCustomerHits(customers);
-      setLookupResult(product ?? (customers.length ? null : "not-found"));
+      const res = await globalSearch(query);
+      if (id !== latestRequest.current) return;
+      setSearch(res.ok
+        ? { query, status: "done", products: res.products, customers: res.customers }
+        : { query, status: "failed", error: res.error, products: [], customers: [] });
     } catch {
-      // Signed out, or no connection -- say so rather than looking broken.
-      setCustomerHits([]);
-      setLookupResult("failed");
-    } finally {
-      setChecking(false);
+      if (id !== latestRequest.current) return;
+      setSearch({ query, status: "failed", products: [], customers: [] });
     }
+  }, []);
+
+  useEffect(() => {
+    const query = scanValue.trim();
+    if (query.length < 2) return;
+    const timer = setTimeout(() => { void runSearch(query); }, 250);
+    return () => clearTimeout(timer);
+  }, [scanValue, runSearch]);
+
+  const closeSearch = () => {
+    setOpen(false);
+    setScanValue("");
+    setSearch(null);
   };
 
-  const closeLookup = () => {
-    setLookupResult(null);
-    setCustomerHits([]);
-    setScanValue("");
-  };
+  const query = scanValue.trim();
+  // A single character only shows results when it was searched with Enter (a scanned code).
+  const shown = open && search && (query.length >= 2 || (query.length > 0 && search.query === query)) ? search : null;
+  const found = !!shown && (shown.products.length > 0 || shown.customers.length > 0);
 
   return (
     <header className="glass-topbar sticky top-0 z-30 px-4 lg:px-6 h-14 flex items-center gap-3">
@@ -72,7 +129,7 @@ export function Topbar({ user, branches }: { user: TopbarUser; branches: BranchV
         <div className="hidden md:flex items-center gap-2 text-sm">
           <span className="font-semibold">{SHOP_NAME}</span>
           <span className="text-muted-foreground">·</span>
-          <div className="relative">
+          <div className="relative" ref={branchRef}>
             <button
               onClick={() => setBranchOpen(!branchOpen)}
               className="flex items-center gap-1 text-muted-foreground hover:text-foreground text-sm transition-colors"
@@ -81,54 +138,91 @@ export function Topbar({ user, branches }: { user: TopbarUser; branches: BranchV
               <ChevronDown className="w-3.5 h-3.5" />
             </button>
             {branchOpen && (
-              <>
-                <div className="fixed inset-0 z-10" onClick={() => setBranchOpen(false)} />
-                <div className="absolute top-full left-0 mt-2 w-56 glass rounded-xl p-1.5 z-20 animate-fade-in">
-                  {branches.map((branch) => (
-                    <button
-                      key={branch.id}
-                      onClick={() => { setActiveBranch(branch.id); setBranchOpen(false); }}
-                      className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
-                        (activeBranch || branches[0]?.id) === branch.id ? "bg-primary text-white" : "hover:bg-surface-hover"
-                      }`}
-                    >
-                      {branch.name}
-                    </button>
-                  ))}
-                </div>
-              </>
+              <div className="absolute top-full left-0 mt-2 w-56 topbar-popover rounded-xl p-1.5 z-20 animate-fade-in">
+                {branches.map((branch) => (
+                  <button
+                    key={branch.id}
+                    onClick={() => { setActiveBranch(branch.id); setBranchOpen(false); }}
+                    className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
+                      (activeBranch || branches[0]?.id) === branch.id ? "bg-primary text-white" : "hover:bg-surface-hover"
+                    }`}
+                  >
+                    {branch.name}
+                  </button>
+                ))}
+              </div>
             )}
           </div>
         </div>
       )}
 
-      <div className="flex-1 max-w-md mx-auto">
+      {/* Not positioned on phones, so the results panel spans the whole bar
+          instead of the narrow box; lined up under the box from sm up. */}
+      <div className="flex-1 min-w-0 max-w-md mx-auto sm:relative" ref={searchRef}>
         <div className="relative">
-          {checking ? (
+          {search?.status === "searching" ? (
             <Loader2 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground animate-spin" />
           ) : (
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           )}
           <input
             type="text"
-            placeholder="Scan a barcode, or search a customer by serial, name or phone..."
+            placeholder="Search products, barcodes or customers..."
             value={scanValue}
-            onChange={(e) => setScanValue(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") checkStock(); }}
+            onChange={(e) => { setScanValue(e.target.value); setOpen(true); }}
+            onFocus={() => setOpen(true)}
+            onKeyDown={(e) => {
+              // A barcode scanner types the code and presses Enter: search at once.
+              if (e.key === "Enter" && query) { setOpen(true); void runSearch(query); }
+            }}
             className="w-full pl-9 pr-4 py-2 glass-input text-sm"
           />
-          {(lookupResult || customerHits.length > 0) && (
-            <>
-              <div className="fixed inset-0 z-10" onClick={closeLookup} />
-              <div className="absolute top-full left-0 right-0 mt-2 glass rounded-xl p-3 z-20 animate-fade-in space-y-2">
-                {customerHits.length > 0 && (
-                  <div className="space-y-1">
-                    {customerHits.map((c) => (
-                      <Link key={c.id} href={`/dashboard/customers/${c.id}`} onClick={closeLookup}
+        </div>
+        {shown && (
+          <div className="absolute top-full left-2 right-2 sm:left-0 sm:right-0 mt-2 topbar-popover rounded-xl p-2 z-20 animate-fade-in max-h-[70vh] overflow-y-auto">
+            {shown.status === "failed" ? (
+              <p className="text-sm text-muted-foreground p-1.5">
+                {shown.error ?? "Couldn't search just now — check the connection and try again."}
+              </p>
+            ) : !found ? (
+              <p className="text-sm text-muted-foreground p-1.5">
+                {shown.status === "searching" ? "Searching…" : `Nothing found for "${shown.query}" — no product or customer matches.`}
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {shown.products.length > 0 && (
+                  <div>
+                    <p className="px-2 pt-1 pb-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Products</p>
+                    {shown.products.map((p) => {
+                      const chip = stockChip(p);
+                      return (
+                        <Link key={p.id} href={`/dashboard/inventory/${p.id}`} onClick={closeSearch}
+                          className="flex items-center justify-between gap-3 px-2 py-1.5 rounded-lg hover:bg-surface-hover">
+                          <span className="min-w-0">
+                            <span className="text-sm font-medium flex items-center gap-1.5">
+                              <Package className="w-3.5 h-3.5 text-primary flex-shrink-0" />
+                              <span className="truncate">{p.label}</span>
+                            </span>
+                            <span className="block text-[11px] text-muted-foreground truncate">
+                              {[p.model, p.barcode && `Barcode ${p.barcode}`, formatCurrency(p.salePrice)].filter(Boolean).join(" · ")}
+                            </span>
+                          </span>
+                          <span className={`shrink-0 px-2 py-0.5 rounded-full text-[11px] font-semibold ${chip.tone}`}>{chip.label}</span>
+                        </Link>
+                      );
+                    })}
+                  </div>
+                )}
+                {shown.customers.length > 0 && (
+                  <div>
+                    <p className="px-2 pt-1 pb-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Customers</p>
+                    {shown.customers.map((c) => (
+                      <Link key={c.id} href={`/dashboard/customers/${c.id}`} onClick={closeSearch}
                         className="flex items-center justify-between gap-3 px-2 py-1.5 rounded-lg hover:bg-surface-hover">
                         <span className="min-w-0">
                           <span className="text-sm font-medium flex items-center gap-1.5">
-                            <User className="w-3.5 h-3.5 text-primary flex-shrink-0" /> {c.name}
+                            <User className="w-3.5 h-3.5 text-primary flex-shrink-0" />
+                            <span className="truncate">{c.name}</span>
                           </span>
                           <span className="block text-[11px] text-muted-foreground truncate">
                             {[c.serialNumber && `Serial ${c.serialNumber}`, c.phone, c.prescriptionCount > 0 && `${c.prescriptionCount} prescription${c.prescriptionCount === 1 ? "" : "s"}`]
@@ -142,38 +236,10 @@ export function Topbar({ user, branches }: { user: TopbarUser; branches: BranchV
                     ))}
                   </div>
                 )}
-                {lookupResult === "failed" ? (
-                  <p className="text-sm text-muted-foreground">Couldn&apos;t search just now — check the connection, or sign in again, and try once more.</p>
-                ) : lookupResult === "not-found" ? (
-                  <p className="text-sm text-muted-foreground">Nothing found for &quot;{scanValue}&quot; — no product with that barcode and no customer by that serial, name or phone.</p>
-                ) : lookupResult && (
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold truncate">{lookupResult.name}</p>
-                      <p className="text-xs text-muted-foreground truncate">{lookupResult.brand} {lookupResult.model}</p>
-                      <p className="text-sm font-bold text-primary mt-0.5">{formatCurrency(lookupResult.salePrice)}</p>
-                    </div>
-                    <span
-                      className={`shrink-0 px-2.5 py-1 rounded-full text-xs font-semibold ${
-                        lookupResult.stock === 0
-                          ? "bg-destructive/10 text-destructive"
-                          : lookupResult.stock <= lookupResult.lowStockThreshold
-                          ? "bg-warning/10 text-warning"
-                          : "bg-success/10 text-success"
-                      }`}
-                    >
-                      {lookupResult.stock === 0
-                        ? "Out of Stock"
-                        : lookupResult.stock <= lookupResult.lowStockThreshold
-                        ? `Low Stock — ${lookupResult.stock} left`
-                        : `In Stock — ${lookupResult.stock} available`}
-                    </span>
-                  </div>
-                )}
               </div>
-            </>
-          )}
-        </div>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="flex items-center gap-2">
@@ -203,7 +269,7 @@ export function Topbar({ user, branches }: { user: TopbarUser; branches: BranchV
           </span>
         </button>
 
-        <div className="relative">
+        <div className="relative" ref={userRef}>
           <button
             onClick={() => setUserOpen(!userOpen)}
             className="w-8 h-8 rounded-full bg-primary text-white flex items-center justify-center text-xs font-semibold cursor-pointer"
@@ -211,22 +277,19 @@ export function Topbar({ user, branches }: { user: TopbarUser; branches: BranchV
             {initials(user.name)}
           </button>
           {userOpen && (
-            <>
-              <div className="fixed inset-0 z-10" onClick={() => setUserOpen(false)} />
-              <div className="absolute top-full right-0 mt-2 w-56 glass rounded-xl p-1.5 z-20 animate-fade-in">
-                <div className="px-3 py-2 border-b border-border mb-1">
-                  <p className="text-sm font-semibold truncate">{user.name}</p>
-                  <p className="text-xs text-muted-foreground truncate">{user.email}</p>
-                </div>
-                <button
-                  onClick={async () => { await clearOfflinePages(); await logout(); }}
-                  className="w-full text-left px-3 py-2 rounded-lg text-sm transition-colors hover:bg-surface-hover flex items-center gap-2 text-red-500"
-                >
-                  <LogOut className="w-4 h-4" />
-                  Sign out
-                </button>
+            <div className="absolute top-full right-0 mt-2 w-56 topbar-popover rounded-xl p-1.5 z-20 animate-fade-in">
+              <div className="px-3 py-2 border-b border-border mb-1">
+                <p className="text-sm font-semibold truncate">{user.name}</p>
+                <p className="text-xs text-muted-foreground truncate">{user.email}</p>
               </div>
-            </>
+              <button
+                onClick={async () => { await clearOfflinePages(); await logout(); }}
+                className="w-full text-left px-3 py-2 rounded-lg text-sm transition-colors hover:bg-surface-hover flex items-center gap-2 text-red-500"
+              >
+                <LogOut className="w-4 h-4" />
+                Sign out
+              </button>
+            </div>
           )}
         </div>
       </div>

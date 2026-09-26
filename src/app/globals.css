@@ -194,6 +194,21 @@ h1, h2, h3 {
   border-bottom: 1px solid var(--glass-border);
 }
 
+/* Menus that drop out of the top bar. The bar's own blur keeps a blur nested
+   inside it from seeing the page, so a see-through glass menu there shows the
+   page's text straight through its own -- these are solid instead. */
+.topbar-popover {
+  background: #fcfcfe;
+  border: 1px solid rgba(30, 20, 70, 0.08);
+  box-shadow: 0 20px 48px rgba(30, 20, 70, 0.16), 0 6px 16px rgba(30, 20, 70, 0.08);
+}
+
+.dark .topbar-popover {
+  background: #161722;
+  border-color: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.5), 0 6px 16px rgba(0, 0, 0, 0.3);
+}
+
 .glass-input {
   background: var(--surface);
   backdrop-filter: blur(8px);
