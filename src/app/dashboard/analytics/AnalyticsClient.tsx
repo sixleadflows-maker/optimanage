@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import type { AnalyticsData } from "@/lib/data";
 import { formatCurrency } from "@/lib/utils/format";
 import { verifyAnalyticsPin, getMonthlyAnalytics, type MonthlyAnalyticsData } from "@/lib/actions/analytics";
+import { changeAnalyticsPin, resetAnalyticsPinWithPassword } from "@/lib/actions/settings";
 import { Lock, Loader2, ChevronLeft, ChevronRight, ArrowUpRight, ArrowDownRight, Package, ChevronDown, ChevronUp } from "lucide-react";
 
 const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -274,6 +275,13 @@ export function AnalyticsClient({ data }: { data: AnalyticsData }) {
   const [pin, setPin] = useState("");
   const [checking, setChecking] = useState(false);
   const [error, setError] = useState("");
+  // "unlock" asks for the PIN; the other two set a new one — with the current
+  // PIN, or with the owner's sign-in password when the PIN has been forgotten.
+  const [mode, setMode] = useState<"unlock" | "change" | "forgot">("unlock");
+  const [newPin, setNewPin] = useState("");
+  const [confirmPin, setConfirmPin] = useState("");
+  const [password, setPassword] = useState("");
+  const [done, setDone] = useState("");
 
   const tryUnlock = async () => {
     setChecking(true);
@@ -284,6 +292,35 @@ export function AnalyticsClient({ data }: { data: AnalyticsData }) {
     else setError("Incorrect PIN");
   };
 
+  const toMode = (next: "unlock" | "change" | "forgot") => {
+    setMode(next);
+    setError("");
+    setDone("");
+    setNewPin("");
+    setConfirmPin("");
+    setPassword("");
+  };
+
+  // Setting a new PIN proves who they are, so it opens Analytics as well.
+  const saveNewPin = async () => {
+    setError("");
+    if (newPin.length < 4) { setError("The new PIN must be 4–6 digits"); return; }
+    if (newPin !== confirmPin) { setError("The two new PINs don't match"); return; }
+    setChecking(true);
+    try {
+      const res = mode === "change"
+        ? await changeAnalyticsPin({ currentPin: pin, newPin })
+        : await resetAnalyticsPinWithPassword({ password, newPin });
+      if (!res.ok) { setError(res.error); return; }
+      setDone("PIN changed");
+      setUnlocked(true);
+    } catch {
+      setError("Couldn't save the PIN — check the connection and try again");
+    } finally {
+      setChecking(false);
+    }
+  };
+
   if (!unlocked) {
     return (
       <div className="flex items-center justify-center min-h-[60vh] animate-fade-in">
@@ -291,18 +328,73 @@ export function AnalyticsClient({ data }: { data: AnalyticsData }) {
           <div className="w-14 h-14 rounded-2xl bg-primary/10 text-primary flex items-center justify-center mx-auto mb-4">
             <Lock className="w-7 h-7" />
           </div>
-          <h2 className="text-lg font-bold">Analytics is protected</h2>
-          <p className="text-sm text-muted-foreground mt-1 mb-5">Enter the PIN to view profit and business figures.</p>
-          <input type="password" inputMode="numeric" value={pin}
-            onChange={(e) => setPin(e.target.value.replace(/[^0-9]/g, ""))}
-            onKeyDown={(e) => e.key === "Enter" && tryUnlock()}
-            maxLength={6} autoFocus
-            className="w-full px-4 py-2.5 glass-input text-center tracking-[0.5em] text-lg" placeholder="••••" />
+          <h2 className="text-lg font-bold">
+            {mode === "unlock" ? "Analytics is protected" : mode === "change" ? "Change the PIN" : "Forgotten the PIN"}
+          </h2>
+          <p className="text-sm text-muted-foreground mt-1 mb-5">
+            {mode === "unlock"
+              ? "Enter the PIN to view profit and business figures."
+              : mode === "change"
+                ? "Enter the PIN you use now, then the new one."
+                : "Enter your own sign-in password and pick a new PIN."}
+          </p>
+
+          {mode === "forgot" ? (
+            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoFocus
+              className="w-full px-4 py-2.5 glass-input text-sm" placeholder="Your sign-in password" />
+          ) : (
+            <input type="password" inputMode="numeric" value={pin}
+              onChange={(e) => setPin(e.target.value.replace(/[^0-9]/g, ""))}
+              onKeyDown={(e) => e.key === "Enter" && mode === "unlock" && tryUnlock()}
+              maxLength={6} autoFocus
+              className="w-full px-4 py-2.5 glass-input text-center tracking-[0.5em] text-lg"
+              placeholder="••••" aria-label={mode === "change" ? "Current PIN" : "PIN"} />
+          )}
+
+          {mode !== "unlock" && (
+            <div className="space-y-2 mt-2">
+              <input type="password" inputMode="numeric" value={newPin}
+                onChange={(e) => setNewPin(e.target.value.replace(/[^0-9]/g, ""))}
+                maxLength={6} className="w-full px-4 py-2.5 glass-input text-center tracking-[0.5em] text-lg"
+                placeholder="New PIN" aria-label="New PIN" />
+              <input type="password" inputMode="numeric" value={confirmPin}
+                onChange={(e) => setConfirmPin(e.target.value.replace(/[^0-9]/g, ""))}
+                onKeyDown={(e) => e.key === "Enter" && saveNewPin()}
+                maxLength={6} className="w-full px-4 py-2.5 glass-input text-center tracking-[0.5em] text-lg"
+                placeholder="New PIN again" aria-label="New PIN again" />
+            </div>
+          )}
+
           {error && <p className="text-xs text-red-500 mt-2">{error}</p>}
-          <button onClick={tryUnlock} disabled={checking || pin.length < 4}
-            className="w-full mt-4 py-2.5 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-primary-hover transition-colors disabled:opacity-60 flex items-center justify-center gap-2">
-            {checking && <Loader2 className="w-4 h-4 animate-spin" />} Unlock
-          </button>
+          {done && <p className="text-xs text-success mt-2">{done}</p>}
+
+          {mode === "unlock" ? (
+            <button onClick={tryUnlock} disabled={checking || pin.length < 4}
+              className="w-full mt-4 py-2.5 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-primary-hover transition-colors disabled:opacity-60 flex items-center justify-center gap-2">
+              {checking && <Loader2 className="w-4 h-4 animate-spin" />} Unlock
+            </button>
+          ) : (
+            <button onClick={saveNewPin}
+              disabled={checking || newPin.length < 4 || (mode === "change" ? pin.length < 4 : !password)}
+              className="w-full mt-4 py-2.5 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-primary-hover transition-colors disabled:opacity-60 flex items-center justify-center gap-2">
+              {checking && <Loader2 className="w-4 h-4 animate-spin" />} Save new PIN
+            </button>
+          )}
+
+          <div className="flex items-center justify-center gap-3 mt-3 text-xs">
+            {mode === "unlock" ? (
+              <>
+                <button onClick={() => toMode("change")} className="text-primary font-medium cursor-pointer">Change PIN</button>
+                <span className="text-muted-foreground">·</span>
+                <button onClick={() => toMode("forgot")} className="text-primary font-medium cursor-pointer">Forgotten it?</button>
+              </>
+            ) : (
+              <button onClick={() => toMode("unlock")} className="text-muted-foreground hover:text-foreground cursor-pointer">
+                Back to unlocking
+              </button>
+            )}
+          </div>
+          <p className="text-[11px] text-muted-foreground mt-3">Only the owner can change this PIN.</p>
         </div>
       </div>
     );

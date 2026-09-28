@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { SettingsView, UserView, BranchView } from "@/lib/data";
 import { useApp } from "@/lib/context";
-import { updateShopSettings, setAnalyticsPin } from "@/lib/actions/settings";
+import { updateShopSettings, changeAnalyticsPin, resetAnalyticsPinWithPassword } from "@/lib/actions/settings";
 import { createUser, setUserActive, resetUserPassword, updateUser } from "@/lib/actions/users";
 import { createBranch, updateBranch, setBranchActive } from "@/lib/actions/branches";
 import { Store, Shield, Users, Save, Lock, Loader2, CheckCircle, Plus, X, KeyRound, UserX, UserCheck, MapPin, Pencil, Ban, RotateCcw } from "lucide-react";
@@ -171,6 +171,11 @@ export function SettingsClient({ settings, users, branches, canManage, isOwner, 
   const [pin, setPin] = useState("");
   const [pinSaving, setPinSaving] = useState(false);
   const [hasPin, setHasPin] = useState(settings.hasAnalyticsPin);
+  // Changing a PIN that exists needs the current one -- or, when it has been
+  // forgotten, the owner's own sign-in password.
+  const [currentPin, setCurrentPin] = useState("");
+  const [pinPassword, setPinPassword] = useState("");
+  const [forgotPin, setForgotPin] = useState(false);
 
   const tabs = [
     { id: "shop" as const, label: "Shop Profile", icon: Store },
@@ -196,13 +201,22 @@ export function SettingsClient({ settings, users, branches, canManage, isOwner, 
   const savePin = async () => {
     setPinSaving(true);
     try {
-      await setAnalyticsPin(pin);
-      showToast("Analytics PIN updated", "success");
+      const res = forgotPin
+        ? await resetAnalyticsPinWithPassword({ password: pinPassword, newPin: pin })
+        : await changeAnalyticsPin({ currentPin, newPin: pin });
+      if (!res.ok) {
+        showToast(res.error, "error");
+        return;
+      }
+      showToast(hasPin ? "Analytics PIN changed" : "Analytics PIN set", "success");
       setPin("");
+      setCurrentPin("");
+      setPinPassword("");
+      setForgotPin(false);
       setHasPin(true);
       router.refresh();
-    } catch (e) {
-      showToast(e instanceof Error ? e.message : "Could not set PIN", "error");
+    } catch {
+      showToast("Could not save the PIN — check the connection and try again", "error");
     } finally {
       setPinSaving(false);
     }
@@ -284,14 +298,37 @@ export function SettingsClient({ settings, users, branches, canManage, isOwner, 
             Protect the Analytics page with a PIN so only authorised staff can view profit figures.
             {hasPin && <span className="inline-flex items-center gap-1 text-success ml-1"><CheckCircle className="w-3 h-3" /> A PIN is currently set.</span>}
           </p>
+          {hasPin && (
+            forgotPin ? (
+              <>
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Your sign-in password</label>
+                <input type="password" value={pinPassword} onChange={(e) => setPinPassword(e.target.value)}
+                  className="w-full mb-3 px-4 py-2.5 glass-input text-sm" placeholder="Password" />
+              </>
+            ) : (
+              <>
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Current PIN</label>
+                <input type="password" inputMode="numeric" value={currentPin}
+                  onChange={(e) => setCurrentPin(e.target.value.replace(/[^0-9]/g, ""))}
+                  maxLength={6} className="w-full mb-3 px-4 py-2.5 glass-input text-sm tracking-widest" placeholder="••••" />
+              </>
+            )
+          )}
           <label className="text-xs font-medium text-muted-foreground mb-1.5 block">New PIN (4–6 digits)</label>
           <input type="password" inputMode="numeric" value={pin} onChange={(e) => setPin(e.target.value.replace(/[^0-9]/g, ""))}
             maxLength={6} className="w-full px-4 py-2.5 glass-input text-sm tracking-widest" placeholder="••••" />
-          <button onClick={savePin} disabled={pinSaving || pin.length < 4 || !canManage}
+          <button onClick={savePin}
+            disabled={pinSaving || pin.length < 4 || !isOwner || (hasPin && (forgotPin ? !pinPassword : currentPin.length < 4))}
             className="mt-3 flex items-center gap-2 px-6 py-2.5 bg-primary text-white rounded-xl text-sm font-medium hover:bg-primary-hover transition-colors disabled:opacity-60">
-            {pinSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} {hasPin ? "Update PIN" : "Set PIN"}
+            {pinSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} {hasPin ? "Change PIN" : "Set PIN"}
           </button>
-          {!canManage && <p className="text-xs text-muted-foreground mt-2">Only managers and owners can change the PIN.</p>}
+          {hasPin && isOwner && (
+            <button onClick={() => { setForgotPin((v) => !v); setCurrentPin(""); setPinPassword(""); }}
+              className="mt-3 ml-3 text-xs text-primary font-medium cursor-pointer">
+              {forgotPin ? "I know the current PIN" : "Forgotten the PIN?"}
+            </button>
+          )}
+          {!isOwner && <p className="text-xs text-muted-foreground mt-2">Only the owner can change the Analytics PIN.</p>}
         </div>
       )}
 
