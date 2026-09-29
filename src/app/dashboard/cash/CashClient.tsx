@@ -7,8 +7,9 @@ import { formatCurrency, formatDate } from "@/lib/utils/format";
 import { useApp } from "@/lib/context";
 import { saveCashCollection } from "@/lib/actions/cash";
 import { Banknote, CreditCard, Building2, Smartphone, Save, Loader2, CheckCircle } from "lucide-react";
+import { BankDeposits } from "./BankDeposits";
 
-export function CashClient({ data, date }: { data: CashCollectionData; date: string }) {
+export function CashClient({ data, date, canManage }: { data: CashCollectionData; date: string; canManage: boolean }) {
   const { showToast } = useApp();
   const router = useRouter();
   // The float carries itself over from the last close -- nobody types yesterday's
@@ -18,7 +19,8 @@ export function CashClient({ data, date }: { data: CashCollectionData; date: str
   const [notes, setNotes] = useState(data.saved?.notes ?? "");
   const [saving, setSaving] = useState(false);
 
-  const expectedDrawer = openingCash + data.cashSales - data.expenses;
+  // Cash sales in, cash spent out, and cash taken to the bank out.
+  const expectedDrawer = openingCash + data.cashSales - data.expenses - data.bankDeposits;
   const variance = closingCash - expectedDrawer;
 
   const methods = [
@@ -106,6 +108,9 @@ export function CashClient({ data, date }: { data: CashCollectionData; date: str
             <div className="flex justify-between"><span className="text-muted-foreground">Opening cash</span><span>{formatCurrency(openingCash)}</span></div>
             <div className="flex justify-between"><span className="text-muted-foreground">+ Cash sales</span><span className="text-success">{formatCurrency(data.cashSales)}</span></div>
             <div className="flex justify-between"><span className="text-muted-foreground">− Cash expenses</span><span className="text-destructive">{formatCurrency(data.expenses)}</span></div>
+            {data.bankDeposits > 0 && (
+              <div className="flex justify-between"><span className="text-muted-foreground">− Deposited in the bank</span><span>{formatCurrency(data.bankDeposits)}</span></div>
+            )}
             <div className="flex justify-between font-semibold border-t border-border pt-1.5"><span>Expected in drawer</span><span>{formatCurrency(expectedDrawer)}</span></div>
             <div className="flex justify-between font-semibold"><span>Counted (closing)</span><span>{formatCurrency(closingCash)}</span></div>
             <div className={`flex justify-between font-bold rounded-lg px-2 py-1.5 mt-1 ${variance === 0 ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive"}`}>
@@ -126,22 +131,32 @@ export function CashClient({ data, date }: { data: CashCollectionData; date: str
           </button>
         </div>
 
-        <div className="glass-card p-5 h-fit">
-          <h3 className="text-sm font-semibold mb-4">Day Summary</h3>
-          <div className="space-y-2.5 text-sm">
-            <div className="flex justify-between"><span className="text-muted-foreground">Invoices</span><span className="font-medium">{data.invoiceCount}</span></div>
-            <div className="flex justify-between"><span className="text-muted-foreground">Total collected</span><span className="font-medium">{formatCurrency(data.totalCollection)}</span></div>
-            <div className="flex justify-between"><span className="text-muted-foreground">Cash expenses</span><span className="font-medium text-destructive">{formatCurrency(data.expenses)}</span></div>
-            {data.otherExpenses > 0 && (
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Card / cheque expenses</span>
-                <span className="font-medium">{formatCurrency(data.otherExpenses)}</span>
+        <div className="space-y-6">
+          <div className="glass-card p-5 h-fit">
+            <h3 className="text-sm font-semibold mb-4">Day Summary</h3>
+            <div className="space-y-2.5 text-sm">
+              <div className="flex justify-between"><span className="text-muted-foreground">Invoices</span><span className="font-medium">{data.invoiceCount}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">Total collected</span><span className="font-medium">{formatCurrency(data.totalCollection)}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">Cash expenses</span><span className="font-medium text-destructive">{formatCurrency(data.expenses)}</span></div>
+              {data.otherExpenses > 0 && (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Card / cheque expenses</span>
+                  <span className="font-medium">{formatCurrency(data.otherExpenses)}</span>
+                </div>
+              )}
+              <div className="flex justify-between border-t border-border pt-2.5 font-semibold">
+                <span>Net cash flow</span><span>{formatCurrency(data.totalCollection - data.expenses)}</span>
               </div>
-            )}
-            <div className="flex justify-between border-t border-border pt-2.5 font-semibold">
-              <span>Net cash flow</span><span>{formatCurrency(data.totalCollection - data.expenses)}</span>
+              {data.bankDeposits > 0 && (
+                <div className="flex justify-between gap-3 text-xs">
+                  <span className="text-muted-foreground">Deposited in the bank (not an expense)</span>
+                  <span className="font-medium">{formatCurrency(data.bankDeposits)}</span>
+                </div>
+              )}
             </div>
           </div>
+
+          <BankDeposits deposits={data.deposits} date={date} canManage={canManage} />
         </div>
       </div>
     </div>

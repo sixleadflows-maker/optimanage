@@ -9,7 +9,8 @@ import { createPrescription, deletePrescription, updatePrescription, setPrescrip
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { RxPowerInput } from "@/components/ui/RxPowerInput";
 import { formatEyeValue, isPowerField, parseRxText, rxFieldText, rxFormTexts } from "@/lib/utils/rx";
-import { Eye, Save, Search, Loader2, Pencil, Trash2, X, EyeOff } from "lucide-react";
+import { Eye, Save, Search, Loader2, Pencil, Trash2, X, EyeOff, UserPlus } from "lucide-react";
+import { CustomerFormModal, type SavedCustomer } from "@/app/dashboard/customers/CustomerFormModal";
 
 interface RxCustomer { id: string; name: string; phone: string; serialNumber: string; }
 
@@ -61,6 +62,9 @@ export function PrescriptionsClient({
   const [removing, setRemoving] = useState(false);
   const [listSearch, setListSearch] = useState("");
   const [togglingNotes, setTogglingNotes] = useState<string | null>(null);
+  // A customer added from this form, before the page's own list has caught up.
+  const [newCustomerOpen, setNewCustomerOpen] = useState(false);
+  const [addedCustomers, setAddedCustomers] = useState<RxCustomer[]>([]);
 
   const toggleNotes = async (rx: PrescriptionView) => {
     setTogglingNotes(rx.id);
@@ -79,10 +83,14 @@ export function PrescriptionsClient({
     }
   };
 
-  const customerById = useMemo(() => new Map(customers.map((c) => [c.id, c])), [customers]);
+  const allCustomers = useMemo(
+    () => [...customers, ...addedCustomers.filter((a) => !customers.some((c) => c.id === a.id))],
+    [customers, addedCustomers],
+  );
+  const customerById = useMemo(() => new Map(allCustomers.map((c) => [c.id, c])), [allCustomers]);
 
   const filteredCustomers = customerSearch
-    ? customers.filter((c) => {
+    ? allCustomers.filter((c) => {
         const q = customerSearch.toLowerCase();
         return c.name.toLowerCase().includes(q) || c.phone.includes(customerSearch) || c.serialNumber.toLowerCase().includes(q);
       }).slice(0, 5)
@@ -121,6 +129,22 @@ export function PrescriptionsClient({
     if (initialEditId || addToSale) router.replace("/dashboard/prescriptions", { scroll: false });
   };
 
+  // A customer who isn't on file yet is added right here and picked for this prescription.
+  const customerAdded = (c: SavedCustomer) => {
+    if (!c.existing) {
+      setAddedCustomers((prev) => [...prev, { id: c.id, name: c.name, phone: c.phone, serialNumber: c.serialNumber }]);
+    }
+    setSelectedCustomer(c.id);
+    setCustomerSearch(c.name);
+  };
+
+  // What was typed into the search box is usually the new customer's name or number.
+  const newCustomerStart = (() => {
+    const typed = customerSearch.trim();
+    const looksLikePhone = /^[+\d][\d\s-]{5,}$/.test(typed);
+    return { name: looksLikePhone ? "" : typed, phone: looksLikePhone ? typed : "" };
+  })();
+
   const startEdit = (rx: PrescriptionView) => {
     setEditing(rx);
     setSelectedCustomer(rx.customerId);
@@ -146,8 +170,20 @@ export function PrescriptionsClient({
         showToast(`${editing.customerName}'s prescription updated`, "success");
       } else {
         // Added to an invoice that already exists, when that's where this started.
-        await createPrescription({ customerId: selectedCustomer, saleId: addToSale?.id, ...values() });
-        showToast(addToSale ? `Prescription added to ${addToSale.invoiceNo}` : "Prescription saved", "success");
+        const res = await createPrescription({ customerId: selectedCustomer, saleId: addToSale?.id, ...values() });
+        if (!res.ok) {
+          showToast(res.error, "error");
+          return;
+        }
+        const who = customerById.get(selectedCustomer)?.name ?? customerSearch;
+        showToast(
+          addToSale
+            ? res.attachedCustomer
+              ? `Prescription added to ${addToSale.invoiceNo} — the invoice is now on ${who}`
+              : `Prescription added to ${addToSale.invoiceNo}`
+            : "Prescription saved",
+          "success",
+        );
       }
       resetForm();
       router.refresh();
@@ -205,9 +241,11 @@ export function PrescriptionsClient({
 
           {!editing && addToSale && (
             <div className="mb-4 p-3 rounded-xl border border-primary/30 bg-primary/5 text-xs">
-              <p className="font-medium">{`Adding to ${addToSale.invoiceNo} — ${addToSale.customerName}`}</p>
+              <p className="font-medium">{`Adding to ${addToSale.invoiceNo}${addToSale.customerName ? ` — ${addToSale.customerName}` : " — walk-in, no customer yet"}`}</p>
               <p className="text-muted-foreground mt-0.5">
-                The invoice keeps its own number and totals; this goes onto it and onto the customer&apos;s record.
+                {addToSale.customerName
+                  ? "The invoice keeps its own number and totals; this goes onto it and onto the customer's record."
+                  : "Pick the customer below, or add them if they aren't on file — the invoice goes onto them and keeps its own number and totals."}
               </p>
             </div>
           )}
@@ -224,9 +262,20 @@ export function PrescriptionsClient({
               <div className="mt-1 glass rounded-xl p-1.5 max-h-32 overflow-y-auto">
                 {filteredCustomers.map((c) => (
                   <button key={c.id} onClick={() => { setSelectedCustomer(c.id); setCustomerSearch(c.name); }}
-                    className="w-full text-left px-3 py-1.5 rounded-lg hover:bg-surface-hover text-xs">{c.name} · {c.phone}</button>
+                    className="w-full text-left px-3 py-1.5 rounded-lg hover:bg-surface-hover text-xs">
+                    {[c.name, c.serialNumber && `Serial ${c.serialNumber}`, c.phone].filter(Boolean).join(" · ")}
+                  </button>
                 ))}
               </div>
+            )}
+            {!editing && !selectedCustomer && (
+              <button type="button" onClick={() => setNewCustomerOpen(true)}
+                className="mt-2 flex items-center gap-1.5 text-xs text-primary font-semibold cursor-pointer">
+                <UserPlus className="w-3.5 h-3.5" />
+                {customerSearch.trim() && filteredCustomers.length === 0
+                  ? `Not on file — add ${customerSearch.trim()} as a new customer`
+                  : "Add a new customer"}
+              </button>
             )}
           </div>
 
@@ -374,6 +423,10 @@ export function PrescriptionsClient({
           </div>
         </div>
       </div>
+
+      {newCustomerOpen && (
+        <CustomerFormModal initial={newCustomerStart} onClose={() => setNewCustomerOpen(false)} onSaved={customerAdded} />
+      )}
 
       {deleting && (
         <ConfirmDialog

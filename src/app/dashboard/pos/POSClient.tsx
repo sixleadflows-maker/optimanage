@@ -10,6 +10,7 @@ import { createCustomer } from "@/lib/actions/customers";
 import { createPrescription, updatePrescription } from "@/lib/actions/prescriptions";
 import { getDrafts, addDraft, replaceDraft, removeDraft, markDraftFailed, makeOfflineRef, type OfflineDraft } from "@/lib/offlineDrafts";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import {
   Search, Plus, Minus, Trash2, X, User, CreditCard,
   Banknote, Building2, Smartphone, Printer, MessageCircle, Receipt,
@@ -63,6 +64,8 @@ interface StaffMember {
 }
 
 interface SaleResult {
+  // The saved invoice, so a prescription can be added to it later.
+  saleId?: string;
   invoiceNo: string;
   // Made offline: invoiceNo is the temporary OFF- number.
   provisional?: boolean;
@@ -617,6 +620,7 @@ export function POSClient({
         return;
       }
       const res = await createPrescription({ customerId: customer.id, ...rxValues(entry) });
+      if (!res.ok) { showToast(res.error, "error"); return; }
       setRxList((prev) => prev.map((e) => (e.key === entry.key ? { ...e, savedId: res.id, savedChanged: false } : e)));
       showToast(`Saved to ${customer.name}'s prescription record`, "success");
     } catch {
@@ -768,6 +772,7 @@ export function POSClient({
       if (recordRx) setRxList((prev) => prev.map((e, i) => ({ ...e, onBillId: rxIds[i] })));
       finish(
         {
+          saleId: saleResult.saleId,
           invoiceNo: res.invoiceNo,
           orderTakenByName: res.orderTakenByName,
           billGeneratedByName: res.billGeneratedByName,
@@ -906,6 +911,7 @@ export function POSClient({
         return;
       }
       setSaleResult({
+        saleId: res.saleId,
         invoiceNo: res.invoiceNo,
         orderTakenByName: res.orderTakenByName,
         billGeneratedByName: res.billGeneratedByName,
@@ -992,6 +998,14 @@ export function POSClient({
         <div className="flex items-center justify-between mb-6 no-print">
           <h1 className="text-2xl font-bold">Invoice Preview</h1>
           <div className="flex items-center gap-2">
+            {saleResult.saleId && (
+              <Link
+                href={`/dashboard/prescriptions?addTo=${saleResult.saleId}`}
+                title="Add the eye test to this invoice now or later — it keeps its number and totals"
+                className="px-4 py-2 glass-card text-sm font-medium cursor-pointer flex items-center gap-2">
+                <Glasses className="w-4 h-4" /> Add prescription
+              </Link>
+            )}
             {canEditBill && (
               <button
                 onClick={() => { setEditingBill(true); setEntryMode("manual"); setShowReceipt(false); }}

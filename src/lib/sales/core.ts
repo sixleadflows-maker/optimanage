@@ -438,6 +438,29 @@ export async function persistSale(input: PersistSaleInput, meta: PersistSaleMeta
   };
 }
 
+/**
+ * Puts a walk-in invoice on a customer after the fact -- the name often turns up
+ * with the eye test. Their spend and visits follow the invoice exactly as if it
+ * had been rung up under them (the same arithmetic as reviseSale's customer move).
+ */
+export async function attachCustomerToSale(
+  tx: Prisma.TransactionClient,
+  sale: { id: string; total: number; date: Date },
+  customerId: string,
+) {
+  const customer = await tx.customer.findUnique({ where: { id: customerId }, select: { lastVisit: true } });
+  await tx.sale.update({ where: { id: sale.id }, data: { customerId } });
+  await tx.customer.update({
+    where: { id: customerId },
+    data: {
+      totalSpend: { increment: sale.total },
+      visitCount: { increment: 1 },
+      // An old invoice mustn't make a regular look like they were last in years ago.
+      lastVisit: !customer?.lastVisit || customer.lastVisit < sale.date ? sale.date : customer.lastVisit,
+    },
+  });
+}
+
 async function alreadySynced(sale: { id: string; invoiceNo: string; total: number; paid: number; balance: number }) {
   return {
     ok: true as const,

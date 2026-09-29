@@ -17,7 +17,10 @@ export default async function SalesPage() {
       sales={sales}
       isOwner={isOwner}
       canEdit={canEdit}
-      customers={customers.map((c) => ({ id: c.id, name: c.name, phone: c.phone }))}
+      customers={customers.map((c) => ({
+        id: c.id, name: c.name, phone: c.phone, serialNumber: c.serialNumber,
+        email: c.email, address: c.address, lastVisit: c.lastVisit,
+      }))}
       staff={users.filter((u) => u.active).map((u) => ({ id: u.id, name: u.name }))}
       shop={shopDetailsFromSettings(settings)}
     />

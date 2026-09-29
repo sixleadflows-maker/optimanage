@@ -29,6 +29,7 @@ const PAGES: Record<TrashKind, string[]> = {
   purchaseOrder: ["/dashboard/suppliers"],
   stockAdjustment: ["/dashboard/stock-adjustments", "/dashboard/inventory"],
   payment: ["/dashboard", "/dashboard/sales", "/dashboard/customers", "/dashboard/cash"],
+  bankDeposit: ["/dashboard/cash"],
 };
 
 function refresh(kind: TrashKind) {

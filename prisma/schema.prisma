@@ -499,6 +499,22 @@ model CashCollection {
   @@unique([date, branchId])
 }
 
+// Cash the owner takes out of the drawer and puts in the bank. It leaves the
+// drawer but isn't a cost, so it's kept apart from Expense (which feeds profit).
+model BankDeposit {
+  id          String   @id @default(cuid())
+  date        DateTime @default(now())
+  amount      Float    @default(0)
+  bankName    String   @default("")
+  // The deposit slip number.
+  reference   String   @default("")
+  notes       String   @default("")
+  depositedBy String   @default("")
+  createdAt   DateTime @default(now())
+
+  @@index([date])
+}
+
 // ─── WhatsApp Messages ──────────────────────────────────────
 
 model WhatsAppMessage {

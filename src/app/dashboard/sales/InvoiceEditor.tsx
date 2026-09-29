@@ -10,8 +10,11 @@ import { LENS_COLORS, PAYMENT_METHODS } from "@/lib/constants";
 import { Loader2, Plus, Search, Trash2, Wallet, X, Pencil, AlertTriangle, CalendarClock, User } from "lucide-react";
 import { SPLIT_METHOD, paymentFromParts, primaryMethod } from "@/lib/sales/paymentSplit";
 import { SplitPaymentFields, splitAmountsTotal, type SplitAmounts } from "@/components/invoice/SplitPaymentFields";
+import { CustomerFormModal, type CustomerFormData, type SavedCustomer } from "@/app/dashboard/customers/CustomerFormModal";
 
-export interface EditorCustomer { id: string; name: string; phone: string }
+// Everything about a customer that the form can correct, so an edit from here
+// never blanks a detail the invoice screen didn't happen to show.
+export type EditorCustomer = CustomerFormData;
 export interface EditorStaff { id: string; name: string }
 
 
@@ -209,9 +212,30 @@ export function EditInvoiceModal({
   const [orderTakenBy, setOrderTakenBy] = useState(staff.find((m) => m.name === sale.createdByName)?.id ?? "");
   const [billedBy, setBilledBy] = useState(staff.find((m) => m.name === sale.receivedByName)?.id ?? "");
 
-  const customer = customers.find((c) => c.id === customerId);
+  // A customer added or corrected from this invoice, before the page's own list catches up.
+  const [changedCustomers, setChangedCustomers] = useState<Record<string, EditorCustomer>>({});
+  const [customerForm, setCustomerForm] = useState<"new" | "edit" | null>(null);
+  const allCustomers = (() => {
+    const byId = new Map(customers.map((c) => [c.id, c]));
+    for (const c of Object.values(changedCustomers)) byId.set(c.id, c);
+    return [...byId.values()];
+  })();
+  const customerSaved = (c: SavedCustomer) => {
+    // Someone already on file under that phone: just use the record we have.
+    if (!c.existing) setChangedCustomers((prev) => ({ ...prev, [c.id]: c }));
+    setCustomerId(c.id);
+    setCustomerSearch("");
+  };
+
+  const customerFormStart = (() => {
+    const typed = customerSearch.trim();
+    const looksLikePhone = /^[+\d][\d\s-]{5,}$/.test(typed);
+    return { name: looksLikePhone ? "" : typed, phone: looksLikePhone ? typed : "" };
+  })();
+
+  const customer = allCustomers.find((c) => c.id === customerId);
   const customerMatches = customerSearch.trim()
-    ? customers.filter((c) => {
+    ? allCustomers.filter((c) => {
         const q = customerSearch.trim().toLowerCase();
         return c.name.toLowerCase().includes(q) || c.phone.replace(/[^0-9]/g, "").includes(q.replace(/[^0-9]/g, ""));
       }).slice(0, 5)
@@ -324,6 +348,7 @@ export function EditInvoiceModal({
   };
 
   return (
+    <>
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
       <div className="glass-modal p-6 w-full max-w-2xl animate-rise max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between gap-3 mb-4">
@@ -372,8 +397,14 @@ export function EditInvoiceModal({
               {customerId ? (
                 <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 bg-surface rounded-lg">
                   <span className="text-xs truncate">{customer?.name ?? sale.customerName}{customer?.phone ? ` · ${customer.phone}` : ""}</span>
-                  <button onClick={() => { setCustomerId(""); setCustomerSearch(""); }} title="Make this a walk-in sale"
-                    className="cursor-pointer flex-shrink-0"><X className="w-3.5 h-3.5" /></button>
+                  <span className="flex items-center gap-1.5 flex-shrink-0">
+                    {customer && (
+                      <button onClick={() => setCustomerForm("edit")} title="Correct this customer's name, phone or other details"
+                        className="cursor-pointer"><Pencil className="w-3.5 h-3.5 text-muted-foreground" /></button>
+                    )}
+                    <button onClick={() => { setCustomerId(""); setCustomerSearch(""); }} title="Make this a walk-in sale"
+                      className="cursor-pointer"><X className="w-3.5 h-3.5" /></button>
+                  </span>
                 </div>
               ) : (
                 <div className="relative">
@@ -390,6 +421,10 @@ export function EditInvoiceModal({
                       ))}
                     </div>
                   )}
+                  <button type="button" onClick={() => setCustomerForm("new")}
+                    className="mt-1.5 flex items-center gap-1 text-[11px] text-primary font-semibold cursor-pointer">
+                    <Plus className="w-3 h-3" /> {customerSearch.trim() && customerMatches.length === 0 ? `Not on file — add ${customerSearch.trim()}` : "Add a new customer"}
+                  </button>
                 </div>
               )}
             </div>
@@ -652,6 +687,17 @@ export function EditInvoiceModal({
         </div>
       </div>
     </div>
+
+    {/* Beside the editor, not inside it: the editor's backdrop closes it on any click. */}
+    {customerForm && (
+      <CustomerFormModal
+        customer={customerForm === "edit" ? customer ?? null : null}
+        initial={customerForm === "new" ? customerFormStart : undefined}
+        onClose={() => setCustomerForm(null)}
+        onSaved={customerSaved}
+      />
+    )}
+    </>
   );
 }
 

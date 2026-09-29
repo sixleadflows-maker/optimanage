@@ -20,7 +20,10 @@ export default async function CustomerProfilePage({ params }: { params: Promise<
       sales={sales}
       canDelete={canDelete}
       canEdit={canEdit}
-      customers={customers.map((c) => ({ id: c.id, name: c.name, phone: c.phone }))}
+      customers={customers.map((c) => ({
+        id: c.id, name: c.name, phone: c.phone, serialNumber: c.serialNumber,
+        email: c.email, address: c.address, lastVisit: c.lastVisit,
+      }))}
       staff={users.filter((u) => u.active).map((u) => ({ id: u.id, name: u.name }))}
     />
   );

@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { auth } from "@/lib/auth";
 import { trashPrescription, TrashError } from "@/lib/trash/snapshots";
 import { rxTextColumns, type RxTextColumns } from "@/lib/utils/rx";
+import { attachCustomerToSale } from "@/lib/sales/core";
 
 export interface PrescriptionInput extends Partial<RxTextColumns> {
   customerId: string;
@@ -18,33 +19,55 @@ export interface PrescriptionInput extends Partial<RxTextColumns> {
   isOwnPrescription?: boolean;
 }
 
-export async function createPrescription(input: PrescriptionInput) {
+export type CreatePrescriptionResult =
+  | { ok: true; id: string; date: string; attachedCustomer: boolean }
+  | { ok: false; error: string };
+
+/**
+ * Saves a prescription for a customer. With `saleId` it goes onto an invoice
+ * that's already been rung up; if that invoice was a walk-in, the customer is
+ * put on it too (the eye test is often when the name turns up).
+ */
+export async function createPrescription(input: PrescriptionInput): Promise<CreatePrescriptionResult> {
   const session = await auth();
-  if (!session?.user) throw new Error("Unauthorized");
-  if (!input.customerId) throw new Error("Select a customer");
+  if (!session?.user) return { ok: false, error: "You've been signed out — sign in again" };
+  if (!input.customerId) return { ok: false, error: "Select or add the customer first" };
 
-  if (input.saleId) {
-    const sale = await db.sale.findUnique({ where: { id: input.saleId }, select: { customerId: true } });
-    if (!sale) throw new Error("That invoice no longer exists");
-    if (sale.customerId !== input.customerId) throw new Error("That invoice belongs to a different customer");
+  const sale = input.saleId
+    ? await db.sale.findUnique({ where: { id: input.saleId }, select: { id: true, total: true, date: true, customerId: true } })
+    : null;
+  if (input.saleId && !sale) return { ok: false, error: "That invoice no longer exists" };
+  // An invoice already on someone else stays theirs -- moving it is done from
+  // the invoice's own Edit, where the money side is handled too.
+  if (sale?.customerId && sale.customerId !== input.customerId) {
+    return { ok: false, error: "That invoice belongs to a different customer — change the customer from the invoice's Edit first" };
   }
+  const attachCustomer = !!sale && !sale.customerId;
 
-  const created = await db.prescription.create({
-    data: {
-      customerId: input.customerId,
-      saleId: input.saleId || null,
-      rightSph: input.rightSph, rightCyl: input.rightCyl, rightAxis: input.rightAxis, rightPd: input.rightPd, rightAdd: input.rightAdd,
-      leftSph: input.leftSph, leftCyl: input.leftCyl, leftAxis: input.leftAxis, leftPd: input.leftPd, leftAdd: input.leftAdd,
-      ...rxTextColumns(input),
-      label: (input.label ?? "").trim(),
-      notes: input.notes,
-      isOwnPrescription: input.isOwnPrescription ?? false,
-    },
+  const created = await db.$transaction(async (tx) => {
+    const rx = await tx.prescription.create({
+      data: {
+        customerId: input.customerId,
+        saleId: input.saleId || null,
+        rightSph: input.rightSph, rightCyl: input.rightCyl, rightAxis: input.rightAxis, rightPd: input.rightPd, rightAdd: input.rightAdd,
+        leftSph: input.leftSph, leftCyl: input.leftCyl, leftAxis: input.leftAxis, leftPd: input.leftPd, leftAdd: input.leftAdd,
+        ...rxTextColumns(input),
+        label: (input.label ?? "").trim(),
+        notes: input.notes,
+        isOwnPrescription: input.isOwnPrescription ?? false,
+      },
+    });
+    if (attachCustomer) await attachCustomerToSale(tx, sale!, input.customerId);
+    return rx;
   });
+
   revalidatePath("/dashboard/prescriptions");
   revalidatePath(`/dashboard/customers/${input.customerId}`);
-  if (input.saleId) revalidatePath("/dashboard/sales");
-  return { ok: true, id: created.id, date: created.date.toISOString() };
+  if (input.saleId) {
+    revalidatePath("/dashboard/sales");
+    if (attachCustomer) revalidatePath("/dashboard/customers");
+  }
+  return { ok: true, id: created.id, date: created.date.toISOString(), attachedCustomer: attachCustomer };
 }
 
 export async function updatePrescription(id: string, input: Omit<PrescriptionInput, "customerId">) {

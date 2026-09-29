@@ -231,6 +231,17 @@ export async function trashExpense(id: string, deletedById: string | null) {
   });
 }
 
+export async function trashBankDeposit(id: string, deletedById: string | null) {
+  const d = await db.bankDeposit.findUnique({ where: { id } });
+  if (!d) throw new TrashError("This bank deposit has already been deleted");
+  await db.$transaction(async (tx) => {
+    await store(tx, "bankDeposit", d.id, `Bank deposit — ${rs(d.amount)}`,
+      [d.date.toLocaleDateString("en-GB"), d.bankName, d.reference && `slip ${d.reference}`].filter(Boolean).join(" · "),
+      { deposit: d }, deletedById);
+    await tx.bankDeposit.delete({ where: { id } });
+  });
+}
+
 export async function trashPrescription(id: string, deletedById: string | null) {
   const exists = await db.prescription.findUnique({ where: { id }, select: { id: true } });
   if (!exists) throw new TrashError("This prescription has already been deleted");
@@ -367,6 +378,9 @@ export async function restoreSnapshot(entryId: string) {
         break;
       case "expense":
         await tx.expense.create({ data: revive(data.expense as Row, ["date", "createdAt"]) as Prisma.ExpenseUncheckedCreateInput });
+        break;
+      case "bankDeposit":
+        await tx.bankDeposit.create({ data: revive(data.deposit as Row, ["date", "createdAt"]) as Prisma.BankDepositUncheckedCreateInput });
         break;
       case "prescription": {
         const p = revive(data.prescription as Row, ["date", "createdAt"]);

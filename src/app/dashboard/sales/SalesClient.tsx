@@ -53,9 +53,7 @@ function InvoiceHistory({
   const takenAtTill = sale.paid - laterTotal;
   // An invoice keyed in well after its own date is an old record from paper.
   const enteredLater = new Date(sale.enteredAt).getTime() - new Date(sale.dateTime).getTime() > 60 * 60_000 && !sale.offlineRef;
-  const hasHistory = sale.payments.length > 0 || sale.returns.length > 0 || enteredLater || !!sale.offlineRef
-    || sale.prescriptions.length > 0 || !!sale.customerId;
-  if (!hasHistory) return null;
+  // Every invoice shows this card: its prescriptions can always be added or corrected.
 
   return (
     <div className="mt-4 rounded-xl border border-border p-3 text-xs space-y-3">
@@ -110,7 +108,7 @@ function InvoiceHistory({
         </div>
       )}
 
-      {(sale.prescriptions.length > 0 || !!sale.customerId) && (
+      {(
         <div>
           <p className="text-muted-foreground mb-1 flex items-center gap-1.5"><Glasses className="w-3.5 h-3.5" /> Prescriptions</p>
           <div className="space-y-1.5">
@@ -135,13 +133,12 @@ function InvoiceHistory({
             {sale.prescriptions.length === 0 && (
               <p className="text-muted-foreground">None on this invoice yet — the eye test can be added later.</p>
             )}
-            {sale.customerId ? (
-              <Link href={`/dashboard/prescriptions?addTo=${sale.id}`}
-                className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-primary/10 text-primary font-medium">
-                <Plus className="w-3 h-3" /> Add prescription
-              </Link>
-            ) : (
-              <p className="text-muted-foreground">Put the invoice on a customer first to add one.</p>
+            <Link href={`/dashboard/prescriptions?addTo=${sale.id}`}
+              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-primary/10 text-primary font-medium">
+              <Plus className="w-3 h-3" /> Add prescription
+            </Link>
+            {!sale.customerId && (
+              <p className="text-muted-foreground">Walk-in invoice — you&apos;ll pick or add the customer as you add it, and the invoice goes onto them.</p>
             )}
           </div>
         </div>
@@ -515,6 +512,11 @@ export function SalesClient({
                   </td>
                   <td className="py-3 px-3">
                     <div className="flex items-center justify-center gap-1.5">
+                      <Link href={`/dashboard/prescriptions?addTo=${sale.id}`}
+                        title={sale.prescriptions.length ? "Add another prescription" : "No prescription yet — add one"}
+                        className="p-1.5 rounded-lg hover:bg-surface-hover cursor-pointer">
+                        <Glasses className={`w-3.5 h-3.5 ${sale.prescriptions.length ? "text-muted-foreground" : "text-warning"}`} />
+                      </Link>
                       <button onClick={() => { setViewFormat("thermal"); setViewingSale(sale); }} title="View / reprint invoice"
                         className="p-1.5 rounded-lg hover:bg-surface-hover cursor-pointer">
                         <Eye className="w-3.5 h-3.5 text-primary" />

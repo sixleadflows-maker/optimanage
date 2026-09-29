@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import type { Expense } from "@/lib/mock/types";
 import { formatCurrency, formatDate } from "@/lib/utils/format";
 import { useApp } from "@/lib/context";
@@ -120,6 +121,10 @@ export function ExpensesClient({ expenses, canManage }: { expenses: Expense[]; c
         <div>
           <h1 className="text-2xl font-bold">Expenses</h1>
           <p className="text-sm text-muted-foreground mt-0.5">Track daily shop expenses</p>
+          <p className="text-[11px] text-muted-foreground mt-1">
+            Taking cash to the bank isn&apos;t an expense — record it as a{" "}
+            <Link href="/dashboard/cash" className="text-primary font-medium">bank deposit on the Cash page</Link>.
+          </p>
         </div>
         <button onClick={openAdd}
           className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-xl text-sm font-medium hover:bg-primary-hover transition-colors">

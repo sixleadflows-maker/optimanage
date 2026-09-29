@@ -11,7 +11,7 @@ import { paymentStatusChipClass } from "@/lib/constants";
 import { formatEyeValue } from "@/lib/utils/rx";
 import { EditInvoiceModal, type EditorCustomer, type EditorStaff } from "@/app/dashboard/sales/InvoiceEditor";
 import { CustomerFormModal } from "../CustomerFormModal";
-import { ArrowLeft, MessageCircle, Bell, Eye, EyeOff, RefreshCw, Phone, Mail, MapPin, Trash2, Loader2, Pencil, FilePlus } from "lucide-react";
+import { ArrowLeft, MessageCircle, Bell, Eye, EyeOff, RefreshCw, Phone, Mail, MapPin, Trash2, Loader2, Pencil, FilePlus, Glasses } from "lucide-react";
 import Link from "next/link";
 
 export function CustomerProfileClient({
@@ -240,6 +240,11 @@ export function CustomerProfileClient({
                         <p className="text-sm font-semibold">{formatCurrency(sale.total)}</p>
                         <span className={`chip ${paymentStatusChipClass(sale.paymentStatus)}`}>{sale.paymentStatus}</span>
                       </div>
+                      <Link href={`/dashboard/prescriptions?addTo=${sale.id}`}
+                        title={sale.prescriptions.length ? "Add another prescription" : "No prescription yet — add one"}
+                        className="p-1.5 rounded-lg hover:bg-surface-hover cursor-pointer">
+                        <Glasses className={`w-3.5 h-3.5 ${sale.prescriptions.length ? "text-muted-foreground" : "text-warning"}`} />
+                      </Link>
                       {canEdit && sale.source === "POS" && (
                         <button onClick={() => setEditingSale(sale)} title="Edit invoice"
                           className="p-1.5 rounded-lg hover:bg-surface-hover cursor-pointer">
