@@ -51,7 +51,6 @@ export function CustomerFormModal({
   const [saving, setSaving] = useState(false);
 
   const save = async () => {
-    if (!form.name.trim()) { showToast("Enter the customer's name", "error"); return; }
     setSaving(true);
     try {
       const trimmed = {
@@ -108,8 +107,8 @@ export function CustomerFormModal({
         </div>
         <div className="space-y-3">
           <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Name *</label>
-            <input type="text" autoFocus {...field("name")} />
+            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Name</label>
+            <input type="text" autoFocus placeholder="Can add later" {...field("name")} />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>

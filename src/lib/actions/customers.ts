@@ -75,7 +75,6 @@ export type CreateCustomerResult =
 
 export async function createCustomer(input: CustomerInput): Promise<CreateCustomerResult> {
   await requireAuth();
-  if (!input.name.trim()) return { ok: false, error: "Name is required" };
 
   // Phone is optional now; only dedupe on it when one was actually entered.
   const phone = input.phone.trim();
@@ -113,7 +112,6 @@ export async function createCustomer(input: CustomerInput): Promise<CreateCustom
 
 export async function updateCustomer(id: string, input: CustomerInput) {
   await requireAuth();
-  if (!input.name.trim()) return { ok: false as const, error: "Name is required" };
 
   const phone = input.phone.trim();
   if (phone) {

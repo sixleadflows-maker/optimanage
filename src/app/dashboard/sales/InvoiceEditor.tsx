@@ -35,8 +35,11 @@ export function CollectPaymentModal({
   // When the money was actually taken — now, unless it's being written up later.
   const [takenAt, setTakenAt] = useState(() => toLocalInput(new Date()));
   const [saving, setSaving] = useState(false);
+  const [remainingEditable, setRemainingEditable] = useState(false);
+  const [editedRemaining, setEditedRemaining] = useState(sale.balance);
 
   const remaining = Math.max(0, sale.balance - (amount || 0));
+  const displayRemaining = remainingEditable ? editedRemaining : remaining;
   const takenAtDate = new Date(takenAt);
   const dateProblem =
     !takenAt || Number.isNaN(takenAtDate.getTime()) ? "Enter the date and time"
@@ -91,9 +94,30 @@ export function CollectPaymentModal({
             Full balance
           </button>
         </div>
-        {amount > 0 && remaining > 0 && (
-          <p className="text-[11px] text-muted-foreground mt-1.5">{formatCurrency(remaining)} will still be owed after this.</p>
-        )}
+        <div className="mt-3 space-y-2">
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-medium text-muted-foreground">Remaining balance</label>
+            <button
+              onClick={() => setRemainingEditable(!remainingEditable)}
+              className="text-[11px] text-primary font-medium hover:underline cursor-pointer"
+            >
+              {remainingEditable ? "Done" : "Edit"}
+            </button>
+          </div>
+          {remainingEditable ? (
+            <input
+              type="number"
+              value={editedRemaining}
+              onChange={(e) => setEditedRemaining(Math.max(0, Number(e.target.value)))}
+              className="w-full px-3 py-2 glass-input text-sm"
+            />
+          ) : (
+            <div className="p-3 bg-surface rounded-xl flex justify-between items-center">
+              <span className="text-sm font-medium">{formatCurrency(displayRemaining)}</span>
+              <span className="text-[11px] text-muted-foreground">after this payment</span>
+            </div>
+          )}
+        </div>
 
         <label className="text-xs font-medium text-muted-foreground mb-1.5 block mt-3">Paid by</label>
         <div className="grid grid-cols-4 gap-1.5">

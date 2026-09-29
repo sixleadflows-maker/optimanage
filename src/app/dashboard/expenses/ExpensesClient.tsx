@@ -28,6 +28,7 @@ export function ExpensesClient({ expenses, canManage }: { expenses: Expense[]; c
   const router = useRouter();
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("All");
+  const [sortBy, setSortBy] = useState<"date-newest" | "date-oldest" | "amount-high" | "amount-low">("date-newest");
   const [showAdd, setShowAdd] = useState(false);
   // Set while the form is changing an existing expense rather than adding one.
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -53,12 +54,27 @@ export function ExpensesClient({ expenses, canManage }: { expenses: Expense[]; c
   }, [expenses]);
 
   const filtered = useMemo(() => {
-    return expenses.filter((e) => {
+    let result = expenses.filter((e) => {
       const matchesSearch = e.description.toLowerCase().includes(search.toLowerCase());
       const matchesCat = categoryFilter === "All" || e.category === categoryFilter;
       return matchesSearch && matchesCat;
     });
-  }, [expenses, search, categoryFilter]);
+
+    result.sort((a, b) => {
+      switch (sortBy) {
+        case "date-newest":
+          return new Date(b.date).getTime() - new Date(a.date).getTime();
+        case "date-oldest":
+          return new Date(a.date).getTime() - new Date(b.date).getTime();
+        case "amount-high":
+          return b.amount - a.amount;
+        case "amount-low":
+          return a.amount - b.amount;
+      }
+    });
+
+    return result;
+  }, [expenses, search, categoryFilter, sortBy]);
 
   const totalExpenses = filtered.reduce((sum, e) => sum + e.amount, 0);
   const byCategory = useMemo(() => {
@@ -160,6 +176,20 @@ export function ExpensesClient({ expenses, canManage }: { expenses: Expense[]; c
               </button>
             ))}
           </div>
+        </div>
+
+        <div className="flex items-center gap-3 mb-4 flex-wrap">
+          <label className="text-xs font-medium text-muted-foreground">Sort by</label>
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as any)}
+            className="px-3 py-2 glass-input text-xs rounded-xl"
+          >
+            <option value="date-newest">Date (Newest)</option>
+            <option value="date-oldest">Date (Oldest)</option>
+            <option value="amount-high">Amount (High to Low)</option>
+            <option value="amount-low">Amount (Low to High)</option>
+          </select>
         </div>
 
         <div className="overflow-x-auto">

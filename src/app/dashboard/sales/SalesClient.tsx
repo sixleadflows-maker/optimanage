@@ -57,7 +57,35 @@ function InvoiceHistory({
 
   return (
     <div className="mt-4 rounded-xl border border-border p-3 text-xs space-y-3">
-      <p className="font-semibold flex items-center gap-1.5"><History className="w-3.5 h-3.5 text-primary" /> History</p>
+      <p className="font-semibold flex items-center gap-1.5"><History className="w-3.5 h-3.5 text-primary" /> Details</p>
+
+      <div>
+        <p className="text-muted-foreground mb-1">Items Purchased</p>
+        <div className="space-y-1">
+          {sale.items.map((item) => (
+            <div key={item.id} className="flex justify-between gap-3">
+              <span className="min-w-0">
+                {item.productName}
+                {item.quantity > 1 && <span className="text-muted-foreground"> × {item.quantity}</span>}
+                {item.returnedQuantity > 0 && <span className="text-destructive text-[10px]"> (returned {item.returnedQuantity})</span>}
+              </span>
+              <span className="font-medium flex-shrink-0">{formatCurrency(item.quantity * item.unitPrice - item.discount)}</span>
+            </div>
+          ))}
+          {sale.discount > 0 && (
+            <div className="flex justify-between gap-3 border-t border-border pt-1">
+              <span className="text-muted-foreground">Invoice Discount</span>
+              <span className="font-medium text-destructive">-{formatCurrency(sale.discount)}</span>
+            </div>
+          )}
+          {(sale.labCharges > 0 || sale.fittingCharges > 0) && (
+            <div className="flex justify-between gap-3 text-muted-foreground">
+              {sale.labCharges > 0 && <span>Lab Charges: {formatCurrency(sale.labCharges)}</span>}
+              {sale.fittingCharges > 0 && <span>Fitting Charges: {formatCurrency(sale.fittingCharges)}</span>}
+            </div>
+          )}
+        </div>
+      </div>
 
       {sale.offlineRef && (
         <p className="flex items-start gap-1.5 text-muted-foreground">
@@ -116,7 +144,7 @@ function InvoiceHistory({
               <div key={rx.id} className="flex items-start justify-between gap-3">
                 <span className="min-w-0">
                   {formatDate(rx.date)}
-                  {rx.label && <span className="text-muted-foreground"> · {rx.label}</span>}
+                  {rx.label && <span className="block text-primary text-[10px] font-medium">{rx.label}</span>}
                   <span className="block text-muted-foreground">
                     {`OD ${rxFields.map((f) => formatEyeValue(f, rx.rightEye)).join(" / ")}`}
                   </span>
@@ -190,6 +218,7 @@ export function SalesClient({
   const [sourceFilter, setSourceFilter] = useState<string>("All");
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
+  const [sortBy, setSortBy] = useState<"date-newest" | "date-oldest" | "total-high" | "total-low">("date-newest");
   const { showToast } = useApp();
   const router = useRouter();
 
@@ -298,7 +327,7 @@ export function SalesClient({
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return sales.filter((s) => {
+    let result = sales.filter((s) => {
       const matchesSearch =
         !q ||
         s.customerName.toLowerCase().includes(q) ||
@@ -313,7 +342,22 @@ export function SalesClient({
       const matchesDates = (!fromDate || day >= fromDate) && (!toDate || day <= toDate);
       return matchesSearch && matchesStatus && matchesSource && matchesDates;
     });
-  }, [sales, search, statusFilter, sourceFilter, fromDate, toDate]);
+
+    result.sort((a, b) => {
+      switch (sortBy) {
+        case "date-newest":
+          return new Date(b.dateTime).getTime() - new Date(a.dateTime).getTime();
+        case "date-oldest":
+          return new Date(a.dateTime).getTime() - new Date(b.dateTime).getTime();
+        case "total-high":
+          return b.total - a.total;
+        case "total-low":
+          return a.total - b.total;
+      }
+    });
+
+    return result;
+  }, [sales, search, statusFilter, sourceFilter, fromDate, toDate, sortBy]);
 
   const setRange = (range: "today" | "month" | "all") => {
     const today = localDay(new Date().toISOString());
@@ -441,6 +485,20 @@ export function SalesClient({
               </button>
             ))}
           </div>
+        </div>
+
+        <div className="flex items-center gap-3 mb-4 flex-wrap">
+          <label className="text-xs font-medium text-muted-foreground">Sort by</label>
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as any)}
+            className="px-3 py-2 glass-input text-xs rounded-xl"
+          >
+            <option value="date-newest">Date (Newest)</option>
+            <option value="date-oldest">Date (Oldest)</option>
+            <option value="total-high">Total (High to Low)</option>
+            <option value="total-low">Total (Low to High)</option>
+          </select>
         </div>
 
         <div className="overflow-x-auto">

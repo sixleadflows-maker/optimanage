@@ -359,7 +359,7 @@ export function PrescriptionsClient({
                   <div className="min-w-0">
                     <p className="text-sm font-medium truncate">
                       {rx.customerName}
-                      {rx.label && <span className="text-muted-foreground font-normal"> · {rx.label}</span>}
+                      {rx.label && <span className="text-primary font-normal text-xs ml-1">({rx.label})</span>}
                     </p>
                     <p className="text-[10px] text-muted-foreground">
                       {[
