@@ -80,11 +80,13 @@ async function main() {
   ];
 
   for (const c of customerData) {
-    await prisma.customer.upsert({
-      where: { phone: c.phone },
-      update: {},
-      create: { ...c, totalSpend: Math.floor(Math.random() * 50000) + 5000, lastVisit: new Date("2026-06-15") },
-    });
+    // A phone number can be shared now, so it's no longer a key to upsert on.
+    const already = await prisma.customer.findFirst({ where: { phone: c.phone, name: c.name } });
+    if (!already) {
+      await prisma.customer.create({
+        data: { ...c, totalSpend: Math.floor(Math.random() * 50000) + 5000, lastVisit: new Date("2026-06-15") },
+      });
+    }
   }
 
   // ─── Products (first 20 for seed) ─────────────────────

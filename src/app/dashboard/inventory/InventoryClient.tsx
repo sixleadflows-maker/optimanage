@@ -8,6 +8,7 @@ import { Search, Grid3X3, List, Plus, AlertTriangle, PackageX, X } from "lucide-
 import Link from "next/link";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { firstImage } from "@/lib/utils/images";
+import { matchesSearch } from "@/lib/utils/search";
 
 // Matches on substring so the kids/sports variants pick up the right icon
 // without needing a new case each time a category is added.
@@ -31,22 +32,34 @@ export function InventoryClient({ products, isOwner }: { products: Product[]; is
     setTypeFilter("All");
   };
 
-  const filtered = useMemo(() => {
-    const q = search.toLowerCase();
-    return products.filter((p) => {
-      const matchesSearch =
-        p.name.toLowerCase().includes(q) ||
-        p.brand.toLowerCase().includes(q) ||
-        p.model.toLowerCase().includes(q) ||
-        p.description.toLowerCase().includes(q) ||
-        p.barcode.includes(search);
+  // Every word typed has to appear somewhere on the product, in any order:
+  // "ray ban aviator", "titan 7002" and "black 52" all find what they describe.
+  const searched = useMemo(
+    () => products.filter((p) =>
+      matchesSearch(search, [p.brand, p.name, p.model, p.description, p.colour, p.size, p.type, p.category, p.barcode])),
+    [products, search]
+  );
+
+  const filtered = useMemo(
+    () => searched.filter((p) => {
       const matchesCategory = categoryFilter === "All" || p.category === categoryFilter;
       const matchesType = typeFilter === "All" || p.type === typeFilter;
       const matchesTag = tagFilter === "All" || p.brandTag === tagFilter;
       const matchesStock = stockFilter === "all" || p.stock <= 0;
-      return matchesSearch && matchesCategory && matchesType && matchesTag && matchesStock;
-    });
-  }, [products, search, categoryFilter, typeFilter, tagFilter, stockFilter]);
+      return matchesCategory && matchesType && matchesTag && matchesStock;
+    }),
+    [searched, categoryFilter, typeFilter, tagFilter, stockFilter]
+  );
+
+  const filtersOn = categoryFilter !== "All" || typeFilter !== "All" || tagFilter !== "All" || stockFilter !== "all";
+  // What the search found that the buttons above are hiding.
+  const hiddenByFilters = search.trim() ? searched.length - filtered.length : 0;
+  const clearFilters = () => {
+    setCategoryFilter("All");
+    setTypeFilter("All");
+    setTagFilter("All");
+    setStockFilter("all");
+  };
 
   // Contact lenses (clear vs coloured) and lens kits (daily/monthly/extended
   // wear) are split by type, so picking one of those categories offers the
@@ -138,28 +151,37 @@ export function InventoryClient({ products, isOwner }: { products: Product[]; is
           })}
         </div>
 
-        <div className="flex flex-col sm:flex-row gap-3 mb-4">
-          <div className="relative flex-1">
+        {/* The search box gets a row to itself: sharing one with the category
+            buttons squeezed it down to a stub once there were ten of them. */}
+        <div className="flex gap-3 mb-3">
+          <div className="relative flex-1 min-w-0">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <input type="text" placeholder="Search products, brands, barcodes..." value={search}
-              onChange={(e) => setSearch(e.target.value)} className="w-full pl-10 pr-4 py-2 glass-input text-sm" />
-          </div>
-          <div className="flex gap-1.5 flex-wrap">
-            {["All", ...PRODUCT_CATEGORIES].map((cat) => (
-              <button key={cat} onClick={() => selectCategory(cat)}
-                className={`px-3 py-2 rounded-xl text-xs font-medium transition-all whitespace-nowrap ${categoryFilter === cat ? "bg-primary text-white" : "bg-surface hover:bg-surface-hover"}`}>
-                {cat}
+            <input type="text" placeholder="Search by name, brand, model, colour or barcode..." value={search}
+              onChange={(e) => setSearch(e.target.value)} className="w-full pl-10 pr-9 py-2 glass-input text-sm" />
+            {search && (
+              <button onClick={() => setSearch("")} title="Clear search"
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-md hover:bg-surface-hover cursor-pointer">
+                <X className="w-3.5 h-3.5 text-muted-foreground" />
               </button>
-            ))}
+            )}
           </div>
-          <div className="flex gap-1">
-            <button onClick={() => setViewMode("grid")} className={`p-2 rounded-lg ${viewMode === "grid" ? "bg-primary text-white" : "bg-surface"}`}>
+          <div className="flex gap-1 flex-shrink-0">
+            <button onClick={() => setViewMode("grid")} title="Grid" className={`p-2 rounded-lg ${viewMode === "grid" ? "bg-primary text-white" : "bg-surface"}`}>
               <Grid3X3 className="w-4 h-4" />
             </button>
-            <button onClick={() => setViewMode("list")} className={`p-2 rounded-lg ${viewMode === "list" ? "bg-primary text-white" : "bg-surface"}`}>
+            <button onClick={() => setViewMode("list")} title="List" className={`p-2 rounded-lg ${viewMode === "list" ? "bg-primary text-white" : "bg-surface"}`}>
               <List className="w-4 h-4" />
             </button>
           </div>
+        </div>
+
+        <div className="flex gap-1.5 flex-wrap mb-4">
+          {["All", ...PRODUCT_CATEGORIES].map((cat) => (
+            <button key={cat} onClick={() => selectCategory(cat)}
+              className={`px-3 py-2 rounded-xl text-xs font-medium transition-all whitespace-nowrap ${categoryFilter === cat ? "bg-primary text-white" : "bg-surface hover:bg-surface-hover"}`}>
+              {cat}
+            </button>
+          ))}
         </div>
 
         {subTypes.length > 0 && (
@@ -174,8 +196,23 @@ export function InventoryClient({ products, isOwner }: { products: Product[]; is
           </div>
         )}
 
+        {(search.trim() || filtersOn) && (
+          <div className="flex items-center gap-2 flex-wrap text-xs text-muted-foreground mb-3">
+            <span>{`Showing ${filtered.length} of ${products.length} products`}</span>
+            {hiddenByFilters > 0 && (
+              <button onClick={clearFilters} className="text-primary font-medium hover:underline cursor-pointer">
+                {`${hiddenByFilters} more match${hiddenByFilters === 1 ? "es" : ""} "${search.trim()}" outside the selected filters — show all`}
+              </button>
+            )}
+          </div>
+        )}
+
         {filtered.length === 0 ? (
-          <EmptyState title="No frames match" hint="Try another name, brand, or barcode — or add it as a new product." />
+          <EmptyState
+            title={hiddenByFilters > 0 ? "Nothing matches inside the selected filters" : "No products match"}
+            hint={hiddenByFilters > 0
+              ? "Use “show all” above to search every category."
+              : "Try another name, brand, model or barcode — or add it as a new product."} />
         ) : viewMode === "grid" ? (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 stagger-rise">
             {filtered.map((product) => (

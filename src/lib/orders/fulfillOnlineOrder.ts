@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
 import { persistSale, type SaleCoreItem } from "@/lib/sales/core";
-import { liveCustomerWithPhone } from "@/lib/trash/heldValues";
+import { customersWithPhone } from "@/lib/trash/heldValues";
+import { sameName } from "@/lib/utils/phone";
 
 interface CartItemSnapshot {
   productId: string;
@@ -28,7 +29,11 @@ export async function fulfillOnlineOrder(checkoutSessionId: string) {
     discount: 0,
   }));
 
-  let customer = session.customerPhone ? await liveCustomerWithPhone(session.customerPhone) : null;
+  // A number can be shared by several customers: the one with this name, or
+  // failing that whoever was last seen on it, rather than a new record for
+  // every spelling typed into the shop's checkout.
+  const onNumber = session.customerPhone ? await customersWithPhone(session.customerPhone) : [];
+  let customer = onNumber.find((c) => sameName(c.name, session.customerName)) ?? onNumber[0] ?? null;
   if (!customer) {
     customer = await db.customer.create({
       data: { name: session.customerName, phone: session.customerPhone, email: session.customerEmail },

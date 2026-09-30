@@ -64,8 +64,8 @@ export function ProductForm({ product, isNew, isOwner = false, barcodeWidth = 2,
 
   const update = (field: string, value: string | number | boolean) => setForm((p) => ({ ...p, [field]: value }));
 
-  // Type options follow the category (frame material, clear/coloured contact
-  // lens, lens-kit wear schedule). Switching category drops a type that no
+  // Type options follow the category (frame material; clear, coloured or wear
+  // schedule for a contact lens). Switching category drops a type that no
   // longer applies instead of saving, say, a contact lens as "Acetate".
   const typeOptions = typesForCategory(form.category);
   const changeCategory = (category: string) =>
@@ -326,7 +326,7 @@ export function ProductForm({ product, isNew, isOwner = false, barcodeWidth = 2,
               {typeOptions.length > 0 && (
                 <div>
                   <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
-                    {form.category === "Contact Lenses" ? "Lens Type" : form.category === "Lens Kit" ? "Wear Type" : "Type"}
+                    {form.category === "Contact Lenses" ? "Lens Type" : "Type"}
                   </label>
                   <select value={form.type} onChange={(e) => update("type", e.target.value)} className="w-full px-4 py-2.5 glass-input text-sm">
                     {/* Items saved before types depended on the category can

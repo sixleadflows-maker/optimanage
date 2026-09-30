@@ -7,6 +7,8 @@ import { clearOfflinePages } from "@/components/layout/ServiceWorker";
 import { globalSearch, type ProductSearchResult } from "@/lib/actions/search";
 import type { CustomerSearchHit } from "@/lib/actions/customers";
 import Link from "next/link";
+import { unstable_isUnrecognizedActionError } from "next/navigation";
+import { reportOutdatedPage } from "@/components/layout/UpdateNotice";
 import type { BranchView } from "@/lib/data";
 import { formatCurrency } from "@/lib/utils/format";
 import { Menu, Search, Moon, Sun, Wifi, WifiOff, ChevronDown, LogOut, Loader2, User, Package } from "lucide-react";
@@ -56,6 +58,8 @@ type SearchState = {
   query: string;
   status: "searching" | "done" | "failed";
   error?: string;
+  // Failed because this page is older than the release now running.
+  outdated?: boolean;
   products: ProductSearchResult[];
   customers: CustomerSearchHit[];
 };
@@ -92,9 +96,13 @@ export function Topbar({ user, branches }: { user: TopbarUser; branches: BranchV
       setSearch(res.ok
         ? { query, status: "done", products: res.products, customers: res.customers }
         : { query, status: "failed", error: res.error, products: [], customers: [] });
-    } catch {
+    } catch (e) {
+      // A page opened before the last update: the server no longer knows what
+      // it's asking for, and only a refresh fixes that.
+      const outdated = unstable_isUnrecognizedActionError(e);
+      if (outdated) reportOutdatedPage();
       if (id !== latestRequest.current) return;
-      setSearch({ query, status: "failed", products: [], customers: [] });
+      setSearch({ query, status: "failed", outdated, products: [], customers: [] });
     }
   }, []);
 
@@ -180,7 +188,15 @@ export function Topbar({ user, branches }: { user: TopbarUser; branches: BranchV
         </div>
         {shown && (
           <div className="absolute top-full left-2 right-2 sm:left-0 sm:right-0 mt-2 topbar-popover rounded-xl p-2 z-20 animate-fade-in max-h-[70vh] overflow-y-auto">
-            {shown.status === "failed" ? (
+            {shown.status === "failed" && shown.outdated ? (
+              <div className="flex items-center justify-between gap-3 p-1.5">
+                <p className="text-sm text-muted-foreground">The system was updated after this page was opened — refresh it to search.</p>
+                <button onClick={() => window.location.reload()}
+                  className="px-3 py-1.5 bg-primary text-white rounded-lg text-xs font-semibold hover:bg-primary-hover transition-colors cursor-pointer flex-shrink-0">
+                  Refresh
+                </button>
+              </div>
+            ) : shown.status === "failed" ? (
               <p className="text-sm text-muted-foreground p-1.5">
                 {shown.error ?? "Couldn't search just now — check the connection and try again."}
               </p>
@@ -222,7 +238,7 @@ export function Topbar({ user, branches }: { user: TopbarUser; branches: BranchV
                         <span className="min-w-0">
                           <span className="text-sm font-medium flex items-center gap-1.5">
                             <User className="w-3.5 h-3.5 text-primary flex-shrink-0" />
-                            <span className="truncate">{c.name}</span>
+                            <span className="truncate">{c.name || "No name yet"}</span>
                           </span>
                           <span className="block text-[11px] text-muted-foreground truncate">
                             {[c.serialNumber && `Serial ${c.serialNumber}`, c.phone, c.prescriptionCount > 0 && `${c.prescriptionCount} prescription${c.prescriptionCount === 1 ? "" : "s"}`]

@@ -10,6 +10,7 @@ import { createStockAdjustment, updateStockAdjustment, deleteStockAdjustment } f
 import { ClipboardList, Plus, X, Search, Loader2, Pencil, Trash2 } from "lucide-react";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { matchesSearch } from "@/lib/utils/search";
 
 const ADJUSTMENT_REASONS = ["Damage", "Theft/Shrinkage", "Recount", "Expired/Obsolete", "Other"] as const;
 
@@ -72,9 +73,8 @@ export function AdjustmentsClient({
   };
 
   const filteredProducts = useMemo(() => {
-    if (!productSearch) return [];
-    const q = productSearch.toLowerCase();
-    return products.filter((p) => p.name.toLowerCase().includes(q) || p.brand.toLowerCase().includes(q)).slice(0, 6);
+    if (!productSearch.trim()) return [];
+    return products.filter((p) => matchesSearch(productSearch, [p.brand, p.name, p.model, p.colour, p.barcode])).slice(0, 6);
   }, [products, productSearch]);
 
   const openAdjust = () => {

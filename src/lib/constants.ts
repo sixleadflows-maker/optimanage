@@ -57,21 +57,22 @@ export const LENS_COLORS = [
   "Mirror",
 ] as const;
 
-export const CONTACT_LENS_TYPES = ["Transparent", "Colored"] as const;
-export const LENS_KIT_TYPES = ["Daily Wear", "Monthly Wear", "Extended Wear"] as const;
+// A contact lens is picked by what it is (clear or coloured) or by how long a
+// pair is worn. The wear schedules used to sit under Lens Kit, which is only
+// the case-and-solution kit; they belong with the lenses.
+export const CONTACT_LENS_TYPES = ["Transparent", "Colored", "Daily Wear", "Monthly Wear", "Extended Wear"] as const;
 
 // "Type" means something different per category: frame material for eyewear,
-// clear vs coloured for contact lenses, wear schedule for lens kits. Lens
-// solution has no preset types, so an empty list hides the field.
+// clear / coloured / wear schedule for contact lenses. Lens solution and lens
+// kits have no preset types, so an empty list hides the field.
 export function typesForCategory(category: string): readonly string[] {
   if (category === "Contact Lenses") return CONTACT_LENS_TYPES;
-  if (category === "Lens Kit") return LENS_KIT_TYPES;
-  if (category === "Lens Solution") return [];
+  if (category === "Lens Solution" || category === "Lens Kit") return [];
   return PRODUCT_TYPES;
 }
 
 // Categories whose types are worth filtering by on the inventory screen.
-export const CATEGORIES_WITH_TYPE_FILTER: readonly string[] = ["Contact Lenses", "Lens Kit"];
+export const CATEGORIES_WITH_TYPE_FILTER: readonly string[] = ["Contact Lenses"];
 
 export const EXPENSE_PAYMENT_METHODS = ["Cash", "Card", "Cheque"] as const;
 

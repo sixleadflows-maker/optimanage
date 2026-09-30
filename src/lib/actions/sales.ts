@@ -13,7 +13,8 @@ import {
 } from "@/lib/sales/core";
 import { trashInvoice, TrashError } from "@/lib/trash/snapshots";
 import type { PaymentPart } from "@/lib/sales/paymentSplit";
-import { liveCustomerWithPhone } from "@/lib/trash/heldValues";
+import { customersWithPhone } from "@/lib/trash/heldValues";
+import { sameName } from "@/lib/utils/phone";
 
 export interface CartItemInput {
   // Correcting an invoice: the line this already is, so it's changed in place.
@@ -75,12 +76,16 @@ export interface CreateSaleInput {
 // till's clock or a slow connection.
 const BACKDATE_AFTER_MS = 10 * 60_000;
 
-/** Finds the offline customer by phone, or adds them. */
+/**
+ * The customer added at the till while it was offline. A number can be shared,
+ * so they're matched on number and name together; anyone else is added as a
+ * new customer, the same as when the till is online.
+ */
 async function customerForOfflineBill(c: { name: string; phone: string }) {
   const phone = c.phone.trim();
   if (phone) {
-    const existing = await liveCustomerWithPhone(phone);
-    if (existing) return existing.id;
+    const same = (await customersWithPhone(phone)).find((x) => sameName(x.name, c.name));
+    if (same) return same.id;
   }
   const created = await db.customer.create({ data: { name: c.name.trim() || "Customer", phone: phone || null } });
   return created.id;

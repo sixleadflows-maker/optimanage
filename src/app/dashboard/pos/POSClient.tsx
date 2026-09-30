@@ -9,7 +9,8 @@ import { createSale, updateTillSale, type CreateSaleInput } from "@/lib/actions/
 import { createCustomer } from "@/lib/actions/customers";
 import { createPrescription, updatePrescription } from "@/lib/actions/prescriptions";
 import { getDrafts, addDraft, replaceDraft, removeDraft, markDraftFailed, makeOfflineRef, type OfflineDraft } from "@/lib/offlineDrafts";
-import { useRouter } from "next/navigation";
+import { useRouter, unstable_isUnrecognizedActionError } from "next/navigation";
+import { reportOutdatedPage } from "@/components/layout/UpdateNotice";
 import Link from "next/link";
 import {
   Search, Plus, Minus, Trash2, X, User, CreditCard,
@@ -24,6 +25,8 @@ import { LensLoader } from "@/components/ui/LensLoader";
 import { RxPowerInput } from "@/components/ui/RxPowerInput";
 import { isPowerField, parseRxText, rxFieldText, rxFormTexts, type RxTextColumns } from "@/lib/utils/rx";
 import { ThermalReceipt, A4Invoice, lensNote, type InvoiceData, type ShopDetails } from "@/components/invoice/InvoiceDocuments";
+import { matchesSearch } from "@/lib/utils/search";
+import { samePhone } from "@/lib/utils/phone";
 
 interface CartItem {
   // productId for an inventory item; a generated key for a typed-in one.
@@ -386,35 +389,18 @@ export function POSClient({
   );
 
   const filteredProducts = useMemo(() => {
-    if (!search) return products.slice(0, 12);
-    const q = search.toLowerCase();
-    return products.filter(
-      (p) =>
-        p.name.toLowerCase().includes(q) ||
-        p.brand.toLowerCase().includes(q) ||
-        p.model.toLowerCase().includes(q) ||
-        p.description.toLowerCase().includes(q) ||
-        p.barcode.includes(q)
-    );
+    if (!search.trim()) return products.slice(0, 12);
+    return products.filter((p) => matchesSearch(search, [p.brand, p.name, p.model, p.description, p.colour, p.size, p.type, p.barcode]));
   }, [products, search]);
 
   const filteredCustomers = useMemo(() => {
-    if (!customerSearch) return allCustomers.slice(0, 5);
-    const q = customerSearch.toLowerCase();
-    return allCustomers.filter(
-      (c) => c.name.toLowerCase().includes(q) || c.phone.includes(q) || c.serialNumber.toLowerCase().includes(q)
-    );
+    if (!customerSearch.trim()) return allCustomers.slice(0, 5);
+    return allCustomers.filter((c) => matchesSearch(customerSearch, [c.name, c.phone, c.serialNumber]));
   }, [allCustomers, customerSearch]);
 
   const filteredLensProducts = useMemo(() => {
-    if (!lensSearch) return lensProducts.slice(0, 6);
-    const q = lensSearch.toLowerCase();
-    return lensProducts.filter(
-      (p) =>
-        p.name.toLowerCase().includes(q) ||
-        p.brand.toLowerCase().includes(q) ||
-        p.model.toLowerCase().includes(q)
-    ).slice(0, 6);
+    if (!lensSearch.trim()) return lensProducts.slice(0, 6);
+    return lensProducts.filter((p) => matchesSearch(lensSearch, [p.brand, p.name, p.model, p.colour, p.type])).slice(0, 6);
   }, [lensProducts, lensSearch]);
 
   const lensProduct = products.find((p) => p.id === lensProductId);
@@ -483,7 +469,19 @@ export function POSClient({
     setShowNewCustomer(true);
   };
 
+  // Who's already on the number being typed. It never blocks adding: several
+  // customers can share one number (a family, or a record per order).
+  const onNewCustomerNumber = showNewCustomer ? allCustomers.filter((c) => samePhone(c.phone, newCustomer.phone)) : [];
+
+  const pickCustomerOnNumber = (id: string) => {
+    setSelectedCustomer(id);
+    setShowNewCustomer(false);
+    setNewCustomer({ ...EMPTY_NEW_CUSTOMER });
+    setCustomerSearch("");
+  };
+
   const saveNewCustomer = async () => {
+    if (savingCustomer) return;
     const name = newCustomer.name.trim();
     if (!name) { showToast("Enter the customer's name", "error"); return; }
     setSavingCustomer(true);
@@ -492,27 +490,28 @@ export function POSClient({
         name, phone: newCustomer.phone, serialNumber: newCustomer.serialNumber,
         email: "", address: "", lastVisit: "",
       });
-      if (res.ok) {
-        const id = res.id;
-        setAddedCustomers((prev) => [...prev, { id, name: res.name ?? name, phone: newCustomer.phone.trim(), serialNumber: newCustomer.serialNumber.trim() }]);
-        setSelectedCustomer(id);
-        showToast(res.restored ? `${name} was deleted before — brought back and selected` : `${name} added and selected`, "success");
-      } else if (res.existing) {
-        // Already on file under that phone number — just use them.
-        const existing = res.existing;
-        setAddedCustomers((prev) => [...prev, { ...existing, serialNumber: "" }]);
-        setSelectedCustomer(existing.id);
-        showToast(`${existing.name} is already registered with that number — selected them`, "info");
-      } else {
+      if (!res.ok) {
         showToast(res.error, "error");
         return;
       }
+      const id = res.id;
+      setAddedCustomers((prev) => prev.some((c) => c.id === id)
+        ? prev
+        : [...prev, { id, name, phone: newCustomer.phone.trim(), serialNumber: newCustomer.serialNumber.trim() }]);
+      setSelectedCustomer(id);
+      showToast(
+        onNewCustomerNumber.length
+          ? `${name} added and selected — ${onNewCustomerNumber.length + 1} customers now share this number`
+          : `${name} added and selected`,
+        "success",
+      );
       setShowNewCustomer(false);
       setNewCustomer({ ...EMPTY_NEW_CUSTOMER });
       setCustomerSearch("");
     } catch {
       // No connection: keep them on this till and add them to the system when
-      // the bill syncs (matched on phone, so no duplicate if they exist already).
+      // the bill syncs (matched on number and name, so no duplicate if they're
+      // on file already).
       const id = `local-${crypto.randomUUID()}`;
       setAddedCustomers((prev) => [...prev, {
         id, name, phone: newCustomer.phone.trim(), serialNumber: newCustomer.serialNumber.trim(), local: true,
@@ -928,10 +927,13 @@ export function POSClient({
         setShowSuccess(false);
         setShowReceipt(true);
       }, 750);
-    } catch {
+    } catch (e) {
       // The request never got a proper answer — most likely no connection. If
       // it did reach the server after all, the sync finds that invoice by
       // clientRef instead of recording it twice.
+      // A till left open across an update gets no answer either: the bill is
+      // kept the same way and goes through once the page is refreshed.
+      if (unstable_isUnrecognizedActionError(e)) reportOutdatedPage();
       printOffline();
     } finally {
       setSaving(false);
@@ -1326,9 +1328,31 @@ export function POSClient({
                     onKeyDown={(e) => { if (e.key === "Enter") saveNewCustomer(); }}
                     placeholder="Serial no. (optional)" className="w-full px-3 py-2 glass-input text-xs" />
                 </div>
+                {onNewCustomerNumber.length > 0 && (
+                  <div className="rounded-lg bg-surface p-2 text-[11px] space-y-1">
+                    <p className="font-semibold">{`Already on this number — ${onNewCustomerNumber.length} customer${onNewCustomerNumber.length === 1 ? "" : "s"}`}</p>
+                    {onNewCustomerNumber.slice(0, 4).map((c) => (
+                      <div key={c.id} className="flex items-center justify-between gap-2">
+                        <span className="min-w-0 truncate">
+                          {c.name || "No name yet"}
+                          {c.serialNumber && <span className="text-muted-foreground">{` · ${c.serialNumber}`}</span>}
+                        </span>
+                        <button onClick={() => pickCustomerOnNumber(c.id)}
+                          className="px-2 py-0.5 rounded-md bg-primary/10 text-primary font-medium flex-shrink-0 cursor-pointer">
+                          Use
+                        </button>
+                      </div>
+                    ))}
+                    {onNewCustomerNumber.length > 4 && (
+                      <p className="text-muted-foreground">{`…and ${onNewCustomerNumber.length - 4} more — search the number to see them all.`}</p>
+                    )}
+                    <p className="text-muted-foreground">Or save below to add a separate customer on the same number.</p>
+                  </div>
+                )}
                 <button onClick={saveNewCustomer} disabled={savingCustomer}
                   className="w-full py-2 bg-primary text-white rounded-lg text-xs font-semibold hover:bg-primary-hover transition-colors disabled:opacity-60 flex items-center justify-center gap-1.5 cursor-pointer">
-                  {savingCustomer && <LensLoader light />} Save &amp; select customer
+                  {savingCustomer && <LensLoader light />}
+                  {onNewCustomerNumber.length ? "Save as a new customer on this number" : "Save & select customer"}
                 </button>
               </div>
             )}
@@ -1429,7 +1453,13 @@ export function POSClient({
                               onClick={() => selectLens(p.id)}
                               className="w-full text-left px-3 py-1.5 rounded-lg hover:bg-surface-hover text-xs flex items-center justify-between gap-2"
                             >
-                              <span className="truncate">{p.brand} {p.name}</span>
+                              <span className="min-w-0">
+                                <span className="block truncate">{p.brand} {p.name}</span>
+                                {/* Clear / coloured / daily / extended wear — only contact lenses carry a lens type. */}
+                                {p.category === "Contact Lenses" && p.type && (
+                                  <span className="block text-[10px] text-muted-foreground">{p.type}</span>
+                                )}
+                              </span>
                               <span className="text-muted-foreground flex-shrink-0">{formatCurrency(p.salePrice)}</span>
                             </button>
                           ))}

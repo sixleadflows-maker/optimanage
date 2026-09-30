@@ -10,6 +10,7 @@ import { PrintPortal } from "@/components/ui/PrintPortal";
 import { applyLabelPageSize } from "@/lib/utils/printLabel";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Search, Barcode, Printer, Wand2, Loader2 } from "lucide-react";
+import { matchesSearch } from "@/lib/utils/search";
 
 export function LabelsClient({ products, barcodeWidth, barcodeHeight }: { products: Product[]; barcodeWidth: number; barcodeHeight: number }) {
   const { showToast } = useApp();
@@ -20,9 +21,7 @@ export function LabelsClient({ products, barcodeWidth, barcodeHeight }: { produc
   const missingCount = products.filter((p) => !p.barcode).length;
 
   const filtered = useMemo(() => {
-    if (!search) return products;
-    const q = search.toLowerCase();
-    return products.filter((p) => p.name.toLowerCase().includes(q) || p.brand.toLowerCase().includes(q) || p.barcode.includes(q));
+    return products.filter((p) => matchesSearch(search, [p.brand, p.name, p.model, p.colour, p.barcode]));
   }, [products, search]);
 
   const generateMissing = async () => {

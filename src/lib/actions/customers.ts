@@ -3,7 +3,6 @@
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { auth } from "@/lib/auth";
-import { customerHoldingPhone } from "@/lib/trash/heldValues";
 
 export interface CustomerInput {
   name: string;
@@ -41,13 +40,25 @@ export async function searchCustomers(query: string): Promise<CustomerSearchHit[
   const q = query.trim();
   if (q.length < 2) return [];
 
+  // Every word has to match somewhere, in any order ("khan ali", "ali 0142").
+  // A number typed with spaces or dashes is also tried as one run of digits.
+  const words = q.split(/\s+/).filter(Boolean);
+  const digits = q.replace(/[^0-9]/g, "");
+  const phoneLike = /^[+\d][\d\s-]*$/.test(q) && digits.length >= 3;
   const rows = await db.customer.findMany({
     where: {
       active: true,
       OR: [
-        { serialNumber: { contains: q, mode: "insensitive" } },
-        { name: { contains: q, mode: "insensitive" } },
-        { phone: { contains: q } },
+        {
+          AND: words.map((w) => ({
+            OR: [
+              { serialNumber: { contains: w, mode: "insensitive" as const } },
+              { name: { contains: w, mode: "insensitive" as const } },
+              { phone: { contains: w } },
+            ],
+          })),
+        },
+        ...(phoneLike ? [{ phone: { contains: digits } }] : []),
       ],
     },
     orderBy: { lastVisit: "desc" },
@@ -67,56 +78,34 @@ export async function searchCustomers(query: string): Promise<CustomerSearchHit[
   }));
 }
 
-export type CreateCustomerResult =
-  // `restored` is set when the number belonged to a deleted customer, who has
-  // been brought back instead of adding a second record.
-  | { ok: true; id: string; restored?: boolean; name?: string }
-  // `existing` is set when the phone number already belongs to a customer, so
-  // the till can simply select them instead.
-  | { ok: false; error: string; existing?: { id: string; name: string; phone: string } };
+export type CreateCustomerResult = { ok: true; id: string } | { ok: false; error: string };
 
+/**
+ * Adds a customer. A phone number already on file is no obstacle: several
+ * customers can share one number (a family on one phone, or a record per
+ * order), so this always adds a new record. The forms show who's already on
+ * the number and let staff pick one of them instead.
+ */
 export async function createCustomer(input: CustomerInput): Promise<CreateCustomerResult> {
   await requireAuth();
 
-  // Phone is optional now; only dedupe on it when one was actually entered.
+  const name = input.name.trim();
   const phone = input.phone.trim();
-  if (phone) {
-    // A customer deleted for good no longer holds the number.
-    const existing = await customerHoldingPhone(phone);
-    if (existing && !existing.active) {
-      // Deleted, but it's their number, so it's them back again. Bring them back
-      // with what was just typed rather than stopping staff mid-order: their
-      // past invoices and prescriptions come back with them.
-      const back = await db.customer.update({
-        where: { id: existing.id },
-        data: {
-          active: true,
-          deletedAt: null,
-          name: input.name.trim() || existing.name,
-          ...(input.serialNumber.trim() ? { serialNumber: input.serialNumber.trim() } : {}),
-          ...(input.email.trim() ? { email: input.email.trim() } : {}),
-          ...(input.address.trim() ? { address: input.address.trim() } : {}),
-          ...(input.lastVisit ? { lastVisit: new Date(input.lastVisit) } : {}),
-        },
-      });
-      revalidatePath("/dashboard/customers");
-      revalidatePath("/dashboard/trash");
-      return { ok: true, id: back.id, restored: true, name: back.name };
-    }
-    if (existing) {
-      return {
-        ok: false,
-        error: "A customer with this phone already exists",
-        existing: { id: existing.id, name: existing.name, phone: existing.phone ?? "" },
-      };
-    }
-  }
+  const serialNumber = input.serialNumber.trim();
+
+  // Save pressed twice in a row mustn't leave two identical records, now that
+  // the phone number no longer stops the second one.
+  const justAdded = await db.customer.findFirst({
+    where: { name, phone: phone || null, serialNumber, active: true, createdAt: { gt: new Date(Date.now() - 15_000) } },
+    select: { id: true },
+  });
+  if (justAdded) return { ok: true, id: justAdded.id };
 
   const customer = await db.customer.create({
     data: {
-      name: input.name.trim(),
+      name,
       phone: phone || null,
-      serialNumber: input.serialNumber.trim(),
+      serialNumber,
       email: input.email.trim(),
       address: input.address.trim(),
       ...(input.lastVisit ? { lastVisit: new Date(input.lastVisit) } : {}),
@@ -129,16 +118,10 @@ export async function createCustomer(input: CustomerInput): Promise<CreateCustom
 export async function updateCustomer(id: string, input: CustomerInput) {
   await requireAuth();
 
+  const current = await db.customer.findUnique({ where: { id }, select: { id: true } });
+  if (!current) return { ok: false as const, error: "This customer is no longer on the system" };
+  // Sharing a number with another customer is fine, so there's nothing to check.
   const phone = input.phone.trim();
-  if (phone) {
-    const existing = await customerHoldingPhone(phone);
-    if (existing && existing.id !== id) {
-      if (existing.active) return { ok: false as const, error: `${existing.name} already has this phone number` };
-      // A deleted customer doesn't get to keep the number from someone on file:
-      // it moves across, and the deleted record simply has no phone.
-      await db.customer.update({ where: { id: existing.id }, data: { phone: null } });
-    }
-  }
 
   await db.customer.update({
     where: { id },

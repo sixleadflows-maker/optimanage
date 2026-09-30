@@ -58,7 +58,9 @@ model Branch {
 model Customer {
   id            String         @id @default(cuid())
   name          String
-  phone         String?        @unique
+  // Not unique: one contact number can carry several customers -- a family on
+  // one phone, or a separate record for each order.
+  phone         String?
   serialNumber  String         @default("")
   email         String         @default("")
   address       String         @default("")
@@ -75,6 +77,8 @@ model Customer {
   prescriptions Prescription[]
   sales         Sale[]
   labOrders     LabOrder[]
+
+  @@index([phone])
 }
 
 // ─── Prescriptions ──────────────────────────────────────────

@@ -2,9 +2,11 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { X, Loader2 } from "lucide-react";
+import Link from "next/link";
+import { X, Loader2, Users } from "lucide-react";
 import { useApp } from "@/lib/context";
 import { createCustomer, updateCustomer } from "@/lib/actions/customers";
+import { samePhone } from "@/lib/utils/phone";
 
 /** Everything the form shows about a customer already on file. */
 export interface CustomerFormData {
@@ -18,22 +20,29 @@ export interface CustomerFormData {
 }
 
 /**
- * What the form hands back once a customer is saved. `existing` is set when the
- * phone number already belonged to someone: only their id, name and phone are
- * known then, so the caller should use the record it already has.
+ * What the form hands back once a customer is saved. `existing` is set when
+ * staff picked someone already on the phone number instead of adding a new
+ * record: only their id, name, phone and serial are known then, so the caller
+ * should use the record it already has.
  */
 export type SavedCustomer = CustomerFormData & { existing?: boolean };
+
+/** Enough about a customer on file to show who else is on a phone number. */
+export interface CustomerOnFile { id: string; name: string; phone: string; serialNumber: string }
 
 /** Adding a customer, or correcting the details of one already on file. */
 export function CustomerFormModal({
   customer,
   initial,
+  others = [],
   onClose,
   onSaved,
 }: {
   customer?: CustomerFormData | null;
   // Where a new customer's form starts from -- what was typed into a search box.
   initial?: { name?: string; phone?: string };
+  // The customers on file, to show who already uses the number being typed.
+  others?: CustomerOnFile[];
   onClose: () => void;
   // Lets a screen pick the customer up straight away instead of searching again.
   onSaved?: (saved: SavedCustomer) => void;
@@ -50,7 +59,12 @@ export function CustomerFormModal({
   });
   const [saving, setSaving] = useState(false);
 
+  // One number can carry several customers (a family, or a record per order),
+  // so this never blocks saving -- it only shows who's already there.
+  const onNumber = others.filter((o) => o.id !== customer?.id && samePhone(o.phone, form.phone));
+
   const save = async () => {
+    if (saving) return;
     setSaving(true);
     try {
       const trimmed = {
@@ -64,28 +78,16 @@ export function CustomerFormModal({
       if (customer) {
         const res = await updateCustomer(customer.id, form);
         if (!res.ok) { showToast(res.error, "error"); return; }
-        showToast(`${trimmed.name}'s details saved`, "success");
+        showToast(`${trimmed.name || "Customer"}'s details saved`, "success");
         onSaved?.({ id: customer.id, ...trimmed });
       } else {
         const res = await createCustomer(form);
-        if (!res.ok) {
-          // Already on file under that number: with somewhere to put them, just use them.
-          if (res.existing && onSaved) {
-            showToast(`${res.existing.name} is already registered with that number — using them`, "info");
-            onSaved({ id: res.existing.id, name: res.existing.name, phone: res.existing.phone, serialNumber: "", email: "", address: "", lastVisit: "", existing: true });
-            onClose();
-            router.refresh();
-            return;
-          }
-          showToast(res.error, "error");
-          return;
-        }
-        const name = res.name ?? trimmed.name;
+        if (!res.ok) { showToast(res.error, "error"); return; }
         showToast(
-          res.restored ? `${name} was deleted before — brought back with their past invoices and prescriptions` : "Customer added",
+          onNumber.length ? `Customer added — ${onNumber.length + 1} customers now share this number` : "Customer added",
           "success",
         );
-        onSaved?.({ id: res.id, ...trimmed, name });
+        onSaved?.({ id: res.id, ...trimmed });
       }
       onClose();
       router.refresh();
@@ -96,6 +98,12 @@ export function CustomerFormModal({
     }
   };
 
+  const pickExisting = (o: CustomerOnFile) => {
+    showToast(`${o.name || "Customer"} selected`, "info");
+    onSaved?.({ id: o.id, name: o.name, phone: o.phone, serialNumber: o.serialNumber, email: "", address: "", lastVisit: "", existing: true });
+    onClose();
+  };
+
   const field = (key: keyof typeof form) => ({
     value: form[key],
     onChange: (e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, [key]: e.target.value }),
@@ -104,9 +112,9 @@ export function CustomerFormModal({
 
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-      <div className="glass-modal p-6 w-full max-w-md animate-rise" onClick={(e) => e.stopPropagation()}>
+      <div className="glass-modal p-6 w-full max-w-md animate-rise max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold">{customer ? `Edit ${customer.name}` : "Add Customer"}</h3>
+          <h3 className="text-lg font-semibold">{customer ? `Edit ${customer.name || "customer"}` : "Add Customer"}</h3>
           <button onClick={onClose} className="cursor-pointer"><X className="w-5 h-5" /></button>
         </div>
         <div className="space-y-3">
@@ -124,6 +132,41 @@ export function CustomerFormModal({
               <input type="text" placeholder="e.g. SN-0142" {...field("serialNumber")} />
             </div>
           </div>
+          {onNumber.length > 0 && (
+            <div className="rounded-xl border border-primary/30 bg-surface p-3 text-xs space-y-2">
+              <p className="font-semibold flex items-center gap-1.5">
+                <Users className="w-3.5 h-3.5 text-primary" />
+                {`Already on this number: ${onNumber.length} customer${onNumber.length === 1 ? "" : "s"}`}
+              </p>
+              <div className="space-y-1">
+                {onNumber.slice(0, 5).map((o) => (
+                  <div key={o.id} className="flex items-center justify-between gap-2">
+                    <span className="min-w-0 truncate">
+                      <span className="font-medium">{o.name || "No name yet"}</span>
+                      {o.serialNumber && <span className="text-muted-foreground">{` · Serial ${o.serialNumber}`}</span>}
+                    </span>
+                    {onSaved && !customer ? (
+                      <button onClick={() => pickExisting(o)}
+                        className="px-2 py-1 rounded-lg bg-primary/10 text-primary hover:bg-primary/15 font-medium flex-shrink-0 cursor-pointer">
+                        Use this one
+                      </button>
+                    ) : (
+                      <Link href={`/dashboard/customers/${o.id}`} onClick={onClose}
+                        className="px-2 py-1 rounded-lg bg-primary/10 text-primary hover:bg-primary/15 font-medium flex-shrink-0">
+                        Open
+                      </Link>
+                    )}
+                  </div>
+                ))}
+                {onNumber.length > 5 && <p className="text-muted-foreground">{`…and ${onNumber.length - 5} more`}</p>}
+              </div>
+              <p className="text-muted-foreground">
+                {customer
+                  ? "That's fine — several customers can share one number."
+                  : "Saving adds a separate customer on the same number, with their own orders. Searching the number shows all of them."}
+              </p>
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Email</label>
@@ -146,7 +189,8 @@ export function CustomerFormModal({
           )}
           <button onClick={save} disabled={saving}
             className="w-full py-2.5 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-primary-hover transition-colors disabled:opacity-60 flex items-center justify-center gap-2 cursor-pointer">
-            {saving && <Loader2 className="w-4 h-4 animate-spin" />} {customer ? "Save Changes" : "Save Customer"}
+            {saving && <Loader2 className="w-4 h-4 animate-spin" />}
+            {customer ? "Save Changes" : onNumber.length ? "Save as a new customer on this number" : "Save Customer"}
           </button>
         </div>
       </div>

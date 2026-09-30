@@ -15,6 +15,7 @@ import {
 import { Truck, CheckCircle, FileText, Plus, X, Loader2, Search, Trash2, Pencil, PenLine, Wallet, ClipboardList, Building2 } from "lucide-react";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { POItemsEditor } from "./POItemsEditor";
+import { matchesSearch } from "@/lib/utils/search";
 
 const EMPTY_SUPPLIER = { name: "", contact: "", phone: "", email: "", address: "", ntn: "" };
 
@@ -269,9 +270,8 @@ export function SuppliersClient({
   const poSupplier = supplierById.get(poSupplierId);
 
   const filteredPOProducts = useMemo(() => {
-    if (!poProductSearch) return [];
-    const q = poProductSearch.toLowerCase();
-    return products.filter((p) => p.name.toLowerCase().includes(q) || p.brand.toLowerCase().includes(q) || p.model.toLowerCase().includes(q)).slice(0, 6);
+    if (!poProductSearch.trim()) return [];
+    return products.filter((p) => matchesSearch(poProductSearch, [p.brand, p.name, p.model, p.colour, p.barcode])).slice(0, 6);
   }, [products, poProductSearch]);
 
   const openCreatePO = () => {

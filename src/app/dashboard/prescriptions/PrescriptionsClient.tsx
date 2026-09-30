@@ -11,6 +11,7 @@ import { RxPowerInput } from "@/components/ui/RxPowerInput";
 import { formatEyeValue, isPowerField, parseRxText, rxFieldText, rxFormTexts } from "@/lib/utils/rx";
 import { Eye, Save, Search, Loader2, Pencil, Trash2, X, EyeOff, UserPlus } from "lucide-react";
 import { CustomerFormModal, type SavedCustomer } from "@/app/dashboard/customers/CustomerFormModal";
+import { matchesSearch } from "@/lib/utils/search";
 
 interface RxCustomer { id: string; name: string; phone: string; serialNumber: string; }
 
@@ -89,23 +90,16 @@ export function PrescriptionsClient({
   );
   const customerById = useMemo(() => new Map(allCustomers.map((c) => [c.id, c])), [allCustomers]);
 
-  const filteredCustomers = customerSearch
-    ? allCustomers.filter((c) => {
-        const q = customerSearch.toLowerCase();
-        return c.name.toLowerCase().includes(q) || c.phone.includes(customerSearch) || c.serialNumber.toLowerCase().includes(q);
-      }).slice(0, 5)
+  const filteredCustomers = customerSearch.trim()
+    ? allCustomers.filter((c) => matchesSearch(customerSearch, [c.name, c.phone, c.serialNumber])).slice(0, 5)
     : [];
 
   // Find a customer's prescription by name, serial number or phone, newest first.
   const shown = useMemo(() => {
-    const q = listSearch.trim().toLowerCase();
-    if (!q) return prescriptions;
-    const digits = q.replace(/[^0-9]/g, "");
+    if (!listSearch.trim()) return prescriptions;
     return prescriptions.filter((rx) => {
       const c = customerById.get(rx.customerId);
-      return rx.customerName.toLowerCase().includes(q) ||
-        (!!c?.serialNumber && c.serialNumber.toLowerCase().includes(q)) ||
-        (digits.length >= 3 && (c?.phone ?? "").replace(/[^0-9]/g, "").includes(digits));
+      return matchesSearch(listSearch, [rx.customerName, c?.serialNumber, c?.phone, rx.label]);
     });
   }, [prescriptions, listSearch, customerById]);
 
@@ -425,7 +419,7 @@ export function PrescriptionsClient({
       </div>
 
       {newCustomerOpen && (
-        <CustomerFormModal initial={newCustomerStart} onClose={() => setNewCustomerOpen(false)} onSaved={customerAdded} />
+        <CustomerFormModal initial={newCustomerStart} others={allCustomers} onClose={() => setNewCustomerOpen(false)} onSaved={customerAdded} />
       )}
 
       {deleting && (

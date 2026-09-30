@@ -11,6 +11,7 @@ import { Plus, Search, X, Loader2, Wallet, Pencil, Trash2 } from "lucide-react";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { EXPENSE_PAYMENT_METHODS } from "@/lib/constants";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { matchesSearch } from "@/lib/utils/search";
 
 const EXPENSE_CATEGORIES = ["Rent", "Utilities", "Salaries", "Supplies", "Marketing", "Maintenance", "Transport", "Other"];
 
@@ -55,9 +56,9 @@ export function ExpensesClient({ expenses, canManage }: { expenses: Expense[]; c
 
   const filtered = useMemo(() => {
     let result = expenses.filter((e) => {
-      const matchesSearch = e.description.toLowerCase().includes(search.toLowerCase());
+      const found = matchesSearch(search, [e.description, e.category]);
       const matchesCat = categoryFilter === "All" || e.category === categoryFilter;
-      return matchesSearch && matchesCat;
+      return found && matchesCat;
     });
 
     result.sort((a, b) => {

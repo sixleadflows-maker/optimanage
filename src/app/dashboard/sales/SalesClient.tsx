@@ -17,6 +17,7 @@ import { primaryMethod } from "@/lib/sales/paymentSplit";
 import { ThermalReceipt, A4Invoice, invoiceFromSale, type ShopDetails } from "@/components/invoice/InvoiceDocuments";
 import { InvoiceDetails } from "@/components/invoice/InvoiceDetails";
 import { CollectPaymentModal, EditInvoiceModal, EditPaymentModal, type EditorCustomer, type EditorStaff } from "./InvoiceEditor";
+import { matchesSearch } from "@/lib/utils/search";
 
 const REFUND_METHODS = ["Cash", "Card", "Bank Transfer", "JazzCash"];
 const ONLINE_ORDER_STATUSES: { value: OnlineOrderStatusValue; label: string }[] = [
@@ -157,21 +158,16 @@ export function SalesClient({
   };
 
   const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
     let result = sales.filter((s) => {
-      const matchesSearch =
-        !q ||
-        s.customerName.toLowerCase().includes(q) ||
-        s.invoiceNo.toLowerCase().includes(q) ||
-        (s.offlineRef && s.offlineRef.toLowerCase().includes(q)) ||
-        s.customerPhone.includes(q) ||
-        (s.customerSerial && s.customerSerial.toLowerCase().includes(q)) ||
-        s.items.some((i) => i.productName.toLowerCase().includes(q) || i.description.toLowerCase().includes(q));
+      const found = matchesSearch(search, [
+        s.invoiceNo, s.offlineRef, s.customerName, s.customerPhone, s.customerSerial,
+        ...s.items.flatMap((i) => [i.productName, i.description]),
+      ]);
       const matchesStatus = statusFilter === "All" || s.paymentStatus === statusFilter;
       const matchesSource = sourceFilter === "All" || s.source === sourceFilter;
       const day = localDay(s.dateTime);
       const matchesDates = (!fromDate || day >= fromDate) && (!toDate || day <= toDate);
-      return matchesSearch && matchesStatus && matchesSource && matchesDates;
+      return found && matchesStatus && matchesSource && matchesDates;
     });
 
     result.sort((a, b) => {

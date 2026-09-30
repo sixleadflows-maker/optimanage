@@ -10,6 +10,8 @@ import { Search, Users, Plus, X, Loader2, Trash2, FilePlus, Pencil } from "lucid
 import Link from "next/link";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { CustomerFormModal } from "./CustomerFormModal";
+import { matchesSearch } from "@/lib/utils/search";
+import { phoneKey } from "@/lib/utils/phone";
 
 export function CustomersClient({ customers, canDelete }: { customers: CustomerView[]; canDelete: boolean }) {
   const router = useRouter();
@@ -40,12 +42,18 @@ export function CustomersClient({ customers, canDelete }: { customers: CustomerV
     }
   };
 
+  // How many customers share each contact number (a family, or a record per order).
+  const onNumber = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const c of customers) {
+      const key = phoneKey(c.phone);
+      if (key) counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return counts;
+  }, [customers]);
+
   const filtered = useMemo(() => {
-    if (!search) return customers;
-    const q = search.toLowerCase();
-    return customers.filter(
-      (c) => c.name.toLowerCase().includes(q) || c.phone.includes(q) || c.email.toLowerCase().includes(q) || c.serialNumber.toLowerCase().includes(q)
-    );
+    return customers.filter((c) => matchesSearch(search, [c.name, c.phone, c.serialNumber, c.email, c.address]));
   }, [customers, search]);
 
   return (
@@ -96,11 +104,19 @@ export function CustomersClient({ customers, canDelete }: { customers: CustomerV
                       <div className="w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-semibold flex-shrink-0">
                         {c.name.split(" ").map((n) => n[0]).join("").slice(0, 2)}
                       </div>
-                      <span className="font-medium">{c.name}</span>
+                      <span className={c.name ? "font-medium" : "text-muted-foreground italic"}>{c.name || "No name yet"}</span>
                     </Link>
                   </td>
                   <td className="py-3 px-3 text-muted-foreground text-xs font-mono">{c.serialNumber || "—"}</td>
-                  <td className="py-3 px-3 text-muted-foreground">{c.phone || "—"}</td>
+                  <td className="py-3 px-3 text-muted-foreground">
+                    {c.phone || "—"}
+                    {(onNumber.get(phoneKey(c.phone)) ?? 0) > 1 && (
+                      <button onClick={() => setSearch(c.phone)} title="Show everyone on this number"
+                        className="chip bg-primary/10 text-primary ml-2 cursor-pointer whitespace-nowrap">
+                        {`${onNumber.get(phoneKey(c.phone))} on this number`}
+                      </button>
+                    )}
+                  </td>
                   <td className="py-3 px-3 text-muted-foreground text-xs">{c.email}</td>
                   <td className="py-3 px-3 text-center">
                     <span className="chip bg-primary/10 text-primary">{c.visitCount}</span>
@@ -134,7 +150,7 @@ export function CustomersClient({ customers, canDelete }: { customers: CustomerV
       </div>
 
       {formFor && (
-        <CustomerFormModal customer={formFor === "new" ? null : formFor} onClose={() => setFormFor(null)} />
+        <CustomerFormModal customer={formFor === "new" ? null : formFor} others={customers} onClose={() => setFormFor(null)} />
       )}
 
       {deletingCustomer && (

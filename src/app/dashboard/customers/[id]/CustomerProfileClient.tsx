@@ -9,10 +9,11 @@ import { deleteCustomer } from "@/lib/actions/customers";
 import { setPrescriptionNotesHidden } from "@/lib/actions/prescriptions";
 import { paymentStatusChipClass } from "@/lib/constants";
 import { formatEyeValue } from "@/lib/utils/rx";
+import { samePhone } from "@/lib/utils/phone";
 import { CollectPaymentModal, EditInvoiceModal, EditPaymentModal, type EditorCustomer, type EditorStaff } from "@/app/dashboard/sales/InvoiceEditor";
 import { InvoiceDetails } from "@/components/invoice/InvoiceDetails";
 import { CustomerFormModal } from "../CustomerFormModal";
-import { ArrowLeft, MessageCircle, Bell, Eye, EyeOff, RefreshCw, Phone, Mail, MapPin, Trash2, Loader2, Pencil, FilePlus, Glasses, ChevronDown, Wallet } from "lucide-react";
+import { ArrowLeft, MessageCircle, Bell, Eye, EyeOff, RefreshCw, Phone, Mail, MapPin, Trash2, Loader2, Pencil, FilePlus, Glasses, ChevronDown, Wallet, Users } from "lucide-react";
 import Link from "next/link";
 
 export function CustomerProfileClient({
@@ -45,6 +46,8 @@ export function CustomerProfileClient({
       return next;
     });
   const owed = sales.reduce((sum, s) => sum + s.balance, 0);
+  // Other customers on the same contact number (a family, or a record per order).
+  const sharingNumber = customers.filter((c) => c.id !== customer.id && samePhone(c.phone, customer.phone));
 
   // Hiding a note applies everywhere, so the customer's own screen at the
   // counter never shows it until someone chooses to.
@@ -146,6 +149,26 @@ export function CustomerProfileClient({
               )}
             </div>
           </div>
+
+          {sharingNumber.length > 0 && (
+            <div className="glass-card p-5">
+              <h3 className="text-sm font-semibold flex items-center gap-1.5"><Users className="w-4 h-4 text-primary" /> Also on this number</h3>
+              <p className="text-[11px] text-muted-foreground mt-0.5 mb-3">
+                {`${sharingNumber.length} other customer${sharingNumber.length === 1 ? "" : "s"} on ${customer.phone} — each keeps their own orders.`}
+              </p>
+              <div className="space-y-1.5">
+                {sharingNumber.map((o) => (
+                  <Link key={o.id} href={`/dashboard/customers/${o.id}`}
+                    className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-surface hover:bg-surface-hover transition-colors text-sm">
+                    <span className="min-w-0 truncate font-medium">{o.name || "No name yet"}</span>
+                    <span className="text-[11px] text-muted-foreground flex-shrink-0">
+                      {[o.serialNumber && `Serial ${o.serialNumber}`, o.lastVisit && formatDate(o.lastVisit)].filter(Boolean).join(" · ")}
+                    </span>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="glass-card p-5">
             <h3 className="text-sm font-semibold mb-3">Quick Actions</h3>
@@ -360,7 +383,7 @@ export function CustomerProfileClient({
         />
       )}
 
-      {editingDetails && <CustomerFormModal customer={customer} onClose={() => setEditingDetails(false)} />}
+      {editingDetails && <CustomerFormModal customer={customer} others={customers} onClose={() => setEditingDetails(false)} />}
     </div>
   );
 }

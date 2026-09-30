@@ -11,6 +11,7 @@ import { Loader2, Plus, Search, Trash2, Wallet, X, Pencil, AlertTriangle, Calend
 import { SPLIT_METHOD, paymentFromParts, primaryMethod } from "@/lib/sales/paymentSplit";
 import { SplitPaymentFields, splitAmountsTotal, type SplitAmounts } from "@/components/invoice/SplitPaymentFields";
 import { CustomerFormModal, type CustomerFormData, type SavedCustomer } from "@/app/dashboard/customers/CustomerFormModal";
+import { matchesSearch } from "@/lib/utils/search";
 
 // Everything about a customer that the form can correct, so an edit from here
 // never blanks a detail the invoice screen didn't happen to show.
@@ -262,10 +263,7 @@ export function EditInvoiceModal({
 
   const customer = allCustomers.find((c) => c.id === customerId);
   const customerMatches = customerSearch.trim()
-    ? allCustomers.filter((c) => {
-        const q = customerSearch.trim().toLowerCase();
-        return c.name.toLowerCase().includes(q) || c.phone.replace(/[^0-9]/g, "").includes(q.replace(/[^0-9]/g, ""));
-      }).slice(0, 5)
+    ? allCustomers.filter((c) => matchesSearch(customerSearch, [c.name, c.phone, c.serialNumber])).slice(0, 5)
     : [];
 
   const [search, setSearch] = useState("");
@@ -720,6 +718,7 @@ export function EditInvoiceModal({
       <CustomerFormModal
         customer={customerForm === "edit" ? customer ?? null : null}
         initial={customerForm === "new" ? customerFormStart : undefined}
+        others={allCustomers}
         onClose={() => setCustomerForm(null)}
         onSaved={customerSaved}
       />
