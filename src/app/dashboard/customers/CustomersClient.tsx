@@ -104,7 +104,14 @@ export function CustomersClient({ customers, canDelete }: { customers: CustomerV
                       <div className="w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-semibold flex-shrink-0">
                         {c.name.split(" ").map((n) => n[0]).join("").slice(0, 2)}
                       </div>
-                      <span className={c.name ? "font-medium" : "text-muted-foreground italic"}>{c.name || "No name yet"}</span>
+                      <span>
+                        <span className={c.name ? "font-medium" : "text-muted-foreground italic"}>{c.name || "No name yet"}</span>
+                        {c.credit > 0 && (
+                          <span className="chip bg-success/10 text-success ml-2 whitespace-nowrap" title="Advance paid in and held for them">
+                            {`Advance ${formatCurrency(c.credit)}`}
+                          </span>
+                        )}
+                      </span>
                     </Link>
                   </td>
                   <td className="py-3 px-3 text-muted-foreground text-xs font-mono">{c.serialNumber || "—"}</td>

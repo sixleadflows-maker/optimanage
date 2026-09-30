@@ -6,7 +6,8 @@ import { formatCurrency, toLocalInput } from "@/lib/utils/format";
 import { useApp } from "@/lib/context";
 import { collectSalePayment, updateSale, updateSalePayment } from "@/lib/actions/sales";
 import { searchProductsForSale, type ProductSearchHit } from "@/lib/actions/products";
-import { LENS_COLORS, PAYMENT_METHODS } from "@/lib/constants";
+import { CREDIT_METHOD, LENS_COLORS, PAYMENT_METHODS } from "@/lib/constants";
+import { customerCreditHeld } from "@/lib/actions/credit";
 import { Loader2, Plus, Search, Trash2, Wallet, X, Pencil, AlertTriangle, CalendarClock, User } from "lucide-react";
 import { SPLIT_METHOD, paymentFromParts, primaryMethod } from "@/lib/sales/paymentSplit";
 import { SplitPaymentFields, splitAmountsTotal, type SplitAmounts } from "@/components/invoice/SplitPaymentFields";
@@ -40,8 +41,20 @@ export function CollectPaymentModal({
   // still owe after it (paying Rs.1,500 of Rs.1,800 leaves Rs.300).
   const [remainingEditable, setRemainingEditable] = useState(false);
 
+  // Advance this customer has already paid in: the balance can come out of it.
+  const [creditHeld, setCreditHeld] = useState(0);
+  useEffect(() => {
+    if (!sale.customerId) return;
+    let stale = false;
+    customerCreditHeld(sale.customerId).then((held) => { if (!stale) setCreditHeld(held); }).catch(() => {});
+    return () => { stale = true; };
+  }, [sale.customerId]);
+  const fromCredit = method === CREDIT_METHOD;
+  // From the advance, it can't be more than what's held.
+  const most = fromCredit ? Math.min(sale.balance, creditHeld) : sale.balance;
+
   const remaining = Math.max(0, sale.balance - (amount || 0));
-  const setRemaining = (left: number) => setAmount(Math.max(0, Math.min(sale.balance, sale.balance - Math.max(0, left))));
+  const setRemaining = (left: number) => setAmount(Math.max(0, Math.min(most, sale.balance - Math.max(0, left))));
   const takenAtDate = new Date(takenAt);
   const dateProblem =
     !takenAt || Number.isNaN(takenAtDate.getTime()) ? "Enter the date and time"
@@ -86,7 +99,7 @@ export function CollectPaymentModal({
         <div className="flex gap-2">
           <input
             type="number" value={amount || ""} autoFocus
-            onChange={(e) => setAmount(Math.max(0, Math.min(sale.balance, Number(e.target.value))))}
+            onChange={(e) => setAmount(Math.max(0, Math.min(most, Number(e.target.value))))}
             className="flex-1 px-3 py-2.5 glass-input text-sm"
           />
           <button
@@ -134,6 +147,19 @@ export function CollectPaymentModal({
             </button>
           ))}
         </div>
+        {creditHeld > 0 && (
+          <button
+            onClick={() => { setMethod(CREDIT_METHOD); setAmount((a) => Math.min(a || sale.balance, sale.balance, creditHeld)); }}
+            className={`w-full mt-1.5 py-2 rounded-xl text-[11px] font-medium transition-all cursor-pointer ${fromCredit ? "bg-success text-white" : "bg-success/10 text-success hover:bg-success/15"}`}
+          >
+            {`From their advance — ${formatCurrency(creditHeld)} held`}
+          </button>
+        )}
+        {fromCredit && (
+          <p className="text-[10px] text-muted-foreground mt-1">
+            {`No money changes hands today: it comes out of what they already paid in. ${formatCurrency(Math.max(0, creditHeld - (amount || 0)))} of advance will be left.`}
+          </p>
+        )}
 
         <label className="text-xs font-medium text-muted-foreground mb-1.5 block mt-3">Received on</label>
         <div className="flex gap-2">
@@ -411,6 +437,7 @@ export function EditInvoiceModal({
                   setPaymentMethod(e.target.value);
                 }}
                 className="w-full px-2.5 py-1.5 glass-input text-xs">
+                {paymentMethod === CREDIT_METHOD && <option value={CREDIT_METHOD}>From advance (nothing at the till)</option>}
                 {PAYMENT_METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
                 <option value={SPLIT_METHOD}>Split (more than one)</option>
               </select>
@@ -795,14 +822,20 @@ export function EditPaymentModal({
           className="w-full px-3 py-2.5 glass-input text-sm" />
 
         <label className="text-xs font-medium text-muted-foreground mb-1.5 block mt-3">Paid by</label>
-        <div className="grid grid-cols-4 gap-1.5">
-          {PAYMENT_METHODS.map((m) => (
-            <button key={m} onClick={() => setMethod(m)}
-              className={`py-2 rounded-xl text-[11px] font-medium transition-all ${method === m ? "bg-primary text-white" : "bg-surface hover:bg-surface-hover"}`}>
-              {m}
-            </button>
-          ))}
-        </div>
+        {payment.method === CREDIT_METHOD ? (
+          <p className="text-xs p-2.5 rounded-xl bg-success/10 text-success">
+            From the customer&apos;s advance. Lower or remove it and that money goes back onto their advance.
+          </p>
+        ) : (
+          <div className="grid grid-cols-4 gap-1.5">
+            {PAYMENT_METHODS.map((m) => (
+              <button key={m} onClick={() => setMethod(m)}
+                className={`py-2 rounded-xl text-[11px] font-medium transition-all ${method === m ? "bg-primary text-white" : "bg-surface hover:bg-surface-hover"}`}>
+                {m}
+              </button>
+            ))}
+          </div>
+        )}
 
         <label className="text-xs font-medium text-muted-foreground mb-1.5 block mt-3">Received on</label>
         <input type="datetime-local" value={takenAt} onChange={(e) => setTakenAt(e.target.value)}

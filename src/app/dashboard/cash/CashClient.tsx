@@ -107,6 +107,11 @@ export function CashClient({ data, date, canManage }: { data: CashCollectionData
           <div className="space-y-1.5 text-sm border-t border-border pt-4">
             <div className="flex justify-between"><span className="text-muted-foreground">Opening cash</span><span>{formatCurrency(openingCash)}</span></div>
             <div className="flex justify-between"><span className="text-muted-foreground">+ Cash sales</span><span className="text-success">{formatCurrency(data.cashSales)}</span></div>
+            {(data.advancesIn > 0 || data.advancesRefunded > 0) && (
+              <p className="text-[11px] text-muted-foreground">
+                {`Today's takings include customer advances: ${formatCurrency(data.advancesIn)} received${data.advancesRefunded > 0 ? `, ${formatCurrency(data.advancesRefunded)} handed back` : ""} (whichever way they were paid). Bills paid from an advance add nothing on the day.`}
+              </p>
+            )}
             <div className="flex justify-between"><span className="text-muted-foreground">− Cash expenses</span><span className="text-destructive">{formatCurrency(data.expenses)}</span></div>
             {data.bankDeposits > 0 && (
               <div className="flex justify-between"><span className="text-muted-foreground">− Deposited in the bank</span><span>{formatCurrency(data.bankDeposits)}</span></div>

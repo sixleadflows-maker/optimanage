@@ -6,6 +6,11 @@ export const PRIMARY_LIGHT = "#edeafd";
 
 export const PAYMENT_METHODS = ["Cash", "Card", "Bank Transfer", "JazzCash"] as const;
 export const PAYMENT_STATUS = ["Full Payment", "Advance", "Balance"] as const;
+
+// How a payment reads when it came out of the advance a customer had already
+// paid in (CustomerCredit) rather than from their pocket that day. Never one of
+// PAYMENT_METHODS: the money was counted on the day the advance came in.
+export const CREDIT_METHOD = "From advance";
 export type PaymentStatusLabel = (typeof PAYMENT_STATUS)[number];
 
 // The till still sends "Full" | "Advance" | "Balance"; this is how each reads to staff.
@@ -133,8 +138,8 @@ export const TRASH_PURGED_AT = new Date(0);
 // Records that are hidden when deleted and simply un-hidden on restore.
 export type SoftTrashKind = "product" | "customer" | "location" | "staff" | "supplier" | "lab";
 // Records copied into TrashEntry and really removed; restore rebuilds them.
-export type SnapshotTrashKind = "invoice" | "return" | "expense" | "prescription" | "labOrder" | "purchaseOrder" | "stockAdjustment" | "payment" | "bankDeposit";
+export type SnapshotTrashKind = "invoice" | "return" | "expense" | "prescription" | "labOrder" | "purchaseOrder" | "stockAdjustment" | "payment" | "bankDeposit" | "customerCredit";
 export type TrashKind = SoftTrashKind | SnapshotTrashKind;
 export const SNAPSHOT_TRASH_KINDS: readonly SnapshotTrashKind[] = [
-  "invoice", "return", "expense", "prescription", "labOrder", "purchaseOrder", "stockAdjustment", "payment", "bankDeposit",
+  "invoice", "return", "expense", "prescription", "labOrder", "purchaseOrder", "stockAdjustment", "payment", "bankDeposit", "customerCredit",
 ];

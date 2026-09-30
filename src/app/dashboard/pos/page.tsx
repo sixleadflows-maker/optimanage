@@ -28,7 +28,7 @@ export default async function POSPage({ searchParams }: { searchParams: Promise<
           isOwn: last.isOwnPrescription,
         }
       : null;
-    return { id: c.id, name: c.name, phone: c.phone, serialNumber: c.serialNumber, latestRx };
+    return { id: c.id, name: c.name, phone: c.phone, serialNumber: c.serialNumber, latestRx, credit: c.credit };
   });
   const staff = users.filter((u) => u.active).map((u) => ({ id: u.id, name: u.name }));
   const currentUserId = session?.user?.id ?? "";

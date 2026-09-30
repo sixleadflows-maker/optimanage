@@ -77,8 +77,30 @@ model Customer {
   prescriptions Prescription[]
   sales         Sale[]
   labOrders     LabOrder[]
+  credits       CustomerCredit[]
 
   @@index([phone])
+}
+
+// Money a customer has paid ahead that the shop is holding for them ("advance
+// held"): a row when they pay it in (amount above zero) and a row when some is
+// handed back (below zero). What they've SPENT from it isn't stored here -- it
+// is the "From advance" payments on their invoices -- so correcting or deleting
+// an invoice can never leave the two out of step.
+model CustomerCredit {
+  id         String   @id @default(cuid())
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id])
+  date       DateTime @default(now())
+  amount     Float    @default(0)
+  // How it was paid in, or handed back.
+  method     String   @default("Cash")
+  note       String   @default("")
+  recordedBy String   @default("")
+  createdAt  DateTime @default(now())
+
+  @@index([customerId])
+  @@index([date])
 }
 
 // ─── Prescriptions ──────────────────────────────────────────

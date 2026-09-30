@@ -4,6 +4,8 @@ import type {
   Product, Customer, Sale, Supplier, Expense, LabOrder, Prescription,
 } from "@/lib/mock/types";
 import { readSplit, tillParts, type PaymentPart } from "@/lib/sales/paymentSplit";
+import { creditHeld, creditHeldByCustomer } from "@/lib/sales/credit";
+import { CREDIT_METHOD } from "@/lib/constants";
 
 // ─── Enum mappers (DB enum → UI title-case) ─────────────────
 const brandTagLabel = { ORIGINAL: "Original", COPY: "Copy", BRANDED: "Branded", UNBRANDED: "Unbranded" } as const;
@@ -68,7 +70,43 @@ export async function getProduct(id: string): Promise<Product | null> {
 }
 
 // ─── Customers ──────────────────────────────────────────────
-export type CustomerView = Customer & { visitCount: number };
+// `credit` is the advance the shop is holding for them (paid in, not yet used).
+export type CustomerView = Customer & { visitCount: number; credit: number };
+
+/** One line of a customer's advance: paid in, used on an invoice, or handed back. */
+export interface CreditEntryView {
+  id: string;
+  date: string;
+  // Above zero when it was paid in; below when it was used or refunded.
+  amount: number;
+  kind: "in" | "used" | "refund";
+  method: string;
+  note: string;
+  by: string;
+  // The invoice it was used on.
+  invoiceNo: string;
+}
+
+export async function getCustomerCreditHistory(customerId: string): Promise<CreditEntryView[]> {
+  const [entries, used] = await Promise.all([
+    db.customerCredit.findMany({ where: { customerId } }),
+    db.salePayment.findMany({
+      where: { method: CREDIT_METHOD, sale: { customerId } },
+      include: { sale: { select: { invoiceNo: true } }, receivedBy: { select: { name: true } } },
+    }),
+  ]);
+  const rows: CreditEntryView[] = [
+    ...entries.map((e) => ({
+      id: e.id, date: e.date.toISOString(), amount: e.amount, kind: e.amount >= 0 ? ("in" as const) : ("refund" as const),
+      method: e.method, note: e.note, by: e.recordedBy, invoiceNo: "",
+    })),
+    ...used.map((p) => ({
+      id: p.id, date: p.date.toISOString(), amount: -p.amount, kind: "used" as const,
+      method: CREDIT_METHOD, note: p.note, by: p.receivedBy?.name ?? "", invoiceNo: p.sale.invoiceNo,
+    })),
+  ];
+  return rows.sort((a, b) => b.date.localeCompare(a.date));
+}
 
 function mapPrescription(p: {
   id: string; date: Date; rightSph: number; rightCyl: number; rightAxis: number; rightPd: number; rightAdd: number;
@@ -95,12 +133,16 @@ function mapPrescription(p: {
 }
 
 export async function getCustomers(): Promise<CustomerView[]> {
-  const rows = await db.customer.findMany({
-    where: { active: true },
-    orderBy: { name: "asc" },
-    include: { prescriptions: { orderBy: { date: "desc" } } },
-  });
+  const [rows, held] = await Promise.all([
+    db.customer.findMany({
+      where: { active: true },
+      orderBy: { name: "asc" },
+      include: { prescriptions: { orderBy: { date: "desc" } } },
+    }),
+    creditHeldByCustomer(),
+  ]);
   return rows.map((c) => ({
+    credit: held.get(c.id) ?? 0,
     id: c.id,
     name: c.name,
     phone: c.phone ?? "",
@@ -121,6 +163,7 @@ export async function getCustomer(id: string): Promise<CustomerView | null> {
   });
   if (!c || !c.active) return null;
   return {
+    credit: await creditHeld(c.id),
     id: c.id,
     name: c.name,
     phone: c.phone ?? "",
@@ -870,6 +913,10 @@ export interface CashCollectionData {
   // an expense, so it has its own line and never reaches profit.
   bankDeposits: number;
   deposits: BankDepositView[];
+  // Customer advances paid in and handed back that day, by any method. They're
+  // already inside the method totals above; these are just for showing.
+  advancesIn: number;
+  advancesRefunded: number;
   invoiceCount: number;
   saved: { openingCash: number; closingCash: number; notes: string; closedBy: string } | null;
   // What the drawer should open with: the last close, plus the cash taken (less
@@ -896,7 +943,7 @@ function dayRange(dateStr: string) {
 export async function getCashCollection(dateStr: string, branchId?: string): Promise<CashCollectionData> {
   const { start, end } = dayRange(dateStr);
   const saleWhere = { date: { gte: start, lt: end }, ...(branchId ? { branchId } : {}) };
-  const [sales, laterPayments, expenses, deposits, saved] = await Promise.all([
+  const [sales, laterPayments, expenses, deposits, saved, credits] = await Promise.all([
     db.sale.findMany({ where: saleWhere, include: { payments: { select: { amount: true } } } }),
     // An advance settled today belongs to today's drawer, whatever day the
     // glasses were ordered on.
@@ -907,13 +954,18 @@ export async function getCashCollection(dateStr: string, branchId?: string): Pro
     db.expense.findMany({ where: { date: { gte: start, lt: end } } }),
     db.bankDeposit.findMany({ where: { date: { gte: start, lt: end } }, orderBy: { createdAt: "asc" } }),
     db.cashCollection.findFirst({ where: { date: { gte: start, lt: end }, ...(branchId ? { branchId } : {}) } }),
+    // Advances customers paid in (or were handed back) today.
+    db.customerCredit.findMany({ where: { date: { gte: start, lt: end } }, select: { amount: true, method: true } }),
   ]);
 
   // A sale's own `paid` is the running total including anything collected
   // later, so take those back out here and count them on their own date. A
   // split payment counts each part under its own method.
   const takenAtTill = sales.flatMap((s) => tillParts(s, s.paid - s.payments.reduce((sum, p) => sum + p.amount, 0)));
-  const collected = [...takenAtTill, ...laterPayments];
+  // An advance is money in the drawer on the day it's paid in (and out of it
+  // on the day it's handed back). A bill paid FROM an advance brings nothing in
+  // that day -- the money was counted when the advance came in.
+  const collected = [...takenAtTill, ...laterPayments, ...credits].filter((c) => c.method !== CREDIT_METHOD);
 
   const byMethod = (m: string) => collected.filter((c) => c.method === m).reduce((sum, c) => sum + c.amount, 0);
   const totalCollection = collected.reduce((sum, c) => sum + c.amount, 0);
@@ -928,6 +980,8 @@ export async function getCashCollection(dateStr: string, branchId?: string): Pro
     totalCollection,
     expenses: cashExpenses.reduce((sum, e) => sum + e.amount, 0),
     otherExpenses: expenses.filter((e) => (e.paymentMethod || "Cash") !== "Cash").reduce((sum, e) => sum + e.amount, 0),
+    advancesIn: credits.filter((c) => c.amount > 0).reduce((sum, c) => sum + c.amount, 0),
+    advancesRefunded: -credits.filter((c) => c.amount < 0).reduce((sum, c) => sum + c.amount, 0),
     bankDeposits: deposits.reduce((sum, d) => sum + d.amount, 0),
     deposits: deposits.map((d) => ({
       id: d.id,
@@ -957,7 +1011,7 @@ async function openingCashFor(start: Date, branchId?: string) {
   if (!lastClose) return null;
 
   const gap = { gte: new Date(lastClose.date.getTime() + 24 * 60 * 60 * 1000), lt: start };
-  const [sales, laterPayments, expenses, deposits] = await Promise.all([
+  const [sales, laterPayments, expenses, deposits, credits] = await Promise.all([
     db.sale.findMany({
       where: { date: gap, ...(branchId ? { branchId } : {}) },
       select: { paid: true, paymentMethod: true, paymentSplit: true, payments: { select: { amount: true } } },
@@ -968,10 +1022,12 @@ async function openingCashFor(start: Date, branchId?: string) {
     }),
     db.expense.findMany({ where: { date: gap }, select: { amount: true, paymentMethod: true } }),
     db.bankDeposit.findMany({ where: { date: gap }, select: { amount: true } }),
+    db.customerCredit.findMany({ where: { date: gap }, select: { amount: true, method: true } }),
   ]);
 
   const takenAtTill = sales.flatMap((s) => tillParts(s, s.paid - s.payments.reduce((sum, p) => sum + p.amount, 0)));
-  const cashIn = [...takenAtTill, ...laterPayments].filter((c) => c.method === "Cash").reduce((sum, c) => sum + c.amount, 0);
+  // Advances paid in cash add to it; ones handed back in cash come off (they're negative).
+  const cashIn = [...takenAtTill, ...laterPayments, ...credits].filter((c) => c.method === "Cash").reduce((sum, c) => sum + c.amount, 0);
   // Cash spent, and cash taken to the bank -- both left the drawer.
   const cashOut =
     expenses.filter((e) => (e.paymentMethod || "Cash") === "Cash").reduce((sum, e) => sum + e.amount, 0) +

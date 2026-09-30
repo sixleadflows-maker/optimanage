@@ -11,6 +11,7 @@ import { createPrescription, updatePrescription } from "@/lib/actions/prescripti
 import { getDrafts, addDraft, replaceDraft, removeDraft, markDraftFailed, makeOfflineRef, type OfflineDraft } from "@/lib/offlineDrafts";
 import { useRouter, unstable_isUnrecognizedActionError } from "next/navigation";
 import { reportOutdatedPage } from "@/components/layout/UpdateNotice";
+import { CREDIT_METHOD } from "@/lib/constants";
 import Link from "next/link";
 import {
   Search, Plus, Minus, Trash2, X, User, CreditCard,
@@ -59,6 +60,8 @@ interface POSCustomer {
   latestRx?: POSRx | null;
   // Added at this till while offline: not on the server yet, created when the bill syncs.
   local?: boolean;
+  // Advance they've paid in that the shop is holding, usable on this bill.
+  credit?: number;
 }
 
 interface StaffMember {
@@ -77,6 +80,8 @@ interface SaleResult {
   date: string;
   paid: number;
   balance: number;
+  // How much of it came out of the customer's advance.
+  creditUsed?: number;
 }
 
 /** One prescription on the slip. An order can carry several. */
@@ -185,6 +190,11 @@ export function POSClient({
   const [paymentMethod, setPaymentMethod] = useState("Cash");
   const [splitAmounts, setSplitAmounts] = useState<SplitAmounts>({});
   const [paymentType, setPaymentType] = useState<"Full" | "Advance" | "Balance">("Full");
+  // The customer whose advance is being used on this bill (ticked per bill).
+  const [useCreditFor, setUseCreditFor] = useState("");
+  // Advance used on bills rung up since this screen loaded, per customer, so
+  // what's shown as held stays right without reloading the page.
+  const [creditSpent, setCreditSpent] = useState<Record<string, number>>({});
   const [advanceAmount, setAdvanceAmount] = useState(0);
   const [invoiceDiscount, setInvoiceDiscount] = useState(0);
   // Which percentage is selected, if any. Kept alongside the rupee amount so
@@ -548,8 +558,20 @@ export function POSClient({
   // Advance and Balance both take whatever the customer puts down now; on
   // Balance that can be nothing. The rest is what they still owe.
   const advancePaid = isSplit ? splitPaid : advanceAmount;
-  const paidNow = paymentType === "Full" ? total : advancePaid;
-  const balanceLeft = Math.max(0, total - paidNow);
+  // Advance the customer already paid in: ticked, it comes off the bill first
+  // and the payment type below applies to what's left. While a bill is being
+  // corrected it stays as it was (it's changed from the invoice's payments).
+  const creditAvailable = customer && !customer.local
+    ? Math.max(0, Math.round(((customer.credit ?? 0) - (creditSpent[customer.id] ?? 0)) * 100) / 100)
+    : 0;
+  const creditUsed = editingBill
+    ? Math.min(saleResult?.creditUsed ?? 0, Math.max(0, total))
+    : customer && useCreditFor === customer.id ? Math.min(creditAvailable, Math.max(0, total)) : 0;
+  const due = Math.max(0, total - creditUsed);
+  // Fully covered by the advance: there's nothing left to choose a type for.
+  const payType = creditUsed > 0 && due <= 0 ? "Full" : paymentType;
+  const paidNow = payType === "Full" ? due : advancePaid;
+  const balanceLeft = Math.max(0, due - paidNow);
   const billPayment = isSplit
     ? paymentFromParts(Object.entries(splitAmounts).map(([method, amount]) => ({ method, amount })), "Cash")
     : { paymentMethod, paymentSplit: [] };
@@ -694,6 +716,7 @@ export function POSClient({
     setDiscountPct(null);
     setSelectedCustomer("");
     setAdvanceAmount(0);
+    setUseCreditFor("");
     setPaymentType("Full");
     setPaymentMethod("Cash");
     setSplitAmounts({});
@@ -754,7 +777,7 @@ export function POSClient({
     if (saleResult.provisional && clientRef.current && replaceDraft(clientRef.current, saleInput, summary)) {
       setDrafts(getDrafts());
       finish(
-        { ...saleResult, ...shown.staffNames, date: shown.date, paid: paidNow, balance: balanceLeft },
+        { ...saleResult, ...shown.staffNames, date: shown.date, paid: paidNow + creditUsed, balance: balanceLeft },
         `${saleResult.invoiceNo} updated — it'll be recorded once the connection is back`,
       );
       return;
@@ -782,6 +805,7 @@ export function POSClient({
           date: shown.date,
           paid: res.paid,
           balance: res.balance,
+          creditUsed: saleResult.creditUsed,
         },
         `${res.invoiceNo} updated — still one invoice`,
       );
@@ -794,21 +818,21 @@ export function POSClient({
 
   const completeSale = async () => {
     if (!hasSaleableItems) return;
-    if (paymentType === "Advance" && advancePaid <= 0) {
+    if (payType === "Advance" && advancePaid <= 0) {
       showToast(isSplit ? "Enter how much was paid by each method" : "Enter the advance amount received", "error");
       return;
     }
-    if (isSplit && paymentType === "Full" && Math.abs(splitPaid - total) > 0.01) {
+    if (isSplit && payType === "Full" && Math.abs(splitPaid - due) > 0.01) {
       showToast(
-        splitPaid < total
-          ? `The split payment is ${formatCurrency(total - splitPaid)} short of the ${formatCurrency(total)} total`
-          : `The split payment is ${formatCurrency(splitPaid - total)} more than the ${formatCurrency(total)} total`,
+        splitPaid < due
+          ? `The split payment is ${formatCurrency(due - splitPaid)} short of the ${formatCurrency(due)} to pay`
+          : `The split payment is ${formatCurrency(splitPaid - due)} more than the ${formatCurrency(due)} to pay`,
         "error",
       );
       return;
     }
-    if (paymentType !== "Full" && advancePaid > total + 0.01) {
-      showToast(`${formatCurrency(advancePaid)} is more than the ${formatCurrency(total)} total — choose Full Payment instead`, "error");
+    if (payType !== "Full" && advancePaid > due + 0.01) {
+      showToast(`${formatCurrency(advancePaid)} is more than the ${formatCurrency(due)} to pay — choose Full Payment instead`, "error");
       return;
     }
     if (recordRx && !selectedCustomer) {
@@ -832,9 +856,10 @@ export function POSClient({
       newCustomer: customer?.local ? { name: customer.name, phone: customer.phone } : undefined,
       paymentMethod: billPayment.paymentMethod,
       paymentSplit: billPayment.paymentSplit.length ? billPayment.paymentSplit : undefined,
-      paymentType,
-      advanceAmount: paymentType === "Advance" ? advancePaid : 0,
-      balancePaid: paymentType === "Balance" ? advancePaid : undefined,
+      paymentType: payType,
+      advanceAmount: payType === "Advance" ? advancePaid : 0,
+      balancePaid: payType === "Balance" ? advancePaid : undefined,
+      creditUsed: creditUsed > 0 ? creditUsed : undefined,
       invoiceDiscount,
       lensProductId: lensProductId || undefined,
       customLensName: useCustomLens ? customLensName.trim() : undefined,
@@ -892,9 +917,11 @@ export function POSClient({
         orderTakenByName: staffName(orderTakenBy || currentUserId),
         billGeneratedByName: staffName(billGeneratedBy || currentUserId),
         date: formatBillTime(billTime),
-        paid: paidNow,
+        paid: paidNow + creditUsed,
         balance: balanceLeft,
+        creditUsed,
       });
+      if (customer && creditUsed > 0) setCreditSpent((prev) => ({ ...prev, [customer.id]: (prev[customer.id] ?? 0) + creditUsed }));
       setShowReceipt(true);
       showToast(`No connection — bill ${offlineRef} saved on this computer. It'll be recorded by itself when the connection is back.`, "info");
     };
@@ -921,7 +948,10 @@ export function POSClient({
         date: formatBillTime(billTime),
         paid: res.paid,
         balance: res.balance,
+        creditUsed: res.creditUsed ?? 0,
       });
+      const fromCredit = res.creditUsed ?? 0;
+      if (customer && fromCredit > 0) setCreditSpent((prev) => ({ ...prev, [customer.id]: (prev[customer.id] ?? 0) + fromCredit }));
       setLastStaff(pickedStaff);
       // Remember which records hold the prescriptions, for "Edit bill".
       const rxIds = res.prescriptionIds ?? [];
@@ -961,6 +991,7 @@ export function POSClient({
   }
 
   if (showReceipt && saleResult) {
+    const billCredit = saleResult.creditUsed ?? 0;
     const invoice: InvoiceData = {
       invoiceNo: saleResult.invoiceNo,
       provisional: saleResult.provisional,
@@ -992,11 +1023,13 @@ export function POSClient({
       subtotal,
       discount: invoiceDiscount,
       total,
-      paymentMethod: billPayment.paymentMethod,
+      // Covered entirely by the customer's advance: nothing was taken at the till.
+      paymentMethod: billCredit > 0 && saleResult.paid - billCredit <= 0 ? CREDIT_METHOD : billPayment.paymentMethod,
       paymentSplit: billPayment.paymentSplit,
       paymentStatus: saleResult.balance <= 0 ? PAYMENT_TYPE_LABEL.Full : PAYMENT_TYPE_LABEL[paymentType],
       paid: saleResult.paid,
       balance: saleResult.balance,
+      payments: billCredit > 0 ? [{ date: new Date().toISOString(), amount: billCredit, method: CREDIT_METHOD }] : undefined,
     };
 
     return (
@@ -1733,6 +1766,31 @@ export function POSClient({
               </div>
 
               <div className="mt-4 space-y-3">
+                {creditAvailable > 0 && !editingBill && customer && (
+                  <label className="flex items-start gap-2 p-2.5 rounded-xl border border-success/30 bg-success/5 text-xs cursor-pointer">
+                    <input type="checkbox" className="rounded mt-0.5" checked={useCreditFor === customer.id}
+                      onChange={(e) => setUseCreditFor(e.target.checked ? customer.id : "")} />
+                    <span className="min-w-0">
+                      <span className="font-semibold">{`Use advance held — ${formatCurrency(creditAvailable)}`}</span>
+                      <span className="block text-[10px] text-muted-foreground">
+                        {creditUsed > 0
+                          ? `${formatCurrency(creditUsed)} comes off this bill · ${formatCurrency(creditAvailable - creditUsed)} stays as their advance`
+                          : "Tick to pay this bill from the money they've already paid in."}
+                      </span>
+                    </span>
+                  </label>
+                )}
+                {editingBill && creditUsed > 0 && (
+                  <p className="text-[10px] text-muted-foreground">
+                    {`${formatCurrency(creditUsed)} of this bill came from their advance — change that from the invoice's payments in Sales & Invoices.`}
+                  </p>
+                )}
+                {creditUsed > 0 && (
+                  <div className="flex justify-between text-xs font-semibold">
+                    <span>{due > 0 ? "Left to pay after the advance" : "The advance covers this bill"}</span>
+                    <span className={due > 0 ? "" : "text-success"}>{formatCurrency(due)}</span>
+                  </div>
+                )}
                 <div>
                   <p className="text-[10px] font-medium text-muted-foreground mb-1.5">Payment Method</p>
                   <div className="grid grid-cols-5 gap-1.5">
@@ -1784,8 +1842,8 @@ export function POSClient({
                     <SplitPaymentFields
                       amounts={splitAmounts}
                       onChange={setSplitAmounts}
-                      target={paymentType === "Full" ? total : null}
-                      total={total}
+                      target={payType === "Full" ? due : null}
+                      total={due}
                     />
                   </div>
                 )}
@@ -1806,10 +1864,10 @@ export function POSClient({
                   </div>
                 )}
 
-                {paymentType !== "Full" && total > 0 && (
-                  advancePaid > total + 0.01 ? (
+                {payType !== "Full" && due > 0 && (
+                  advancePaid > due + 0.01 ? (
                     <p className="text-[11px] text-destructive">
-                      {`${formatCurrency(advancePaid)} is more than the ${formatCurrency(total)} total — choose Full Payment instead.`}
+                      {`${formatCurrency(advancePaid)} is more than the ${formatCurrency(due)} to pay — choose Full Payment instead.`}
                     </p>
                   ) : (
                     <div className="rounded-xl bg-surface p-2.5 text-xs space-y-1">

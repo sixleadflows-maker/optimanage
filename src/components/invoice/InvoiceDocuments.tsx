@@ -155,7 +155,7 @@ export function ThermalReceipt({ invoice, shop }: { invoice: InvoiceData; shop: 
         ))}
         {laterPayments.length > 0 && (
           <>
-            <Row label={`Paid at till (${invoice.paymentMethod})`} value={amt(takenAtTill)} />
+            {takenAtTill > 0 && <Row label={`Paid at till (${invoice.paymentMethod})`} value={amt(takenAtTill)} />}
             {laterPayments.map((p, i) => (
               <Row key={i} label={`${when(p.date)} · ${p.method}`} value={amt(p.amount)} />
             ))}

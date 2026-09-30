@@ -1,4 +1,4 @@
-import { PAYMENT_METHODS } from "@/lib/constants";
+import { CREDIT_METHOD, PAYMENT_METHODS } from "@/lib/constants";
 
 // A customer paying part by one method and part by another (some cash, the
 // rest on card). Shared by the till, the invoice editor and the cash reports,
@@ -61,6 +61,12 @@ export function paymentFromParts(parts: PaymentPart[], fallbackMethod: string) {
   return { paymentMethod: split[0]?.method ?? fallbackMethod, paymentSplit: [] as PaymentPart[] };
 }
 
-/** A single method to start a follow-up payment or refund with. */
-export const primaryMethod = (sale: { paymentMethod: string; paymentSplit: PaymentPart[] }) =>
-  sale.paymentSplit[0]?.method ?? sale.paymentMethod;
+/**
+ * A single method to start a follow-up payment or refund with. A bill that was
+ * covered by the customer's advance starts from cash: "From advance" isn't a
+ * way money changes hands.
+ */
+export const primaryMethod = (sale: { paymentMethod: string; paymentSplit: PaymentPart[] }) => {
+  const method = sale.paymentSplit[0]?.method ?? sale.paymentMethod;
+  return method === CREDIT_METHOD ? "Cash" : method;
+};

@@ -23,6 +23,7 @@ const kindMeta: Record<TrashKind, { icon: typeof Package; label: string; plural:
   prescription: { icon: Eye, label: "Prescription", plural: "Prescriptions", color: "bg-secondary/10 text-secondary" },
   expense: { icon: Wallet, label: "Expense", plural: "Expenses", color: "bg-destructive/10 text-destructive" },
   bankDeposit: { icon: Landmark, label: "Bank deposit", plural: "Bank deposits", color: "bg-secondary/10 text-secondary" },
+  customerCredit: { icon: Wallet, label: "Customer advance", plural: "Customer advances", color: "bg-success/10 text-success" },
   supplier: { icon: Truck, label: "Supplier", plural: "Suppliers", color: "bg-secondary/10 text-secondary" },
   purchaseOrder: { icon: ClipboardList, label: "Purchase order", plural: "Purchase orders", color: "bg-secondary/10 text-secondary" },
   lab: { icon: FlaskConical, label: "Lab", plural: "Labs", color: "bg-warning/10 text-warning" },

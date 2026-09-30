@@ -5,6 +5,8 @@ import { trashPrescriptionRows, trashSalePaymentRow } from "@/lib/trash/snapshot
 import { rxTextColumns, type RxTextColumns } from "@/lib/utils/rx";
 import { paymentFromParts, readSplit, splitTotal, type PaymentPart } from "@/lib/sales/paymentSplit";
 import { settleInvoice, type InvoiceStatus } from "@/lib/sales/settle";
+import { creditHeld } from "@/lib/sales/credit";
+import { CREDIT_METHOD } from "@/lib/constants";
 
 export interface SaleCoreItem {
   // Left out for an item typed in at the till that isn't in the inventory --
@@ -49,6 +51,9 @@ export interface PersistSaleInput {
   // Its own field, so an advance typed and then switched away from on an older
   // till is never counted as money taken.
   balancePaid?: number;
+  // How much of the bill comes out of the advance this customer already paid
+  // in. The payment type above then applies to what's left of the bill.
+  creditUsed?: number;
   invoiceDiscount: number;
   branchId?: string | null;
   // Prescription-job costs (reduce profit, not charged separately to customer)
@@ -270,12 +275,31 @@ export async function persistSale(input: PersistSaleInput, meta: PersistSaleMeta
     labCharges, fittingCharges, customLensName, customLensPrice, customLensQty, lensCost, totalCost, profit,
   } = priced;
 
-  const paid = paidAtSale(input, total);
+  // Part (or all) of the bill paid from the advance the customer has with the shop.
+  const creditAsked = Math.round(Math.max(0, input.creditUsed ?? 0) * 100) / 100;
+  let creditUsed = 0;
+  if (creditAsked > 0) {
+    if (!input.customerId) throw new SaleError("Select the customer whose advance is being used");
+    const held = await creditHeld(input.customerId);
+    // A bill made offline has already been handed over, so it takes whatever
+    // advance is there and the rest stays owed; at the till it's refused.
+    if (creditAsked > held + 0.01 && !meta.allowOversell) {
+      throw new SaleError(held > 0 ? `Only ${formatRs(held)} of advance is held for this customer` : "This customer has no advance held now");
+    }
+    creditUsed = Math.min(creditAsked, Math.max(0, held), total);
+  }
+  // The payment type applies to what the advance didn't cover.
+  const atTill = paidAtSale(input, total - creditUsed);
+  const paid = Math.round((atTill + creditUsed) * 100) / 100;
   const { balance, status: paymentStatus } = settleInvoice(total, paid, paymentStatusFor(input.paymentType));
-  const payment = paymentFromParts(input.paymentSplit ?? [], input.paymentMethod);
-  if (payment.paymentSplit.length && Math.abs(splitTotal(payment.paymentSplit) - paid) > 0.01) {
+  // Nothing taken at the till because the advance covered it: the bill reads "From advance".
+  const payment: { paymentMethod: string; paymentSplit: PaymentPart[] } =
+    creditUsed > 0 && atTill <= 0
+      ? { paymentMethod: CREDIT_METHOD, paymentSplit: [] }
+      : paymentFromParts(input.paymentSplit ?? [], input.paymentMethod);
+  if (payment.paymentSplit.length && Math.abs(splitTotal(payment.paymentSplit) - atTill) > 0.01) {
     throw new SaleError(
-      `The split payment comes to ${formatRs(splitTotal(payment.paymentSplit))} but ${formatRs(paid)} is being paid now — make the amounts match`
+      `The split payment comes to ${formatRs(splitTotal(payment.paymentSplit))} but ${formatRs(atTill)} is being paid now — make the amounts match`
     );
   }
   const saleDate = meta.date ?? new Date();
@@ -405,6 +429,14 @@ export async function persistSale(input: PersistSaleInput, meta: PersistSaleMeta
       }
     }
 
+    // Recorded like money received on the invoice, dated with the sale: the
+    // till's own takings stay what was actually handed over today.
+    if (creditUsed > 0) {
+      await tx.salePayment.create({
+        data: { saleId: created.id, amount: creditUsed, method: CREDIT_METHOD, date: saleDate, receivedById: meta.receivedById || null },
+      });
+    }
+
     return created;
   }, { timeout: 20_000 });
 
@@ -440,6 +472,7 @@ export async function persistSale(input: PersistSaleInput, meta: PersistSaleMeta
     total,
     paid,
     balance,
+    creditUsed,
     oversold: [...oversold],
     prescriptionIds: [...prescriptionIds],
     duplicate: false,
@@ -477,6 +510,7 @@ async function alreadySynced(sale: { id: string; invoiceNo: string; total: numbe
     total: sale.total,
     paid: sale.paid,
     balance: sale.balance,
+    creditUsed: (await db.salePayment.aggregate({ where: { saleId: sale.id, method: CREDIT_METHOD }, _sum: { amount: true } }))._sum.amount ?? 0,
     oversold: [] as string[],
     prescriptionIds: await billPrescriptionIds(sale.id),
     duplicate: true,
@@ -619,6 +653,9 @@ export async function reviseSale(saleId: string, input: ReviseSaleInput) {
       );
     }
     ({ paymentMethod, paymentSplit } = payment);
+    // "From advance" labels a bill nothing was taken for at the till. Money
+    // now put against the till is cash unless the editor said otherwise.
+    if (atCounter > 0 && paymentMethod === CREDIT_METHOD) paymentMethod = "Cash";
   } else if (priced.total < sale.paid) {
     throw new SaleError(
       `The new total (Rs.${priced.total.toLocaleString()}) is less than the Rs.${sale.paid.toLocaleString()} already paid. Refund the difference through Return & Refund instead.`
@@ -627,6 +664,9 @@ export async function reviseSale(saleId: string, input: ReviseSaleInput) {
   const { balance, status } = settleInvoice(priced.total, paid, input.payment?.label ?? sale.paymentStatus);
   const customerId = input.customerId === undefined ? sale.customerId : input.customerId || null;
   if (input.prescriptions?.length && !customerId) throw new SaleError("Select a customer to save the prescription");
+  if (customerId !== sale.customerId && (await db.salePayment.count({ where: { saleId, method: CREDIT_METHOD } })) > 0) {
+    throw new SaleError("Part of this invoice was paid from the customer's advance, so it can't move to someone else — remove that payment first");
+  }
   let prescriptionIds: string[] | undefined;
 
   // Stock only moves by what actually changed — quantities that stayed the same
@@ -832,6 +872,12 @@ export async function recordSalePayment(
   if (amount > sale.balance) {
     throw new SaleError(`That's more than the Rs.${sale.balance.toLocaleString()} still owed on this invoice`);
   }
+  if (payment.method === CREDIT_METHOD) {
+    const held = sale.customerId ? await creditHeld(sale.customerId) : 0;
+    if (amount > held + 0.01) {
+      throw new SaleError(held > 0 ? `Only ${formatRs(held)} of advance is held for this customer` : "This customer has no advance held");
+    }
+  }
 
   const paid = sale.paid + amount;
   const { balance, status } = settleInvoice(sale.total, paid, sale.paymentStatus);
@@ -875,7 +921,19 @@ export async function reviseSalePayment(
 
   const amount = change.remove ? 0 : Math.round((change.amount ?? payment.amount) * 100) / 100;
   const date = change.date ?? payment.date;
+  // A payment out of the customer's advance stays one: only its amount, date
+  // and note can change, and it can't take more than they have.
+  const fromCredit = payment.method === CREDIT_METHOD;
   if (!change.remove) {
+    if (!fromCredit && change.method === CREDIT_METHOD) {
+      throw new SaleError("To pay this from the customer's advance, remove this payment and receive it again as From advance");
+    }
+    if (fromCredit && amount > payment.amount) {
+      const held = sale.customerId ? await creditHeld(sale.customerId) : 0;
+      if (amount - payment.amount > held + 0.01) {
+        throw new SaleError(`Only ${formatRs(held)} more of advance is held for this customer`);
+      }
+    }
     if (!(amount > 0)) throw new SaleError("Enter the amount received");
     if (Number.isNaN(date.getTime())) throw new SaleError("Check the payment date and time");
     if (date.getTime() > Date.now() + 5 * 60_000) throw new SaleError("The payment date can't be in the future");
@@ -897,7 +955,7 @@ export async function reviseSalePayment(
     } else {
       await tx.salePayment.update({
         where: { id: paymentId },
-        data: { amount, date, method: change.method ?? payment.method, note: (change.note ?? payment.note).trim() },
+        data: { amount, date, method: fromCredit ? CREDIT_METHOD : change.method ?? payment.method, note: (change.note ?? payment.note).trim() },
       });
     }
     await tx.sale.update({ where: { id: sale.id }, data: { paid, balance, paymentStatus: status } });

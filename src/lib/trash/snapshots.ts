@@ -3,6 +3,8 @@ import type { Prisma } from "@/generated/prisma/client";
 import type { SnapshotTrashKind } from "@/lib/constants";
 import { formatRxPower } from "@/lib/utils/rx";
 import { settleInvoice } from "@/lib/sales/settle";
+import { creditHeld } from "@/lib/sales/credit";
+import { CREDIT_METHOD } from "@/lib/constants";
 
 /**
  * Trash for records that are really removed when deleted.
@@ -243,6 +245,29 @@ export async function trashBankDeposit(id: string, deletedById: string | null) {
   });
 }
 
+/** An advance a customer paid in, or a refund of one, entered by mistake. */
+export async function trashCustomerCredit(id: string, deletedById: string | null) {
+  const entry = await db.customerCredit.findUnique({ where: { id }, include: { customer: { select: { name: true, phone: true } } } });
+  if (!entry) throw new TrashError("This entry has already been deleted");
+  const { customer, ...row } = entry;
+  // Taking back money that was paid in mustn't leave them having spent more
+  // than they ever had.
+  if (row.amount > 0) {
+    const held = await creditHeld(row.customerId);
+    if (row.amount > held + 0.01) {
+      throw new TrashError(`${rs(row.amount - held)} of this advance has already been used or refunded — remove those first`);
+    }
+  }
+  const who = customer.name.trim() || customer.phone || "Customer";
+  await db.$transaction(async (tx) => {
+    await store(tx, "customerCredit", row.id,
+      `${row.amount > 0 ? "Advance received" : "Advance refunded"} — ${rs(Math.abs(row.amount))}`,
+      [who, row.date.toLocaleDateString("en-GB"), row.method].filter(Boolean).join(" · "),
+      { credit: row }, deletedById);
+    await tx.customerCredit.delete({ where: { id } });
+  });
+}
+
 export async function trashPrescription(id: string, deletedById: string | null) {
   const exists = await db.prescription.findUnique({ where: { id }, select: { id: true } });
   if (!exists) throw new TrashError("This prescription has already been deleted");
@@ -347,6 +372,12 @@ async function restorePayment(tx: Tx, data: Row) {
   const amount = payment.amount as number;
   const sale = await tx.sale.findUnique({ where: { id: payment.saleId as string } });
   if (!sale) throw new TrashError("Can't restore this payment: its invoice has been deleted");
+  if (payment.method === CREDIT_METHOD) {
+    const held = sale.customerId ? await creditHeld(sale.customerId, tx) : 0;
+    if (amount > held + 0.01) {
+      throw new TrashError(`Can't restore this payment: the customer only has ${rs(held)} of advance held now`);
+    }
+  }
   if (amount > sale.balance + 0.01) {
     throw new TrashError(
       `Can't restore this payment: ${sale.invoiceNo} only has ${rs(sale.balance)} still owed now — correct the invoice or take a new payment instead`
@@ -382,6 +413,21 @@ export async function restoreSnapshot(entryId: string) {
       case "bankDeposit":
         await tx.bankDeposit.create({ data: revive(data.deposit as Row, ["date", "createdAt"]) as Prisma.BankDepositUncheckedCreateInput });
         break;
+      case "customerCredit": {
+        const c = revive(data.credit as Row, ["date", "createdAt"]);
+        if (!(await tx.customer.findUnique({ where: { id: c.customerId as string }, select: { id: true } }))) {
+          throw new TrashError("Can't restore this: the customer is no longer on the system");
+        }
+        // Putting a refund back takes that money off what they have again.
+        if ((c.amount as number) < 0) {
+          const held = await creditHeld(c.customerId as string, tx);
+          if (-(c.amount as number) > held + 0.01) {
+            throw new TrashError(`Can't restore this refund: the customer only has ${rs(held)} of advance held now`);
+          }
+        }
+        await tx.customerCredit.create({ data: c as Prisma.CustomerCreditUncheckedCreateInput });
+        break;
+      }
       case "prescription": {
         const p = revive(data.prescription as Row, ["date", "createdAt"]);
         if (!(await tx.customer.findUnique({ where: { id: p.customerId as string }, select: { id: true } }))) {

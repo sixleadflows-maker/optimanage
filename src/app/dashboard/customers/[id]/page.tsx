@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { getCustomer, getCustomerSales, getCustomers, getUsers } from "@/lib/data";
+import { getCustomer, getCustomerCreditHistory, getCustomerSales, getCustomers, getUsers } from "@/lib/data";
 import { auth } from "@/lib/auth";
 import { CustomerProfileClient } from "./CustomerProfileClient";
 
@@ -7,8 +7,8 @@ export const dynamic = "force-dynamic";
 
 export default async function CustomerProfilePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const [customer, sales, customers, users, session] = await Promise.all([
-    getCustomer(id), getCustomerSales(id), getCustomers(), getUsers(), auth(),
+  const [customer, sales, customers, users, session, creditHistory] = await Promise.all([
+    getCustomer(id), getCustomerSales(id), getCustomers(), getUsers(), auth(), getCustomerCreditHistory(id),
   ]);
   if (!customer) notFound();
   const canDelete = !!session?.user && session.user.role !== "CASHIER";
@@ -18,6 +18,7 @@ export default async function CustomerProfilePage({ params }: { params: Promise<
     <CustomerProfileClient
       customer={customer}
       sales={sales}
+      creditHistory={creditHistory}
       canDelete={canDelete}
       canEdit={canEdit}
       customers={customers.map((c) => ({

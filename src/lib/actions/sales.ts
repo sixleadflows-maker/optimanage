@@ -38,6 +38,9 @@ export interface CreateSaleInput {
   advanceAmount: number;
   // Paid now on a "Balance" bill (can be nothing); the rest stays owed.
   balancePaid?: number;
+  // Taken from the advance the customer already paid in; the payment type then
+  // applies to the rest of the bill.
+  creditUsed?: number;
   invoiceDiscount: number;
   branchId?: string;
   // Prescription-job costs (reduce profit, not charged separately to customer)

@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import type { CustomerView, SaleView } from "@/lib/data";
+import type { CreditEntryView, CustomerView, SaleView } from "@/lib/data";
+import { CustomerCredit } from "./CustomerCredit";
 import { formatCurrency, formatDate } from "@/lib/utils/format";
 import { useApp } from "@/lib/context";
 import { deleteCustomer } from "@/lib/actions/customers";
@@ -17,10 +18,11 @@ import { ArrowLeft, MessageCircle, Bell, Eye, EyeOff, RefreshCw, Phone, Mail, Ma
 import Link from "next/link";
 
 export function CustomerProfileClient({
-  customer, sales, canDelete, canEdit, customers, staff,
+  customer, sales, creditHistory, canDelete, canEdit, customers, staff,
 }: {
   customer: CustomerView;
   sales: SaleView[];
+  creditHistory: CreditEntryView[];
   canDelete: boolean;
   canEdit: boolean;
   customers: EditorCustomer[];
@@ -149,6 +151,14 @@ export function CustomerProfileClient({
               )}
             </div>
           </div>
+
+          <CustomerCredit
+            customerId={customer.id}
+            customerLabel={customer.name || customer.phone || "this customer"}
+            held={customer.credit}
+            history={creditHistory}
+            canManage={canEdit}
+          />
 
           {sharingNumber.length > 0 && (
             <div className="glass-card p-5">
