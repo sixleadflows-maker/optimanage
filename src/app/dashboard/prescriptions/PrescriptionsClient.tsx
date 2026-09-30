@@ -300,6 +300,11 @@ export function PrescriptionsClient({
             );
           })}
 
+          <p className="text-[11px] text-muted-foreground -mt-2 mb-4">
+            SPH, CYL and ADD take letters as well as digits: type them after the number (2.50 DS), or tap the ± button
+            in the box and pick ABC for words like Plano.
+          </p>
+
           <div className="mb-4">
             <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Whose eyes / what for</label>
             <input type="text" value={form.label} onChange={(e) => setForm((p) => ({ ...p, label: e.target.value }))}

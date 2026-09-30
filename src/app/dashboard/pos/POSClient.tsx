@@ -1586,6 +1586,10 @@ export function POSClient({
                           );
                         })}
 
+                        <p className="text-[9px] text-muted-foreground leading-snug">
+                          SPH, CYL and ADD take letters too — type them after the number (2.50 DS), or tap ± and pick ABC.
+                        </p>
+
                         <input type="text" value={entry.notes} onChange={(e) => editRx(entry.key, { notes: e.target.value })}
                           className="w-full px-3 py-1.5 glass-input text-[10px]" placeholder="Rx notes (optional)..." />
 

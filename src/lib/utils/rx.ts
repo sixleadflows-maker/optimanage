@@ -54,9 +54,19 @@ export function rxFieldText(field: RxField, n: number, text = ""): string {
   return formatRxValue(field, n);
 }
 
-/** Reads a form field back. Blank, words, or a sign with no number yet, is 0. */
+/** The number a piece of writing starts with: "+2.50 DS" is 2.5, "Plano" has none. */
+const LEADING_NUMBER = /^\s*[+-]?(\d+\.?\d*|\.\d+)/;
+
+/**
+ * Reads a form field back. Blank, or a sign with no number yet, is 0. Letters
+ * written after a number ("+2.50 DS") keep the number; words alone are 0.
+ */
 export function parseRxText(v: string): number {
-  if (isRxTextValue(v)) return 0;
+  if (isRxTextValue(v)) {
+    const lead = v.slice(RX_TEXT_MARK.length).match(LEADING_NUMBER);
+    const n = lead ? Number(lead[0]) : 0;
+    return Number.isFinite(n) ? n : 0;
+  }
   const n = Number(v.trim());
   return Number.isFinite(n) ? n : 0;
 }

@@ -5,20 +5,34 @@ import { formatRxPower, isRxTextValue, parseRxText, RX_TEXT_MARK, RX_TEXT_MAX } 
 
 type Mode = "+" | "-" | "text";
 
-const OPTIONS: { mode: Mode; label: string; title: string; tone: string }[] = [
-  { mode: "+", label: "+", title: "Plus", tone: "bg-success/15 text-success" },
-  { mode: "-", label: "−", title: "Minus", tone: "bg-primary/15 text-primary" },
-  { mode: "text", label: "Aa", title: "Text — e.g. Plano", tone: "bg-warning/15 text-warning" },
+// `label` sits on the small button inside the box; `menu` is what the chooser
+// shows, where there's room to spell it out.
+const OPTIONS: { mode: Mode; label: string; menu: string; title: string; tone: string }[] = [
+  { mode: "+", label: "+", menu: "+", title: "Plus", tone: "bg-success/15 text-success" },
+  { mode: "-", label: "−", menu: "−", title: "Minus", tone: "bg-primary/15 text-primary" },
+  { mode: "text", label: "Aa", menu: "ABC", title: "Letters — on their own (Plano) or with the number (+2.50 DS)", tone: "bg-warning/15 text-warning" },
 ];
+
+const HAS_LETTER = /\p{L}/u;
+// A number with letters typed (or pasted) straight after it, e.g. "2.5D", "-1.25n".
+const NUMBER_THEN_LETTERS = /^\s*([+-]?)\s*(\d+\.?\d*|\.\d+)\s*(\p{L}.*)$/u;
+// Only a number left in a box that's in letters mode, e.g. "+2.5".
+const JUST_A_NUMBER = /^[+-]?(\d+\.?\d*|\.\d+)$/;
+const asText = (written: string) => `${RX_TEXT_MARK}${written.slice(0, RX_TEXT_MAX)}`;
 
 /**
  * A lens power box (SPH, CYL, ADD). Phone and tablet number pads have a minus
  * but no plus, so the sign has its own button, which opens a choice of plus,
- * minus or text -- words such as "Plano" when that's what the slip says.
- * Typing + or - works as well, and the arrow keys step by 0.25.
+ * minus or letters. Typing + or - works as well, and the arrow keys step by
+ * 0.25.
+ *
+ * Letters go in the same box as the digits: type them straight after the
+ * number ("2.50 DS") or on their own ("Plano") and the box keeps both -- on a
+ * number pad, the ABC choice brings up the letter keyboard with the number
+ * still there.
  *
  * The value is the text as typed, sign first ("+2.5", "-1.25", "" for blank),
- * or RX_TEXT_MARK followed by the words in text mode.
+ * or RX_TEXT_MARK followed by what's written once it has letters in it.
  */
 export function RxPowerInput({
   value,
@@ -33,8 +47,8 @@ export function RxPowerInput({
 }) {
   const [choosing, setChoosing] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-  // Back to typing once a choice is made. Switching to or from text swaps the
-  // box underneath, so this waits for the render that puts the new one in.
+  // Back to typing once a choice is made. Switching to or from letters swaps
+  // the box underneath, so this waits for the render that puts the new one in.
   const focusNext = useRef(false);
   useEffect(() => {
     if (!focusNext.current) return;
@@ -51,6 +65,22 @@ export function RxPowerInput({
   const mode: Mode | "" = isText ? "text" : sign;
 
   const typeDigits = (raw: string) => {
+    // A letter typed with the number: keep everything that's there, sign
+    // included, and carry on as letters ("2.50" then "D" becomes "+2.50D").
+    if (HAS_LETTER.test(raw)) {
+      const numberThenLetters = raw.match(NUMBER_THEN_LETTERS);
+      if (numberThenLetters) {
+        // Written the way it reads on a slip: "+2.50 DS".
+        const [, typed, number, letters] = numberThenLetters;
+        const n = Number(number) * ((typed || sign) === "-" ? -1 : 1);
+        onChange(asText(`${formatRxPower(n)} ${letters}`));
+      } else {
+        const needsSign = /\d/.test(raw) && !/[+-]/.test(raw);
+        onChange(asText(`${needsSign ? sign : ""}${raw}`));
+      }
+      focusNext.current = true;
+      return;
+    }
     const signs = raw.match(/[+-]/g);
     const nextSign = signs ? signs[signs.length - 1] : typedSign;
     const [whole, ...fraction] = raw.replace(/[^0-9.]/g, "").split(".");
@@ -61,9 +91,12 @@ export function RxPowerInput({
   const choose = (next: Mode) => {
     setChoosing(false);
     if (next === "text") {
-      if (!isText) onChange(RX_TEXT_MARK);
+      // The number stays, ready for letters after it.
+      if (!isText) onChange(asText(digits && digits !== "." ? `${formatRxPower(parseRxText(value))} ` : ""));
     } else {
-      onChange(`${next}${digits}`);
+      // From letters back to a number: whatever number was written is kept.
+      const number = isText ? (words.match(/\d+\.?\d*|\.\d+/)?.[0] ?? "") : digits;
+      onChange(`${next}${number}`);
     }
     focusNext.current = true;
   };
@@ -82,8 +115,8 @@ export function RxPowerInput({
       <button
         type="button"
         onClick={() => setChoosing((v) => !v)}
-        title="Plus, minus or text"
-        aria-label={`${current ? current.title : "No sign yet"} — tap to choose plus, minus or text`}
+        title="Plus, minus or letters (ABC)"
+        aria-label={`${current ? current.title : "No sign yet"} — tap to choose plus, minus or letters`}
         aria-expanded={choosing}
         className={`absolute top-1/2 -translate-y-1/2 left-0.5 w-4 h-4 flex items-center justify-center rounded-md font-bold cursor-pointer transition-colors ${
           isText ? "text-[8px]" : "text-[11px]"
@@ -105,11 +138,11 @@ export function RxPowerInput({
                 role="menuitem"
                 title={o.title}
                 onClick={() => choose(o.mode)}
-                className={`w-7 h-7 rounded-md text-xs font-bold cursor-pointer transition-colors ${o.tone} ${
-                  o.mode === mode ? "ring-2 ring-current" : "hover:opacity-80"
-                }`}
+                className={`h-7 rounded-md font-bold cursor-pointer transition-colors ${
+                  o.mode === "text" ? "px-2 text-[10px] tracking-wide" : "w-7 text-xs"
+                } ${o.tone} ${o.mode === mode ? "ring-2 ring-current" : "hover:opacity-80"}`}
               >
-                {o.label}
+                {o.menu}
               </button>
             ))}
           </div>
@@ -122,11 +155,16 @@ export function RxPowerInput({
           type="text"
           inputMode="text"
           autoComplete="off"
-          placeholder="Text"
+          placeholder="ABC"
+          title="Letters and numbers — e.g. Plano, or +2.50 DS"
           maxLength={RX_TEXT_MAX}
           value={words}
-          onChange={(e) => onChange(`${RX_TEXT_MARK}${e.target.value}`)}
-          onBlur={() => onChange(`${RX_TEXT_MARK}${words.trim()}`)}
+          onChange={(e) => onChange(asText(e.target.value))}
+          onBlur={() => {
+            // Only a number left (the letters were deleted): it's a number again.
+            const written = words.trim();
+            onChange(JUST_A_NUMBER.test(written) ? formatRxPower(Number(written)) : asText(written));
+          }}
           className={`w-full glass-input text-center pl-5 pr-1 ${
             compact ? "py-1 text-[10px]" : "py-2 text-[11px] @min-[76px]:pl-8 @min-[76px]:pr-2 @min-[76px]:text-xs"
           }`}
@@ -138,6 +176,7 @@ export function RxPowerInput({
           inputMode="decimal"
           autoComplete="off"
           placeholder={placeholder}
+          title="Type the number — letters can go after it (e.g. 2.50 DS)"
           value={digits}
           onChange={(e) => typeDigits(e.target.value)}
           onKeyDown={(e) => {
