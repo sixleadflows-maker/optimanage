@@ -83,6 +83,31 @@ export function rxTextColumns(p: Partial<RxTextColumns>): RxTextColumns {
   return out;
 }
 
+/** The lens made up for a prescription: what it is, its colour, and any notes. */
+export interface RxLensFields {
+  lensName?: string;
+  lensColor?: string;
+  lensDescription?: string;
+}
+
+/**
+ * The lens columns to store. Only what was given comes back, so a form that
+ * knows nothing about the lens (the Prescriptions page) never blanks it.
+ */
+export function rxLensColumns(p: RxLensFields) {
+  const tidy = (v: string) => v.trim().slice(0, 120);
+  return {
+    ...(p.lensName !== undefined ? { lensName: tidy(p.lensName) } : {}),
+    ...(p.lensColor !== undefined ? { lensColor: tidy(p.lensColor) } : {}),
+    ...(p.lensDescription !== undefined ? { lensDescription: tidy(p.lensDescription) } : {}),
+  };
+}
+
+/** How a prescription's lens reads in a history: "Essilor Crizal · Blue Cut · anti-glare". */
+export function rxLensLabel(p: { lensName: string; lensColor: string; lensDescription: string }) {
+  return [p.lensName, p.lensColor, p.lensDescription].map((s) => s.trim()).filter(Boolean).join(" · ");
+}
+
 /** The words typed into a prescription form's power boxes. */
 export function rxFormTexts(f: {
   rightSph: string; rightCyl: string; rightAdd: string; leftSph: string; leftCyl: string; leftAdd: string;

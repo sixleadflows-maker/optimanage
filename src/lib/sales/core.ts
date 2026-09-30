@@ -2,7 +2,7 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import type { Prisma } from "@/generated/prisma/client";
 import { trashPrescriptionRows, trashSalePaymentRow } from "@/lib/trash/snapshots";
-import { rxTextColumns, type RxTextColumns } from "@/lib/utils/rx";
+import { rxLensColumns, rxTextColumns, type RxLensFields, type RxTextColumns } from "@/lib/utils/rx";
 import { paymentFromParts, readSplit, splitTotal, type PaymentPart } from "@/lib/sales/paymentSplit";
 import { settleInvoice, type InvoiceStatus } from "@/lib/sales/settle";
 import { creditHeld } from "@/lib/sales/credit";
@@ -24,7 +24,7 @@ export interface SaleCoreItem {
   id?: string;
 }
 
-export interface SalePrescriptionInput extends Partial<RxTextColumns> {
+export interface SalePrescriptionInput extends Partial<RxTextColumns>, RxLensFields {
   rightSph: number; rightCyl: number; rightAxis: number; rightPd: number; rightAdd: number;
   leftSph: number; leftCyl: number; leftAxis: number; leftPd: number; leftAdd: number;
   notes: string;
@@ -534,6 +534,7 @@ function prescriptionFields(p: SalePrescriptionInput) {
     rightSph: p.rightSph, rightCyl: p.rightCyl, rightAxis: p.rightAxis, rightPd: p.rightPd, rightAdd: p.rightAdd,
     leftSph: p.leftSph, leftCyl: p.leftCyl, leftAxis: p.leftAxis, leftPd: p.leftPd, leftAdd: p.leftAdd,
     ...rxTextColumns(p),
+    ...rxLensColumns(p),
     notes: p.notes,
     isOwnPrescription: p.isOwnPrescription ?? false,
   };

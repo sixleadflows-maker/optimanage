@@ -143,6 +143,12 @@ model Prescription {
   // screen with the customer standing there. The note itself is never deleted.
   notesHidden Boolean @default(false)
   isOwnPrescription Boolean @default(false)
+  // The lens made up for this prescription -- one slip can carry several
+  // prescriptions, each with its own lens. Words only: the lens is billed as a
+  // line on the invoice; this is what says which prescription it was for.
+  lensName        String @default("")
+  lensColor       String @default("")
+  lensDescription String @default("")
   createdAt  DateTime @default(now())
 }
 

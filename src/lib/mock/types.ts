@@ -47,6 +47,10 @@ export interface Prescription {
   // them. The note is still stored and still editable.
   notesHidden: boolean;
   isOwnPrescription: boolean;
+  // The lens made up for this prescription ("" when none was recorded).
+  lensName: string;
+  lensColor: string;
+  lensDescription: string;
 }
 
 export interface EyeRx {

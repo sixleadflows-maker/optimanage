@@ -9,7 +9,7 @@ import { useApp } from "@/lib/context";
 import { deleteCustomer } from "@/lib/actions/customers";
 import { setPrescriptionNotesHidden } from "@/lib/actions/prescriptions";
 import { paymentStatusChipClass } from "@/lib/constants";
-import { formatEyeValue } from "@/lib/utils/rx";
+import { formatEyeValue, rxLensLabel } from "@/lib/utils/rx";
 import { samePhone } from "@/lib/utils/phone";
 import { CollectPaymentModal, EditInvoiceModal, EditPaymentModal, type EditorCustomer, type EditorStaff } from "@/app/dashboard/sales/InvoiceEditor";
 import { InvoiceDetails } from "@/components/invoice/InvoiceDetails";
@@ -247,6 +247,9 @@ export function CustomerProfileClient({
                     </div>
                     {rx.label && (
                       <p className="text-[11px] font-medium text-primary mb-1">For {rx.label}</p>
+                    )}
+                    {rxLensLabel(rx) && (
+                      <p className="text-xs mt-2"><span className="text-muted-foreground">Lens: </span>{rxLensLabel(rx)}</p>
                     )}
                     {rx.notes && (
                       <div className="flex items-start gap-2 mt-2 pt-2 border-t border-border">

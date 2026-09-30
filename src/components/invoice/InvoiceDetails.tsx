@@ -3,7 +3,7 @@
 import Link from "next/link";
 import type { SaleView } from "@/lib/data";
 import { formatCurrency, formatDate } from "@/lib/utils/format";
-import { formatEyeValue } from "@/lib/utils/rx";
+import { formatEyeValue, rxLensLabel } from "@/lib/utils/rx";
 import { paymentStatusChipClass } from "@/lib/constants";
 import { Glasses, History, Pencil, Plus, Undo2, WifiOff } from "lucide-react";
 
@@ -47,6 +47,11 @@ function RxCard({ rx }: { rx: Rx }) {
           ))}
         </tbody>
       </table>
+      {rxLensLabel(rx) && (
+        <p className="mt-1.5 pt-1.5 border-t border-border/60">
+          <span className="text-muted-foreground">Lens: </span>{rxLensLabel(rx)}
+        </p>
+      )}
       {rx.notes && (
         <p className={`mt-1.5 pt-1.5 border-t border-border/60 ${rx.notesHidden ? "italic text-muted-foreground/70" : "text-muted-foreground"}`}>
           {rx.notesHidden ? "Notes hidden" : `Notes: ${rx.notes}`}

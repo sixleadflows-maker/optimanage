@@ -102,6 +102,18 @@ interface RxEntry {
   // The record holding it on the invoice once the bill is saved, so saving a
   // corrected bill changes that record instead of adding another.
   onBillId?: string;
+  // The lens made up for this prescription. The first prescription's lens is
+  // the one picked in the "Lens" box above; every further one carries its own
+  // here -- from the catalog (lensProductId) or typed in (lensCustom).
+  lensProductId?: string;
+  lensCustom?: boolean;
+  lensName: string;
+  lensPrice: string;
+  lensQty: number;
+  lensColorChoice: string;
+  lensColorOther: string;
+  lensDescription: string;
+  lensSearch: string;
 }
 
 const blankRx = (): RxEntry => ({
@@ -115,6 +127,7 @@ const EMPTY_RX = {
   rightSph: "", rightCyl: "", rightAxis: "", rightPd: "", rightAdd: "",
   leftSph: "", leftCyl: "", leftAxis: "", leftPd: "", leftAdd: "",
   notes: "",
+  lensName: "", lensPrice: "", lensQty: 1, lensColorChoice: "", lensColorOther: "", lensDescription: "", lensSearch: "",
 };
 
 const EMPTY_MANUAL_ITEM = { name: "", description: "", price: "", quantity: "1" };
@@ -143,6 +156,105 @@ function LensQty({ value, onChange, max }: { value: number; onChange: (n: number
         className="w-6 h-6 rounded-md bg-surface hover:bg-surface-hover flex items-center justify-center disabled:opacity-40 cursor-pointer">
         <Plus className="w-3 h-3" />
       </button>
+    </div>
+  );
+}
+
+/**
+ * The lens for one prescription on a slip that carries several: picked from the
+ * lens stock or typed in, with how many, its colour and any notes. It's billed
+ * as its own line and saved on that prescription's record.
+ */
+function RxLensPicker({
+  entry, lenses, onChange,
+}: {
+  entry: RxEntry;
+  lenses: Product[];
+  onChange: (patch: Partial<RxEntry>) => void;
+}) {
+  const picked = entry.lensProductId ? lenses.find((p) => p.id === entry.lensProductId) : undefined;
+  const matches = entry.lensSearch.trim()
+    ? lenses.filter((p) => matchesSearch(entry.lensSearch, [p.brand, p.name, p.model, p.colour, p.type])).slice(0, 6)
+    : [];
+  const price = Number(entry.lensPrice) || 0;
+
+  return (
+    <div className="p-2 rounded-lg bg-primary/5 space-y-1.5">
+      <div className="flex items-center justify-between gap-2">
+        <label className="text-[10px] font-medium text-muted-foreground">Lens for this prescription (adds to the bill)</label>
+        {!picked && (
+          <button type="button" onClick={() => onChange({ lensCustom: !entry.lensCustom, lensSearch: "" })}
+            className="text-[10px] text-primary font-medium flex items-center gap-1 cursor-pointer flex-shrink-0">
+            {entry.lensCustom ? <><Search className="w-3 h-3" /> Search catalog</> : <><Edit3 className="w-3 h-3" /> Enter manually</>}
+          </button>
+        )}
+      </div>
+
+      {entry.lensCustom ? (
+        <div className="space-y-1">
+          <input type="text" value={entry.lensName} onChange={(e) => onChange({ lensName: e.target.value })}
+            placeholder="Lens name" className="w-full px-2.5 py-1.5 glass-input text-[11px]" />
+          <div className="grid grid-cols-[1fr_auto] gap-2">
+            <input type="number" min={0} value={entry.lensPrice} onChange={(e) => onChange({ lensPrice: e.target.value })}
+              placeholder="Price per lens" className="w-full px-2.5 py-1.5 glass-input text-[11px]" />
+            <LensQty value={entry.lensQty} onChange={(q) => onChange({ lensQty: q })} />
+          </div>
+          {price > 0 && entry.lensQty > 1 && (
+            <p className="text-[10px] text-muted-foreground text-right">
+              {`${entry.lensQty} × ${formatCurrency(price)} = ${formatCurrency(price * entry.lensQty)}`}
+            </p>
+          )}
+        </div>
+      ) : picked ? (
+        <div className="px-2.5 py-1.5 bg-surface rounded-lg space-y-1">
+          {/* The name gets a line to itself: beside the quantity buttons there's no room for it in the cart column. */}
+          <p className="text-[11px] font-medium">{`${picked.brand} ${picked.name}`.trim()}</p>
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[10px] text-muted-foreground">{`${formatCurrency(picked.salePrice)} each`}</span>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <LensQty value={entry.lensQty} max={picked.stock} onChange={(q) => onChange({ lensQty: q })} />
+              <button type="button" onClick={() => onChange({ lensProductId: undefined, lensQty: 1 })} title="Take this lens off" className="cursor-pointer">
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div>
+          <input type="text" placeholder="Type to search lenses..." value={entry.lensSearch}
+            onChange={(e) => onChange({ lensSearch: e.target.value })} className="w-full px-2.5 py-1.5 glass-input text-[11px]" />
+          {entry.lensSearch.trim() && (
+            <div className="mt-1 glass rounded-lg p-1 max-h-32 overflow-y-auto">
+              {matches.length === 0 && <p className="px-3 py-1.5 text-xs text-muted-foreground">No matching lens — use Enter manually</p>}
+              {matches.map((p) => (
+                <button key={p.id} type="button" onClick={() => onChange({ lensProductId: p.id, lensSearch: "" })}
+                  className="w-full text-left px-3 py-1.5 rounded-lg hover:bg-surface-hover text-xs flex items-center justify-between gap-2 cursor-pointer">
+                  <span className="min-w-0">
+                    <span className="block truncate">{p.brand} {p.name}</span>
+                    {p.category === "Contact Lenses" && p.type && <span className="block text-[10px] text-muted-foreground">{p.type}</span>}
+                  </span>
+                  <span className="text-muted-foreground flex-shrink-0">{formatCurrency(p.salePrice)}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 gap-1.5">
+        <select value={entry.lensColorChoice} onChange={(e) => onChange({ lensColorChoice: e.target.value })}
+          className="w-full px-2 py-1.5 glass-input text-[11px]">
+          <option value="">Lens colour</option>
+          {LENS_COLORS.map((c) => <option key={c} value={c}>{c}</option>)}
+          <option value="Other">Other — type it</option>
+        </select>
+        <input type="text" value={entry.lensDescription} onChange={(e) => onChange({ lensDescription: e.target.value })}
+          placeholder="Coating, index, brand..." className="w-full px-2.5 py-1.5 glass-input text-[11px]" />
+      </div>
+      {entry.lensColorChoice === "Other" && (
+        <input type="text" value={entry.lensColorOther} onChange={(e) => onChange({ lensColorOther: e.target.value })}
+          placeholder="Type the colour" className="w-full px-2.5 py-1.5 glass-input text-[11px]" />
+      )}
     </div>
   );
 }
@@ -542,7 +654,25 @@ export function POSClient({
   const cartSubtotal = cart.reduce((sum, i) => sum + i.price * i.quantity - i.discount, 0);
   const lensColor = lensColorChoice === "Other" ? lensColorOther.trim() : lensColorChoice;
   const customLensAmount = useCustomLens ? customLensPrice * customLensQty : 0;
-  const subtotal = cartSubtotal + customLensAmount;
+  const rxLensColor = (e: RxEntry) => (e.lensColorChoice === "Other" ? e.lensColorOther.trim() : e.lensColorChoice);
+  // The lens of each prescription after the first, as a line on the bill. (The
+  // first prescription's lens is the one chosen in the Lens box, already a
+  // line of its own.)
+  const extraLensLines = recordRx
+    ? rxList.slice(1).flatMap((e, i) => {
+        const description = [`Lens for ${e.label.trim() || `prescription ${i + 2}`}`, lensNote(rxLensColor(e), e.lensDescription)].filter(Boolean).join(" · ");
+        if (e.lensCustom) {
+          const price = Number(e.lensPrice) || 0;
+          if (!e.lensName.trim() || price <= 0) return [];
+          return [{ key: `rx-lens-${e.key}`, productId: undefined as string | undefined, name: e.lensName.trim(), description, quantity: e.lensQty, price }];
+        }
+        const p = e.lensProductId ? products.find((x) => x.id === e.lensProductId) : undefined;
+        if (!p) return [];
+        return [{ key: `rx-lens-${e.key}`, productId: p.id as string | undefined, name: `${p.brand} ${p.name}`.trim(), description, quantity: e.lensQty, price: p.salePrice }];
+      })
+    : [];
+  const extraLensAmount = extraLensLines.reduce((sum, l) => sum + l.price * l.quantity, 0);
+  const subtotal = cartSubtotal + customLensAmount + extraLensAmount;
   const total = subtotal - invoiceDiscount;
   const customer = allCustomers.find((c) => c.id === selectedCustomer);
   // What to call them on screen: a customer saved with only a number goes by it.
@@ -578,7 +708,23 @@ export function POSClient({
 
   const choosePaymentType = (pt: "Full" | "Advance" | "Balance") => setPaymentType(pt);
 
+  // Which lens went with which prescription, for the record: the first one's
+  // is the lens chosen in the Lens box, the others carry their own.
+  const rxLens = (entry: RxEntry) => {
+    if (rxList[0]?.key === entry.key) {
+      const name = useCustomLens ? customLensName.trim() : lensProduct ? `${lensProduct.brand} ${lensProduct.name}`.trim() : "";
+      return { lensName: name, lensColor, lensDescription: lensDescription.trim() };
+    }
+    const p = entry.lensProductId ? products.find((x) => x.id === entry.lensProductId) : undefined;
+    return {
+      lensName: entry.lensCustom ? entry.lensName.trim() : p ? `${p.brand} ${p.name}`.trim() : "",
+      lensColor: rxLensColor(entry),
+      lensDescription: entry.lensDescription.trim(),
+    };
+  };
+
   const rxValues = (entry: RxEntry) => ({
+    ...rxLens(entry),
     rightSph: num(entry.rightSph), rightCyl: num(entry.rightCyl), rightAxis: num(entry.rightAxis), rightPd: num(entry.rightPd), rightAdd: num(entry.rightAdd),
     leftSph: num(entry.leftSph), leftCyl: num(entry.leftCyl), leftAxis: num(entry.leftAxis), leftPd: num(entry.leftPd), leftAdd: num(entry.leftAdd),
     ...rxFormTexts(entry),
@@ -659,7 +805,7 @@ export function POSClient({
   // Cost and profit are deliberately not computed or shown here — the till is
   // visible to customers. createSale still records them server-side, so they
   // stay available in Analytics.
-  const hasSaleableItems = cart.length > 0 || (useCustomLens && customLensPrice > 0);
+  const hasSaleableItems = cart.length > 0 || (useCustomLens && customLensPrice > 0) || extraLensLines.length > 0;
 
   // Picking a percentage works out the rupee amount off the current subtotal.
   const applyDiscountPct = (pct: number | null) => {
@@ -843,15 +989,29 @@ export function POSClient({
       showToast("Enter a name and price for the custom lens", "error");
       return;
     }
+    // A typed-in lens on a further prescription, half filled in.
+    const halfLens = recordRx
+      ? rxList.findIndex((e, i) => i > 0 && e.lensCustom && (e.lensName.trim() !== "" || e.lensPrice !== "") && (!e.lensName.trim() || !(Number(e.lensPrice) > 0)))
+      : -1;
+    if (halfLens > 0) {
+      showToast(`Enter a name and price for the lens on prescription ${halfLens + 1} (${rxList[halfLens].label.trim() || "no name yet"})`, "error");
+      return;
+    }
     if (billDateValue && (Number.isNaN(billDateValue.getTime()) || billDateValue.getTime() > Date.now() + 60_000)) {
       showToast("Check the bill date — it can't be in the future", "error");
       return;
     }
     clientRef.current ??= crypto.randomUUID();
     const saleInput: CreateSaleInput = {
-      items: cart.map((i) => (i.productId
-        ? { productId: i.productId, description: i.description, quantity: i.quantity, unitPrice: i.price, discount: i.discount }
-        : { name: i.name, description: i.description, quantity: i.quantity, unitPrice: i.price, discount: i.discount })),
+      items: [
+        ...cart.map((i) => (i.productId
+          ? { productId: i.productId, description: i.description, quantity: i.quantity, unitPrice: i.price, discount: i.discount }
+          : { name: i.name, description: i.description, quantity: i.quantity, unitPrice: i.price, discount: i.discount })),
+        // One line for the lens of each prescription after the first.
+        ...extraLensLines.map((l) => (l.productId
+          ? { productId: l.productId, description: l.description, quantity: l.quantity, unitPrice: l.price, discount: 0 }
+          : { name: l.name, description: l.description, quantity: l.quantity, unitPrice: l.price, discount: 0 })),
+      ],
       customerId: customer && !customer.local ? customer.id : undefined,
       newCustomer: customer?.local ? { name: customer.name, phone: customer.phone } : undefined,
       paymentMethod: billPayment.paymentMethod,
@@ -1019,6 +1179,10 @@ export function POSClient({
               quantity: customLensQty, unitPrice: customLensPrice, discount: 0, total: customLensAmount,
             }]
           : []),
+        ...extraLensLines.map((l) => ({
+          key: l.key, name: l.name, description: l.description,
+          quantity: l.quantity, unitPrice: l.price, discount: 0, total: l.price * l.quantity,
+        })),
       ],
       subtotal,
       discount: invoiceDiscount,
@@ -1628,6 +1792,16 @@ export function POSClient({
                           SPH, CYL and ADD take letters too — type them after the number (2.50 DS), or tap ± and pick ABC.
                         </p>
 
+                        {index === 0 ? (
+                          rxList.length > 1 && (
+                            <p className="text-[10px] text-muted-foreground">
+                              {`Lens for this one: ${rxLens(entry).lensName || "none chosen"} — it's the Lens box at the top. Each prescription below has its own.`}
+                            </p>
+                          )
+                        ) : (
+                          <RxLensPicker entry={entry} lenses={lensProducts} onChange={(patch) => editRx(entry.key, patch)} />
+                        )}
+
                         <input type="text" value={entry.notes} onChange={(e) => editRx(entry.key, { notes: e.target.value })}
                           className="w-full px-3 py-1.5 glass-input text-[10px]" placeholder="Rx notes (optional)..." />
 
@@ -1715,6 +1889,18 @@ export function POSClient({
                       + Add details
                     </button>
                   )}
+                </div>
+              ))}
+              {extraLensLines.map((l) => (
+                <div key={l.key} className="py-2 px-1.5 -mx-1.5 border-b border-border">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-xs font-medium truncate">{l.name}</p>
+                      <p className="text-[10px] text-muted-foreground">{`${l.description} · ${l.quantity} × ${formatCurrency(l.price)}`}</p>
+                    </div>
+                    <span className="text-xs font-semibold flex-shrink-0">{formatCurrency(l.price * l.quantity)}</span>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">Change it in that prescription&apos;s lens box above.</p>
                 </div>
               ))}
             </div>
