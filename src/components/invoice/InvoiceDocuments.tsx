@@ -99,7 +99,9 @@ export function ThermalReceipt({ invoice, shop }: { invoice: InvoiceData; shop: 
         {invoice.offlineRef && <Row label="Offline ref" value={invoice.offlineRef} />}
         <Row label="Date" value={invoice.date} />
         {invoice.customerName && <Row label="Customer" value={invoice.customerName} />}
-        {invoice.customerName && invoice.customerPhone && <Row label="Phone" value={invoice.customerPhone} />}
+        {invoice.customerName && invoice.customerPhone && invoice.customerPhone !== invoice.customerName && (
+          <Row label="Phone" value={invoice.customerPhone} />
+        )}
         {invoice.orderTakenBy && <Row label="Served by" value={invoice.orderTakenBy} />}
         {invoice.billGeneratedBy && invoice.billGeneratedBy !== invoice.orderTakenBy && (
           <Row label="Billed by" value={invoice.billGeneratedBy} />
@@ -202,7 +204,9 @@ export function A4Invoice({ invoice, shop }: { invoice: InvoiceData; shop: ShopD
         <div>
           <p className="text-[10px] uppercase tracking-widest text-gray-400 mb-1">Billed To</p>
           <p className="font-semibold">{invoice.customerName ?? "Walk-in Customer"}</p>
-          {invoice.customerPhone && <p className="text-gray-600">{invoice.customerPhone}</p>}
+          {invoice.customerPhone && invoice.customerPhone !== invoice.customerName && (
+            <p className="text-gray-600">{invoice.customerPhone}</p>
+          )}
         </div>
         <div>
           <p className="text-[10px] uppercase tracking-widest text-gray-400 mb-1">Invoice Details</p>

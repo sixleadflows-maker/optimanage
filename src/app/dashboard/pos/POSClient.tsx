@@ -483,7 +483,10 @@ export function POSClient({
   const saveNewCustomer = async () => {
     if (savingCustomer) return;
     const name = newCustomer.name.trim();
-    if (!name) { showToast("Enter the customer's name", "error"); return; }
+    const phone = newCustomer.phone.trim();
+    // A number on its own is enough -- the name can be added later.
+    if (!name && !phone) { showToast("Enter a name or a phone number", "error"); return; }
+    const label = name || phone;
     setSavingCustomer(true);
     try {
       const res = await createCustomer({
@@ -501,8 +504,8 @@ export function POSClient({
       setSelectedCustomer(id);
       showToast(
         onNewCustomerNumber.length
-          ? `${name} added and selected — ${onNewCustomerNumber.length + 1} customers now share this number`
-          : `${name} added and selected`,
+          ? `${label} added and selected — ${onNewCustomerNumber.length + 1} customers now share this number`
+          : `${label} added and selected`,
         "success",
       );
       setShowNewCustomer(false);
@@ -520,7 +523,7 @@ export function POSClient({
       setShowNewCustomer(false);
       setNewCustomer({ ...EMPTY_NEW_CUSTOMER });
       setCustomerSearch("");
-      showToast(`No connection — ${name} will be added when this bill syncs`, "info");
+      showToast(`No connection — ${label} will be added when this bill syncs`, "info");
     } finally {
       setSavingCustomer(false);
     }
@@ -532,6 +535,8 @@ export function POSClient({
   const subtotal = cartSubtotal + customLensAmount;
   const total = subtotal - invoiceDiscount;
   const customer = allCustomers.find((c) => c.id === selectedCustomer);
+  // What to call them on screen: a customer saved with only a number goes by it.
+  const customerLabel = customer ? customer.name || customer.phone || "this customer" : "";
   const lensLine = lensProductId ? cart.find((i) => i.key === lensProductId) : undefined;
   const billDateValue = billDate ? new Date(billDate) : null;
   const isOldBill = !!billDateValue && Date.now() - billDateValue.getTime() > OLD_BILL_AFTER_MS;
@@ -607,7 +612,7 @@ export function POSClient({
 
   const saveRxNow = async (entry: RxEntry) => {
     if (!customer) { showToast("Select the customer first", "error"); return; }
-    if (customer.local) { showToast(`${customer.name} isn't on the system yet — the prescription is saved with the bill`, "info"); return; }
+    if (customer.local) { showToast(`${customerLabel} isn't on the system yet — the prescription is saved with the bill`, "info"); return; }
     setSavingRx(entry.key);
     try {
       // Saved once already: that record is updated, not joined by a second one.
@@ -615,13 +620,13 @@ export function POSClient({
         const res = await updatePrescription(entry.savedId, rxValues(entry));
         if (!res.ok) { showToast(res.error, "error"); return; }
         setRxList((prev) => prev.map((e) => (e.key === entry.key ? { ...e, savedChanged: false } : e)));
-        showToast(`${customer.name}'s prescription record updated`, "success");
+        showToast(`${customerLabel}'s prescription record updated`, "success");
         return;
       }
       const res = await createPrescription({ customerId: customer.id, ...rxValues(entry) });
       if (!res.ok) { showToast(res.error, "error"); return; }
       setRxList((prev) => prev.map((e) => (e.key === entry.key ? { ...e, savedId: res.id, savedChanged: false } : e)));
-      showToast(`Saved to ${customer.name}'s prescription record`, "success");
+      showToast(`Saved to ${customerLabel}'s prescription record`, "success");
     } catch {
       showToast("Couldn't save it right now — it will be saved with the sale", "error");
     } finally {
@@ -745,7 +750,7 @@ export function POSClient({
       showToast(message, "success");
     };
 
-    const summary = { customerName: customer?.name ?? "Walk-in", itemCount: cart.length, total };
+    const summary = { customerName: customer ? customerLabel : "Walk-in", itemCount: cart.length, total };
     if (saleResult.provisional && clientRef.current && replaceDraft(clientRef.current, saleInput, summary)) {
       setDrafts(getDrafts());
       finish(
@@ -877,7 +882,7 @@ export function POSClient({
       const offlineRef = makeOfflineRef(billTime);
       const draft = addDraft(
         { ...saleInput, offlineRef, date: billTime.toISOString() },
-        { customerName: customer?.name ?? "Walk-in", itemCount: cart.length, total }
+        { customerName: customer ? customerLabel : "Walk-in", itemCount: cart.length, total }
       );
       setDrafts(getDrafts().length ? getDrafts() : [draft]);
       setLastStaff(pickedStaff);
@@ -962,7 +967,7 @@ export function POSClient({
       date: saleResult.date,
       orderTakenBy: saleResult.orderTakenByName,
       billGeneratedBy: saleResult.billGeneratedByName,
-      customerName: customer?.name ?? null,
+      customerName: customer ? customer.name || customer.phone || "Customer" : null,
       customerPhone: customer?.phone ?? "",
       lines: [
         ...cart.map((item) => ({
@@ -1092,7 +1097,7 @@ export function POSClient({
           <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-primary/10 text-sm">
             <User className="w-4 h-4 text-primary" />
             <span>
-              New invoice for <span className="font-semibold">{customer.name}</span>
+              New invoice for <span className="font-semibold">{customerLabel}</span>
               {customer.phone ? <span className="text-muted-foreground"> · {customer.phone}</span> : null}
             </span>
             <button onClick={() => setSelectedCustomer("")} title="Bill someone else" className="cursor-pointer">
@@ -1303,7 +1308,7 @@ export function POSClient({
                     onClick={() => { setSelectedCustomer(c.id); setCustomerSearch(""); }}
                     className="w-full text-left px-3 py-1.5 rounded-lg hover:bg-surface-hover text-xs"
                   >
-                    {c.name}{c.phone ? ` · ${c.phone}` : ""}
+                    {[c.name, c.phone].filter(Boolean).join(" · ") || "No name yet"}
                   </button>
                 ))}
               </div>
@@ -1317,12 +1322,12 @@ export function POSClient({
                 <input type="text" value={newCustomer.name} autoFocus
                   onChange={(e) => setNewCustomer({ ...newCustomer, name: e.target.value })}
                   onKeyDown={(e) => { if (e.key === "Enter") saveNewCustomer(); }}
-                  placeholder="Name *" className="w-full px-3 py-2 glass-input text-xs" />
+                  placeholder="Name (can add later)" className="w-full px-3 py-2 glass-input text-xs" />
                 <div className="grid grid-cols-2 gap-2">
                   <input type="text" value={newCustomer.phone}
                     onChange={(e) => setNewCustomer({ ...newCustomer, phone: e.target.value })}
                     onKeyDown={(e) => { if (e.key === "Enter") saveNewCustomer(); }}
-                    placeholder="Phone (optional)" className="w-full px-3 py-2 glass-input text-xs" />
+                    placeholder="Phone" className="w-full px-3 py-2 glass-input text-xs" />
                   <input type="text" value={newCustomer.serialNumber}
                     onChange={(e) => setNewCustomer({ ...newCustomer, serialNumber: e.target.value })}
                     onKeyDown={(e) => { if (e.key === "Enter") saveNewCustomer(); }}
@@ -1358,7 +1363,7 @@ export function POSClient({
             )}
             {customer && !showNewCustomer && (
               <div className="flex items-center justify-between mt-2 px-2 py-1.5 bg-primary/5 rounded-lg">
-                <span className="text-xs font-medium">{customer.name}{customer.phone ? ` · ${customer.phone}` : ""}</span>
+                <span className="text-xs font-medium">{[customer.name, customer.phone].filter(Boolean).join(" · ") || "No name yet"}</span>
                 <button onClick={() => setSelectedCustomer("")}><X className="w-3.5 h-3.5" /></button>
               </div>
             )}
@@ -1527,9 +1532,9 @@ export function POSClient({
                     {customer ? (
                       <p className="text-[10px] text-muted-foreground leading-relaxed">
                         {rxPrefilledFrom && !rxTouched
-                          ? `Filled in from ${customer.name}'s last prescription (${new Date(rxPrefilledFrom).toLocaleDateString("en-GB")}) — change anything that's different. `
+                          ? `Filled in from ${customerLabel}'s last prescription (${new Date(rxPrefilledFrom).toLocaleDateString("en-GB")}) — change anything that's different. `
                           : ""}
-                        {`Saved to ${customer.name}'s prescription record when you complete the sale.`}
+                        {`Saved to ${customerLabel}'s prescription record when you complete the sale.`}
                       </p>
                     ) : (
                       <p className="text-[10px] text-warning">Select a customer above to save the prescription.</p>
@@ -1596,13 +1601,13 @@ export function POSClient({
                         {customer && !customer.local && (
                           entry.savedId && !entry.savedChanged ? (
                             <p className="flex items-center justify-center gap-1 text-[10px] text-success font-medium">
-                              <Check className="w-3 h-3" /> On {customer.name}&apos;s record — the sale will use this one
+                              <Check className="w-3 h-3" /> On {customerLabel}&apos;s record — the sale will use this one
                             </p>
                           ) : (
                             <button onClick={() => saveRxNow(entry)} disabled={savingRx !== null}
                               className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-surface hover:bg-surface-hover text-[10px] font-medium disabled:opacity-60 cursor-pointer">
                               {savingRx === entry.key ? <LensLoader /> : <Save className="w-3 h-3" />}
-                              {entry.savedId ? `Update ${customer.name}'s record now` : `Save to ${customer.name}'s record now`}
+                              {entry.savedId ? `Update ${customerLabel}'s record now` : `Save to ${customerLabel}'s record now`}
                             </button>
                           )
                         )}

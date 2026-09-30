@@ -18,6 +18,10 @@ const onlineOrderStatusLabel = {
 
 const iso = (d: Date | null | undefined) => (d ? d.toISOString().slice(0, 10) : "");
 
+// What to call a customer in lists and on bills. One saved with only a number
+// (the name can be added later) goes by the number rather than a blank.
+const customerLabel = (c: { name: string; phone: string | null }) => c.name.trim() || c.phone || "No name yet";
+
 // ─── Products ───────────────────────────────────────────────
 type ProductRow = Awaited<ReturnType<typeof db.product.findMany>>[number];
 
@@ -201,7 +205,7 @@ function mapSale(s: SaleRow): SaleView {
     date: iso(s.date),
     dateTime: s.date.toISOString(),
     customerId: s.customerId ?? "",
-    customerName: s.customer?.name ?? "Walk-in",
+    customerName: s.customer ? customerLabel(s.customer) : "Walk-in",
     customerPhone: s.customer?.phone ?? "",
     customerSerial: s.customer?.serialNumber ?? "",
     items: s.items.map((it) => ({
@@ -373,7 +377,7 @@ export async function getLabOrders(): Promise<LabOrder[]> {
     id: l.id,
     orderNo: l.orderNo,
     customerId: l.customerId,
-    customerName: l.customer?.name ?? "",
+    customerName: l.customer ? customerLabel(l.customer) : "",
     labId: l.labId,
     lab: l.lab.name,
     lensType: l.lensType,
@@ -412,9 +416,9 @@ export type PrescriptionView = Prescription & { customerId: string; customerName
 
 /** Just enough about an invoice to add a prescription to it later. */
 export async function getSaleBrief(id: string) {
-  const sale = await db.sale.findUnique({ where: { id }, select: { id: true, invoiceNo: true, customerId: true, customer: { select: { name: true } } } });
+  const sale = await db.sale.findUnique({ where: { id }, select: { id: true, invoiceNo: true, customerId: true, customer: { select: { name: true, phone: true } } } });
   if (!sale) return null;
-  return { id: sale.id, invoiceNo: sale.invoiceNo, customerId: sale.customerId ?? "", customerName: sale.customer?.name ?? "" };
+  return { id: sale.id, invoiceNo: sale.invoiceNo, customerId: sale.customerId ?? "", customerName: sale.customer ? customerLabel(sale.customer) : "" };
 }
 
 export async function getPrescriptions(): Promise<PrescriptionView[]> {
@@ -425,7 +429,7 @@ export async function getPrescriptions(): Promise<PrescriptionView[]> {
   return rows.map((p) => ({
     ...mapPrescription(p),
     customerId: p.customerId,
-    customerName: p.customer?.name ?? "",
+    customerName: p.customer ? customerLabel(p.customer) : "",
   }));
 }
 
@@ -1038,7 +1042,7 @@ export async function getDashboardData(branchId?: string): Promise<DashboardData
   // Reminders: outstanding balances + low stock
   const reminders: DashboardData["reminders"] = [];
   sales.filter((s) => s.paymentStatus !== "PAID" && s.balance > 0).slice(0, 2).forEach((s) => {
-    reminders.push({ text: `${s.customer?.name ?? "Walk-in"} — balance ${Math.round(s.balance).toLocaleString()} Rs due`, type: "balance", date: iso(s.date) });
+    reminders.push({ text: `${s.customer ? customerLabel(s.customer) : "Walk-in"} — balance ${Math.round(s.balance).toLocaleString()} Rs due`, type: "balance", date: iso(s.date) });
   });
   lowStock.slice(0, 3).forEach((p) => {
     reminders.push({ text: `Low stock: ${p.name} (${p.stock} left)`, type: "stock", date: "Now" });
@@ -1054,7 +1058,7 @@ export async function getDashboardData(branchId?: string): Promise<DashboardData
     topBrands,
     recentSales: sales.slice(0, 5).map((s) => ({
       id: s.id, invoiceNo: s.invoiceNo, date: iso(s.date),
-      customerName: s.customer?.name ?? "Walk-in", total: s.total,
+      customerName: s.customer ? customerLabel(s.customer) : "Walk-in", total: s.total,
       paymentStatus: paymentStatusLabel[s.paymentStatus],
     })),
     reminders,

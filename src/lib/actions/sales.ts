@@ -82,14 +82,19 @@ const BACKDATE_AFTER_MS = 10 * 60_000;
  * new customer, the same as when the till is online.
  */
 async function customerForOfflineBill(c: { name: string; phone: string }) {
+  const name = c.name.trim();
   const phone = c.phone.trim();
   if (phone) {
-    const same = (await customersWithPhone(phone)).find((x) => sameName(x.name, c.name));
+    // Saved with only a number: the record on that number that has no name yet.
+    const same = (await customersWithPhone(phone)).find((x) => (name ? sameName(x.name, name) : !x.name.trim()));
     if (same) return same.id;
   }
-  const created = await db.customer.create({ data: { name: c.name.trim() || "Customer", phone: phone || null } });
+  const created = await db.customer.create({ data: { name, phone: phone || null } });
   return created.id;
 }
+
+/** A customer can be added with just a number, or just a name. */
+const hasNameOrPhone = (c: { name: string; phone: string }) => !!(c.name.trim() || c.phone.trim());
 
 /**
  * Who took the order vs. who generated the bill, defaulting to the signed-in
@@ -145,7 +150,7 @@ export async function createSale(input: CreateSaleInput) {
     }
 
     let customerId = input.customerId;
-    if (!customerId && input.newCustomer?.name.trim()) customerId = await customerForOfflineBill(input.newCustomer);
+    if (!customerId && input.newCustomer && hasNameOrPhone(input.newCustomer)) customerId = await customerForOfflineBill(input.newCustomer);
 
     const result = await persistSale(
       { ...input, customerId, branchId },
@@ -274,7 +279,7 @@ export async function updateTillSale(input: CreateSaleInput) {
 
   try {
     let customerId = input.customerId ?? null;
-    if (!customerId && input.newCustomer?.name.trim()) customerId = await customerForOfflineBill(input.newCustomer);
+    if (!customerId && input.newCustomer && hasNameOrPhone(input.newCustomer)) customerId = await customerForOfflineBill(input.newCustomer);
 
     const result = await reviseSale(sale.id, {
       items: input.items,
