@@ -80,8 +80,12 @@ export function CustomerFormModal({
           showToast(res.error, "error");
           return;
         }
-        showToast("Customer added", "success");
-        onSaved?.({ id: res.id, ...trimmed });
+        const name = res.name ?? trimmed.name;
+        showToast(
+          res.restored ? `${name} was deleted before — brought back with their past invoices and prescriptions` : "Customer added",
+          "success",
+        );
+        onSaved?.({ id: res.id, ...trimmed, name });
       }
       onClose();
       router.refresh();

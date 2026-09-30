@@ -4,6 +4,7 @@ import type { Prisma } from "@/generated/prisma/client";
 import { trashPrescriptionRows, trashSalePaymentRow } from "@/lib/trash/snapshots";
 import { rxTextColumns, type RxTextColumns } from "@/lib/utils/rx";
 import { paymentFromParts, readSplit, splitTotal, type PaymentPart } from "@/lib/sales/paymentSplit";
+import { settleInvoice, type InvoiceStatus } from "@/lib/sales/settle";
 
 export interface SaleCoreItem {
   // Left out for an item typed in at the till that isn't in the inventory --
@@ -44,6 +45,10 @@ export interface PersistSaleInput {
   paymentSplit?: PaymentPart[];
   paymentType: "Full" | "Advance" | "Balance";
   advanceAmount: number;
+  // What a customer on "Balance" pays now, if anything; the rest stays owed.
+  // Its own field, so an advance typed and then switched away from on an older
+  // till is never counted as money taken.
+  balancePaid?: number;
   invoiceDiscount: number;
   branchId?: string | null;
   // Prescription-job costs (reduce profit, not charged separately to customer)
@@ -100,10 +105,21 @@ export interface PersistSaleMeta {
  */
 export class SaleError extends Error {}
 
-function paymentStatusFor(type: "Full" | "Advance" | "Balance") {
-  if (type === "Full") return "PAID" as const;
-  if (type === "Advance") return "ADVANCE" as const;
-  return "BALANCE" as const;
+function paymentStatusFor(type: "Full" | "Advance" | "Balance"): InvoiceStatus {
+  if (type === "Full") return "PAID";
+  if (type === "Advance") return "ADVANCE";
+  return "BALANCE";
+}
+
+/**
+ * What's paid when the bill is made: everything, the advance, or what a
+ * customer on Balance put down. Never more than the bill -- anything over it
+ * went back as change.
+ */
+function paidAtSale(input: Pick<PersistSaleInput, "paymentType" | "advanceAmount" | "balancePaid">, total: number) {
+  if (input.paymentType === "Full") return total;
+  const amount = input.paymentType === "Advance" ? input.advanceAmount : input.balancePaid ?? 0;
+  return Math.min(total, Math.max(0, Math.round((amount || 0) * 100) / 100));
 }
 
 /**
@@ -240,13 +256,6 @@ async function priceSale(input: {
   };
 }
 
-/** Where an invoice stands once its total or its payments change. */
-function settle(total: number, paid: number) {
-  const balance = Math.max(0, total - paid);
-  const status = balance <= 0 ? ("PAID" as const) : paid > 0 ? ("ADVANCE" as const) : ("BALANCE" as const);
-  return { balance, status };
-}
-
 export async function persistSale(input: PersistSaleInput, meta: PersistSaleMeta) {
   // A retried offline bill: the first attempt got through (maybe the reply was
   // lost), so hand back that sale rather than recording it twice.
@@ -261,9 +270,8 @@ export async function persistSale(input: PersistSaleInput, meta: PersistSaleMeta
     labCharges, fittingCharges, customLensName, customLensPrice, customLensQty, lensCost, totalCost, profit,
   } = priced;
 
-  const paymentStatus = paymentStatusFor(input.paymentType);
-  const paid = input.paymentType === "Full" ? total : input.paymentType === "Advance" ? input.advanceAmount : 0;
-  const balance = Math.max(0, total - paid);
+  const paid = paidAtSale(input, total);
+  const { balance, status: paymentStatus } = settleInvoice(total, paid, paymentStatusFor(input.paymentType));
   const payment = paymentFromParts(input.paymentSplit ?? [], input.paymentMethod);
   if (payment.paymentSplit.length && Math.abs(splitTotal(payment.paymentSplit) - paid) > 0.01) {
     throw new SaleError(
@@ -522,7 +530,9 @@ export interface ReviseSaleInput {
   // What was taken at the counter, when the correction says: an amount, or
   // "full" for whatever settles the bill. Payments received on a later day stay
   // as they are. Left out, the invoice keeps what it has.
-  payment?: { atTill: number | "full" };
+  // `label` is what the till had picked (Advance or Balance) for a bill left
+  // part paid; left out, the invoice keeps the label it has.
+  payment?: { atTill: number | "full"; label?: "ADVANCE" | "BALANCE" };
   // Given with `payment`: how that amount divides between methods. Two or more
   // make a split; none or one means it was all one method.
   paymentSplit?: PaymentPart[];
@@ -614,7 +624,7 @@ export async function reviseSale(saleId: string, input: ReviseSaleInput) {
       `The new total (Rs.${priced.total.toLocaleString()}) is less than the Rs.${sale.paid.toLocaleString()} already paid. Refund the difference through Return & Refund instead.`
     );
   }
-  const { balance, status } = settle(priced.total, paid);
+  const { balance, status } = settleInvoice(priced.total, paid, input.payment?.label ?? sale.paymentStatus);
   const customerId = input.customerId === undefined ? sale.customerId : input.customerId || null;
   if (input.prescriptions?.length && !customerId) throw new SaleError("Select a customer to save the prescription");
   let prescriptionIds: string[] | undefined;
@@ -824,7 +834,7 @@ export async function recordSalePayment(
   }
 
   const paid = sale.paid + amount;
-  const { balance, status } = settle(sale.total, paid);
+  const { balance, status } = settleInvoice(sale.total, paid, sale.paymentStatus);
 
   await db.$transaction(async (tx) => {
     await tx.salePayment.create({
@@ -879,7 +889,7 @@ export async function reviseSalePayment(
     throw new SaleError(`That would take the payments past the ${formatRs(sale.total)} invoice total`);
   }
   if (paid < 0) throw new SaleError("That would make the amount paid less than nothing");
-  const { balance, status } = settle(sale.total, paid);
+  const { balance, status } = settleInvoice(sale.total, paid, sale.paymentStatus);
 
   await db.$transaction(async (tx) => {
     if (change.remove) {

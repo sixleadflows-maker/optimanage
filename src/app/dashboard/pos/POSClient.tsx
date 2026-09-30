@@ -118,7 +118,7 @@ const OLD_BILL_AFTER_MS = 10 * 60_000;
 const PAYMENT_TYPE_HINT = {
   Full: "Customer pays the whole amount now.",
   Advance: "Customer pays part now — the rest is due on collection.",
-  Balance: "Nothing is paid now — the whole amount is due later.",
+  Balance: "Customer pays some now (or nothing) — whatever's left stays on as their balance.",
 } as const;
 
 /** Quantity for a lens: a pair is 2. */
@@ -494,9 +494,9 @@ export function POSClient({
       });
       if (res.ok) {
         const id = res.id;
-        setAddedCustomers((prev) => [...prev, { id, name, phone: newCustomer.phone.trim(), serialNumber: newCustomer.serialNumber.trim() }]);
+        setAddedCustomers((prev) => [...prev, { id, name: res.name ?? name, phone: newCustomer.phone.trim(), serialNumber: newCustomer.serialNumber.trim() }]);
         setSelectedCustomer(id);
-        showToast(`${name} added and selected`, "success");
+        showToast(res.restored ? `${name} was deleted before — brought back and selected` : `${name} added and selected`, "success");
       } else if (res.existing) {
         // Already on file under that phone number — just use them.
         const existing = res.existing;
@@ -538,19 +538,19 @@ export function POSClient({
   const isOldBill = !!billDateValue && Date.now() - billDateValue.getTime() > OLD_BILL_AFTER_MS;
 
   // Split: what's paid now is the parts added up (all of it for Full Payment,
-  // the advance otherwise), and the bill reads "Cash + Card".
+  // the amount put down otherwise), and the bill reads "Cash + Card".
   const isSplit = paymentMethod === SPLIT_METHOD;
   const splitPaid = splitAmountsTotal(splitAmounts);
+  // Advance and Balance both take whatever the customer puts down now; on
+  // Balance that can be nothing. The rest is what they still owe.
   const advancePaid = isSplit ? splitPaid : advanceAmount;
+  const paidNow = paymentType === "Full" ? total : advancePaid;
+  const balanceLeft = Math.max(0, total - paidNow);
   const billPayment = isSplit
     ? paymentFromParts(Object.entries(splitAmounts).map(([method, amount]) => ({ method, amount })), "Cash")
     : { paymentMethod, paymentSplit: [] };
 
-  const choosePaymentType = (pt: "Full" | "Advance" | "Balance") => {
-    setPaymentType(pt);
-    // Nothing is taken now, so there's nothing to split.
-    if (pt === "Balance" && isSplit) setPaymentMethod("Cash");
-  };
+  const choosePaymentType = (pt: "Full" | "Advance" | "Balance") => setPaymentType(pt);
 
   const rxValues = (entry: RxEntry) => ({
     rightSph: num(entry.rightSph), rightCyl: num(entry.rightCyl), rightAxis: num(entry.rightAxis), rightPd: num(entry.rightPd), rightAdd: num(entry.rightAdd),
@@ -749,9 +749,8 @@ export function POSClient({
     const summary = { customerName: customer?.name ?? "Walk-in", itemCount: cart.length, total };
     if (saleResult.provisional && clientRef.current && replaceDraft(clientRef.current, saleInput, summary)) {
       setDrafts(getDrafts());
-      const paid = paymentType === "Full" ? total : paymentType === "Advance" ? advancePaid : 0;
       finish(
-        { ...saleResult, ...shown.staffNames, date: shown.date, paid, balance: Math.max(0, total - paid) },
+        { ...saleResult, ...shown.staffNames, date: shown.date, paid: paidNow, balance: balanceLeft },
         `${saleResult.invoiceNo} updated — it'll be recorded once the connection is back`,
       );
       return;
@@ -804,8 +803,8 @@ export function POSClient({
       );
       return;
     }
-    if (isSplit && paymentType === "Advance" && splitPaid > total + 0.01) {
-      showToast(`The advance is more than the ${formatCurrency(total)} total`, "error");
+    if (paymentType !== "Full" && advancePaid > total + 0.01) {
+      showToast(`${formatCurrency(advancePaid)} is more than the ${formatCurrency(total)} total — choose Full Payment instead`, "error");
       return;
     }
     if (recordRx && !selectedCustomer) {
@@ -830,7 +829,8 @@ export function POSClient({
       paymentMethod: billPayment.paymentMethod,
       paymentSplit: billPayment.paymentSplit.length ? billPayment.paymentSplit : undefined,
       paymentType,
-      advanceAmount: advancePaid,
+      advanceAmount: paymentType === "Advance" ? advancePaid : 0,
+      balancePaid: paymentType === "Balance" ? advancePaid : undefined,
       invoiceDiscount,
       lensProductId: lensProductId || undefined,
       customLensName: useCustomLens ? customLensName.trim() : undefined,
@@ -882,15 +882,14 @@ export function POSClient({
       );
       setDrafts(getDrafts().length ? getDrafts() : [draft]);
       setLastStaff(pickedStaff);
-      const paid = paymentType === "Full" ? total : paymentType === "Advance" ? advancePaid : 0;
       setSaleResult({
         invoiceNo: offlineRef,
         provisional: true,
         orderTakenByName: staffName(orderTakenBy || currentUserId),
         billGeneratedByName: staffName(billGeneratedBy || currentUserId),
         date: formatBillTime(billTime),
-        paid,
-        balance: Math.max(0, total - paid),
+        paid: paidNow,
+        balance: balanceLeft,
       });
       setShowReceipt(true);
       showToast(`No connection — bill ${offlineRef} saved on this computer. It'll be recorded by itself when the connection is back.`, "info");
@@ -988,7 +987,7 @@ export function POSClient({
       total,
       paymentMethod: billPayment.paymentMethod,
       paymentSplit: billPayment.paymentSplit,
-      paymentStatus: PAYMENT_TYPE_LABEL[paymentType],
+      paymentStatus: saleResult.balance <= 0 ? PAYMENT_TYPE_LABEL.Full : PAYMENT_TYPE_LABEL[paymentType],
       paid: saleResult.paid,
       balance: saleResult.balance,
     };
@@ -1704,27 +1703,19 @@ export function POSClient({
                       { id: "Bank Transfer", icon: Building2 },
                       { id: "JazzCash", icon: Smartphone },
                       { id: SPLIT_METHOD, icon: Split },
-                    ].map((pm) => {
-                      const splitOff = pm.id === SPLIT_METHOD && paymentType === "Balance";
-                      return (
-                        <button
-                          key={pm.id}
-                          onClick={() => setPaymentMethod(pm.id)}
-                          disabled={splitOff}
-                          title={
-                            pm.id !== SPLIT_METHOD ? undefined
-                              : splitOff ? "Nothing is paid now, so there's nothing to split"
-                              : "Customer pays part by one method and part by another — e.g. some cash, the rest on card"
-                          }
-                          className={`flex flex-col items-center gap-1 py-2 rounded-xl text-[10px] transition-all disabled:opacity-40 ${
-                            paymentMethod === pm.id ? "bg-primary text-white" : "bg-surface hover:bg-surface-hover"
-                          }`}
-                        >
-                          <pm.icon className="w-3.5 h-3.5" />
-                          {pm.id === "Bank Transfer" ? "Bank" : pm.id}
-                        </button>
-                      );
-                    })}
+                    ].map((pm) => (
+                      <button
+                        key={pm.id}
+                        onClick={() => setPaymentMethod(pm.id)}
+                        title={pm.id === SPLIT_METHOD ? "Customer pays part by one method and part by another — e.g. some cash, the rest on card" : undefined}
+                        className={`flex flex-col items-center gap-1 py-2 rounded-xl text-[10px] transition-all ${
+                          paymentMethod === pm.id ? "bg-primary text-white" : "bg-surface hover:bg-surface-hover"
+                        }`}
+                      >
+                        <pm.icon className="w-3.5 h-3.5" />
+                        {pm.id === "Bank Transfer" ? "Bank" : pm.id}
+                      </button>
+                    ))}
                   </div>
                 </div>
 
@@ -1746,10 +1737,10 @@ export function POSClient({
                   <p className="text-[10px] text-muted-foreground mt-1.5">{PAYMENT_TYPE_HINT[paymentType]}</p>
                 </div>
 
-                {isSplit && paymentType !== "Balance" && (
+                {isSplit && (
                   <div>
                     <p className="text-[10px] font-medium text-muted-foreground mb-1">
-                      {paymentType === "Full" ? "How the total is being paid" : "Advance paid now, by method"}
+                      {paymentType === "Full" ? "How the total is being paid" : paymentType === "Advance" ? "Advance paid now, by method" : "Paid now, by method"}
                     </p>
                     <SplitPaymentFields
                       amounts={splitAmounts}
@@ -1760,22 +1751,43 @@ export function POSClient({
                   </div>
                 )}
 
-                {paymentType === "Advance" && !isSplit && (
+                {paymentType !== "Full" && !isSplit && (
                   <div>
-                    <p className="text-[10px] font-medium text-muted-foreground mb-1">Advance Amount</p>
+                    <p className="text-[10px] font-medium text-muted-foreground mb-1">
+                      {paymentType === "Advance" ? "Advance Amount" : "Amount paid now"}
+                    </p>
                     <input
                       type="number"
+                      min={0}
                       value={advanceAmount || ""}
-                      onChange={(e) => setAdvanceAmount(Number(e.target.value))}
+                      onChange={(e) => setAdvanceAmount(Math.max(0, Number(e.target.value) || 0))}
                       className="w-full px-3 py-2 glass-input text-sm"
-                      placeholder="Enter advance amount"
+                      placeholder={paymentType === "Advance" ? "Enter advance amount" : "e.g. 1500 — leave empty if nothing is paid"}
                     />
-                    {advanceAmount > 0 && total - advanceAmount > 0 && (
-                      <p className="text-[10px] text-muted-foreground mt-1 text-right">
-                        Balance due on collection: <span className="font-semibold text-foreground">{formatCurrency(total - advanceAmount)}</span>
-                      </p>
-                    )}
                   </div>
+                )}
+
+                {paymentType !== "Full" && total > 0 && (
+                  advancePaid > total + 0.01 ? (
+                    <p className="text-[11px] text-destructive">
+                      {`${formatCurrency(advancePaid)} is more than the ${formatCurrency(total)} total — choose Full Payment instead.`}
+                    </p>
+                  ) : (
+                    <div className="rounded-xl bg-surface p-2.5 text-xs space-y-1">
+                      <div className="flex justify-between text-muted-foreground">
+                        <span>Paid now</span><span>{formatCurrency(paidNow)}</span>
+                      </div>
+                      <div className="flex justify-between font-semibold">
+                        <span>{balanceLeft > 0 ? "Balance remaining" : "Nothing left to pay"}</span>
+                        <span className={balanceLeft > 0 ? "text-destructive" : "text-success"}>{formatCurrency(balanceLeft)}</span>
+                      </div>
+                      {balanceLeft > 0 && (
+                        <p className="text-[10px] text-muted-foreground">
+                          Collect it later from Sales &amp; Invoices or the customer&apos;s profile — part payments are fine, whatever&apos;s left stays owed.
+                        </p>
+                      )}
+                    </div>
+                  )
                 )}
 
                 {canBackdate && (

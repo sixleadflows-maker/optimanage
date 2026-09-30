@@ -35,11 +35,12 @@ export function CollectPaymentModal({
   // When the money was actually taken — now, unless it's being written up later.
   const [takenAt, setTakenAt] = useState(() => toLocalInput(new Date()));
   const [saving, setSaving] = useState(false);
+  // Staff can type either figure: what the customer is paying, or what they'll
+  // still owe after it (paying Rs.1,500 of Rs.1,800 leaves Rs.300).
   const [remainingEditable, setRemainingEditable] = useState(false);
-  const [editedRemaining, setEditedRemaining] = useState(sale.balance);
 
   const remaining = Math.max(0, sale.balance - (amount || 0));
-  const displayRemaining = remainingEditable ? editedRemaining : remaining;
+  const setRemaining = (left: number) => setAmount(Math.max(0, Math.min(sale.balance, sale.balance - Math.max(0, left))));
   const takenAtDate = new Date(takenAt);
   const dateProblem =
     !takenAt || Number.isNaN(takenAtDate.getTime()) ? "Enter the date and time"
@@ -106,15 +107,17 @@ export function CollectPaymentModal({
           </div>
           {remainingEditable ? (
             <input
-              type="number"
-              value={editedRemaining}
-              onChange={(e) => setEditedRemaining(Math.max(0, Number(e.target.value)))}
+              type="number" min={0} max={sale.balance} placeholder="0"
+              value={remaining || ""}
+              onChange={(e) => setRemaining(Number(e.target.value) || 0)}
               className="w-full px-3 py-2 glass-input text-sm"
             />
           ) : (
             <div className="p-3 bg-surface rounded-xl flex justify-between items-center">
-              <span className="text-sm font-medium">{formatCurrency(displayRemaining)}</span>
-              <span className="text-[11px] text-muted-foreground">after this payment</span>
+              <span className={`text-sm font-medium ${remaining > 0 ? "text-destructive" : "text-success"}`}>{formatCurrency(remaining)}</span>
+              <span className="text-[11px] text-muted-foreground">
+                {remaining > 0 ? "still owed after this payment" : "paid in full after this"}
+              </span>
             </div>
           )}
         </div>

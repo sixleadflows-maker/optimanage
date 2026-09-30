@@ -35,6 +35,8 @@ export interface CreateSaleInput {
   paymentSplit?: PaymentPart[];
   paymentType: "Full" | "Advance" | "Balance";
   advanceAmount: number;
+  // Paid now on a "Balance" bill (can be nothing); the rest stays owed.
+  balancePaid?: number;
   invoiceDiscount: number;
   branchId?: string;
   // Prescription-job costs (reduce profit, not charged separately to customer)
@@ -285,7 +287,11 @@ export async function updateTillSale(input: CreateSaleInput) {
       customLensQty: input.customLensQty,
       lensColor: input.lensColor,
       lensDescription: input.lensDescription,
-      payment: { atTill: input.paymentType === "Full" ? "full" : input.paymentType === "Advance" ? input.advanceAmount : 0 },
+      payment: input.paymentType === "Full"
+        ? { atTill: "full" }
+        : input.paymentType === "Advance"
+          ? { atTill: input.advanceAmount, label: "ADVANCE" }
+          : { atTill: input.balancePaid ?? 0, label: "BALANCE" },
       paymentSplit: input.paymentSplit ?? [],
       prescriptions: input.prescriptions ?? [],
       revisedById: session.user.id,

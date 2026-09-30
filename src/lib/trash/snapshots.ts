@@ -2,6 +2,7 @@ import { db } from "@/lib/db";
 import type { Prisma } from "@/generated/prisma/client";
 import type { SnapshotTrashKind } from "@/lib/constants";
 import { formatRxPower } from "@/lib/utils/rx";
+import { settleInvoice } from "@/lib/sales/settle";
 
 /**
  * Trash for records that are really removed when deleted.
@@ -352,8 +353,7 @@ async function restorePayment(tx: Tx, data: Row) {
     );
   }
   const paid = Math.round((sale.paid + amount) * 100) / 100;
-  const balance = Math.max(0, sale.total - paid);
-  const paymentStatus = balance <= 0 ? ("PAID" as const) : paid > 0 ? ("ADVANCE" as const) : ("BALANCE" as const);
+  const { balance, status: paymentStatus } = settleInvoice(sale.total, paid, sale.paymentStatus);
   await tx.salePayment.create({ data: payment as Prisma.SalePaymentUncheckedCreateInput });
   await tx.sale.update({ where: { id: sale.id }, data: { paid, balance, paymentStatus } });
 }

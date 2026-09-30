@@ -68,7 +68,9 @@ export async function searchCustomers(query: string): Promise<CustomerSearchHit[
 }
 
 export type CreateCustomerResult =
-  | { ok: true; id: string }
+  // `restored` is set when the number belonged to a deleted customer, who has
+  // been brought back instead of adding a second record.
+  | { ok: true; id: string; restored?: boolean; name?: string }
   // `existing` is set when the phone number already belongs to a customer, so
   // the till can simply select them instead.
   | { ok: false; error: string; existing?: { id: string; name: string; phone: string } };
@@ -82,10 +84,24 @@ export async function createCustomer(input: CustomerInput): Promise<CreateCustom
     // A customer deleted for good no longer holds the number.
     const existing = await customerHoldingPhone(phone);
     if (existing && !existing.active) {
-      return {
-        ok: false,
-        error: `${existing.name} already has this phone number and is in the Trash — restore them from there, or delete them there for good first`,
-      };
+      // Deleted, but it's their number, so it's them back again. Bring them back
+      // with what was just typed rather than stopping staff mid-order: their
+      // past invoices and prescriptions come back with them.
+      const back = await db.customer.update({
+        where: { id: existing.id },
+        data: {
+          active: true,
+          deletedAt: null,
+          name: input.name.trim() || existing.name,
+          ...(input.serialNumber.trim() ? { serialNumber: input.serialNumber.trim() } : {}),
+          ...(input.email.trim() ? { email: input.email.trim() } : {}),
+          ...(input.address.trim() ? { address: input.address.trim() } : {}),
+          ...(input.lastVisit ? { lastVisit: new Date(input.lastVisit) } : {}),
+        },
+      });
+      revalidatePath("/dashboard/customers");
+      revalidatePath("/dashboard/trash");
+      return { ok: true, id: back.id, restored: true, name: back.name };
     }
     if (existing) {
       return {
@@ -117,12 +133,10 @@ export async function updateCustomer(id: string, input: CustomerInput) {
   if (phone) {
     const existing = await customerHoldingPhone(phone);
     if (existing && existing.id !== id) {
-      return {
-        ok: false as const,
-        error: existing.active
-          ? `${existing.name} already has this phone number`
-          : `${existing.name} already has this phone number but is in the Trash — restore or delete them there first`,
-      };
+      if (existing.active) return { ok: false as const, error: `${existing.name} already has this phone number` };
+      // A deleted customer doesn't get to keep the number from someone on file:
+      // it moves across, and the deleted record simply has no phone.
+      await db.customer.update({ where: { id: existing.id }, data: { phone: null } });
     }
   }
 

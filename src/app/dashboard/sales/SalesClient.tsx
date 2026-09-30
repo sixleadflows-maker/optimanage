@@ -4,9 +4,8 @@ import { useState, useMemo, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import type { SaleView } from "@/lib/data";
 import { formatCurrency, formatDate } from "@/lib/utils/format";
-import { Search, Download, Receipt, RotateCcw, X, Loader2, Trash2, Eye, Printer, MessageCircle, CalendarRange, Wallet, Pencil, Undo2, WifiOff, History, Glasses, Plus } from "lucide-react";
+import { Search, Download, Receipt, RotateCcw, X, Loader2, Trash2, Eye, Printer, MessageCircle, CalendarRange, Wallet, Pencil, Glasses } from "lucide-react";
 import Link from "next/link";
-import { formatEyeValue } from "@/lib/utils/rx";
 import { useApp } from "@/lib/context";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { PrintPortal } from "@/components/ui/PrintPortal";
@@ -16,6 +15,7 @@ import { updateOnlineOrderStatus, deleteSale, type OnlineOrderStatusValue } from
 import { PAYMENT_STATUS, paymentStatusChipClass } from "@/lib/constants";
 import { primaryMethod } from "@/lib/sales/paymentSplit";
 import { ThermalReceipt, A4Invoice, invoiceFromSale, type ShopDetails } from "@/components/invoice/InvoiceDocuments";
+import { InvoiceDetails } from "@/components/invoice/InvoiceDetails";
 import { CollectPaymentModal, EditInvoiceModal, EditPaymentModal, type EditorCustomer, type EditorStaff } from "./InvoiceEditor";
 
 const REFUND_METHODS = ["Cash", "Card", "Bank Transfer", "JazzCash"];
@@ -32,175 +32,6 @@ const ONLINE_ORDER_STATUSES: { value: OnlineOrderStatusValue; label: string }[] 
 function localDay(isoDateTime: string) {
   const d = new Date(isoDateTime);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
-const when = (iso: string) =>
-  new Date(iso).toLocaleString("en-PK", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
-
-/** Everything that happened to an invoice after it was rung up, with times. */
-function InvoiceHistory({
-  sale, canUndoReturn, onUndoReturn, canEditPayments, onEditPayment, onEditReturn,
-}: {
-  sale: SaleView;
-  canUndoReturn: boolean;
-  onUndoReturn: (ret: SaleView["returns"][number]) => void;
-  canEditPayments: boolean;
-  onEditPayment: (payment: SaleView["payments"][number]) => void;
-  onEditReturn: (ret: SaleView["returns"][number]) => void;
-}) {
-  const laterTotal = sale.payments.reduce((sum, p) => sum + p.amount, 0);
-  const rxFields = ["Sph", "Cyl", "Axis", "Pd", "Add"] as const;
-  const takenAtTill = sale.paid - laterTotal;
-  // An invoice keyed in well after its own date is an old record from paper.
-  const enteredLater = new Date(sale.enteredAt).getTime() - new Date(sale.dateTime).getTime() > 60 * 60_000 && !sale.offlineRef;
-  // Every invoice shows this card: its prescriptions can always be added or corrected.
-
-  return (
-    <div className="mt-4 rounded-xl border border-border p-3 text-xs space-y-3">
-      <p className="font-semibold flex items-center gap-1.5"><History className="w-3.5 h-3.5 text-primary" /> Details</p>
-
-      <div>
-        <p className="text-muted-foreground mb-1">Items Purchased</p>
-        <div className="space-y-1">
-          {sale.items.map((item) => (
-            <div key={item.id} className="flex justify-between gap-3">
-              <span className="min-w-0">
-                {item.productName}
-                {item.quantity > 1 && <span className="text-muted-foreground"> × {item.quantity}</span>}
-                {item.returnedQuantity > 0 && <span className="text-destructive text-[10px]"> (returned {item.returnedQuantity})</span>}
-              </span>
-              <span className="font-medium flex-shrink-0">{formatCurrency(item.quantity * item.unitPrice - item.discount)}</span>
-            </div>
-          ))}
-          {sale.discount > 0 && (
-            <div className="flex justify-between gap-3 border-t border-border pt-1">
-              <span className="text-muted-foreground">Invoice Discount</span>
-              <span className="font-medium text-destructive">-{formatCurrency(sale.discount)}</span>
-            </div>
-          )}
-          {(sale.labCharges > 0 || sale.fittingCharges > 0) && (
-            <div className="flex justify-between gap-3 text-muted-foreground">
-              {sale.labCharges > 0 && <span>Lab Charges: {formatCurrency(sale.labCharges)}</span>}
-              {sale.fittingCharges > 0 && <span>Fitting Charges: {formatCurrency(sale.fittingCharges)}</span>}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {sale.offlineRef && (
-        <p className="flex items-start gap-1.5 text-muted-foreground">
-          <WifiOff className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
-          Made while the till was offline — the customer&apos;s bill shows {sale.offlineRef}. Synced {when(sale.enteredAt)}.
-        </p>
-      )}
-      {enteredLater && (
-        <p className="text-muted-foreground">
-          Old invoice dated {when(sale.dateTime)}, entered {when(sale.enteredAt)}
-          {sale.stockDeducted ? "." : " without taking items out of stock."}
-        </p>
-      )}
-
-      {sale.payments.length > 0 && (
-        <div>
-          <p className="text-muted-foreground mb-1">Payments</p>
-          <div className="space-y-1">
-            {(sale.paymentSplit.length ? sale.paymentSplit : [{ method: sale.paymentMethod, amount: takenAtTill }]).map((p) => (
-              <div key={p.method} className="flex justify-between gap-3">
-                <span>{when(sale.dateTime)} · {p.method} · at the till</span>
-                <span className="font-medium">{formatCurrency(p.amount)}</span>
-              </div>
-            ))}
-            {sale.payments.map((p) => (
-              <div key={p.id} className="flex justify-between gap-3 items-start">
-                <span className="min-w-0">
-                  {when(p.date)} · {p.method}
-                  {p.receivedByName && ` · ${p.receivedByName}`}
-                  {p.note && <span className="text-muted-foreground"> · {p.note}</span>}
-                </span>
-                <span className="flex items-center gap-1.5 flex-shrink-0">
-                  <span className="font-medium">{formatCurrency(p.amount)}</span>
-                  {canEditPayments && (
-                    <button onClick={() => onEditPayment(p)} title="Correct this payment"
-                      className="p-0.5 rounded hover:bg-surface-hover cursor-pointer">
-                      <Pencil className="w-3 h-3 text-muted-foreground" />
-                    </button>
-                  )}
-                </span>
-              </div>
-            ))}
-            <div className="flex justify-between gap-3 border-t border-border pt-1 font-semibold">
-              <span>{sale.balance > 0 ? "Still owed" : "Paid in full"}</span>
-              <span>{formatCurrency(sale.balance > 0 ? sale.balance : sale.paid)}</span>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {(
-        <div>
-          <p className="text-muted-foreground mb-1 flex items-center gap-1.5"><Glasses className="w-3.5 h-3.5" /> Prescriptions</p>
-          <div className="space-y-1.5">
-            {sale.prescriptions.map((rx) => (
-              <div key={rx.id} className="flex items-start justify-between gap-3">
-                <span className="min-w-0">
-                  {formatDate(rx.date)}
-                  {rx.label && <span className="block text-primary text-[10px] font-medium">{rx.label}</span>}
-                  <span className="block text-muted-foreground">
-                    {`OD ${rxFields.map((f) => formatEyeValue(f, rx.rightEye)).join(" / ")}`}
-                  </span>
-                  <span className="block text-muted-foreground">
-                    {`OS ${rxFields.map((f) => formatEyeValue(f, rx.leftEye)).join(" / ")}`}
-                  </span>
-                </span>
-                <Link href={`/dashboard/prescriptions?edit=${rx.id}`} title="Edit prescription"
-                  className="flex items-center gap-1 px-2 py-1 rounded-lg bg-surface hover:bg-surface-hover font-medium flex-shrink-0">
-                  <Pencil className="w-3 h-3" /> Edit
-                </Link>
-              </div>
-            ))}
-            {sale.prescriptions.length === 0 && (
-              <p className="text-muted-foreground">None on this invoice yet — the eye test can be added later.</p>
-            )}
-            <Link href={`/dashboard/prescriptions?addTo=${sale.id}`}
-              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-primary/10 text-primary font-medium">
-              <Plus className="w-3 h-3" /> Add prescription
-            </Link>
-            {!sale.customerId && (
-              <p className="text-muted-foreground">Walk-in invoice — you&apos;ll pick or add the customer as you add it, and the invoice goes onto them.</p>
-            )}
-          </div>
-        </div>
-      )}
-
-      {sale.returns.length > 0 && (
-        <div>
-          <p className="text-muted-foreground mb-1">Returns</p>
-          <div className="space-y-1.5">
-            {sale.returns.map((r) => (
-              <div key={r.id} className="flex items-center justify-between gap-3">
-                <span>
-                  <span className="font-medium">{r.returnNo}</span> · {when(r.date)} · refund {formatCurrency(r.totalRefund)}
-                  {r.reason && <span className="text-muted-foreground"> · {r.reason}</span>}
-                </span>
-                {canUndoReturn && (
-                  <span className="flex items-center gap-1 flex-shrink-0">
-                    <button onClick={() => onEditReturn(r)}
-                      className="flex items-center gap-1 px-2 py-1 rounded-lg bg-surface hover:bg-surface-hover font-medium cursor-pointer">
-                      <Pencil className="w-3 h-3" /> Edit
-                    </button>
-                    <button onClick={() => onUndoReturn(r)}
-                      className="flex items-center gap-1 px-2 py-1 rounded-lg bg-surface hover:bg-surface-hover font-medium cursor-pointer">
-                      <Undo2 className="w-3 h-3" /> Undo
-                    </button>
-                  </span>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
 }
 
 export function SalesClient({
@@ -640,17 +471,19 @@ export function SalesClient({
                 : <A4Invoice invoice={viewingInvoice} shop={shop} />}
             </div>
 
-            <InvoiceHistory
-              sale={viewingSale}
-              canUndoReturn={canEdit}
-              onUndoReturn={(ret) => setUndoingReturn({ sale: viewingSale, ret })}
-              canEditPayments={canEdit}
-              onEditPayment={(payment) => setEditingPayment({ sale: viewingSale, payment })}
-              onEditReturn={(ret) => {
-                setEditingReturn(ret);
-                setReturnForm({ reason: ret.reason, refundMethod: "Cash", totalRefund: ret.totalRefund });
-              }}
-            />
+            <div className="mt-4">
+              <InvoiceDetails
+                sale={viewingSale}
+                canUndoReturn={canEdit}
+                onUndoReturn={(ret) => setUndoingReturn({ sale: viewingSale, ret })}
+                canEditPayments={canEdit}
+                onEditPayment={(payment) => setEditingPayment({ sale: viewingSale, payment })}
+                onEditReturn={(ret) => {
+                  setEditingReturn(ret);
+                  setReturnForm({ reason: ret.reason, refundMethod: "Cash", totalRefund: ret.totalRefund });
+                }}
+              />
+            </div>
 
             <div className="flex gap-2 mt-4 flex-wrap">
               <button onClick={() => setPrintJob("thermal")} disabled={printJob !== null}
