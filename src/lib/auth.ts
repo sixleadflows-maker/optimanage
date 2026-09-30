@@ -46,9 +46,16 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) return null;
 
-        const user = await db.user.findUnique({
-          where: { email: credentials.email as string },
-        });
+        // Capitals in an email don't matter to anyone typing it: an account
+        // saved as "Talal@…" (a phone keyboard capitalises the first letter)
+        // must still sign in as "talal@…". The exact spelling wins if two
+        // accounts differ only by capitals.
+        const email = (credentials.email as string).trim();
+        let user = await db.user.findUnique({ where: { email } });
+        if (!user) {
+          const alike = await db.user.findMany({ where: { email: { equals: email, mode: "insensitive" } }, take: 2 });
+          if (alike.length === 1) user = alike[0];
+        }
 
         if (!user || !user.active) return null;
 
