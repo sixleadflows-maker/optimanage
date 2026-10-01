@@ -78,6 +78,38 @@ export async function refundCustomerCredit(input: CreditInput): Promise<Result> 
   return { ok: true, held: await creditHeld(input.customerId) };
 }
 
+/**
+ * Corrects an advance paid in, or a refund of one: amount, how, when, note.
+ * Owner or manager, like the other money corrections. What's been used or
+ * handed back already can't be taken away again: a received advance can't go
+ * below that, and a refund can't be more than there is.
+ */
+export async function updateCustomerCredit(id: string, input: Omit<CreditInput, "customerId">): Promise<Result> {
+  const session = await auth();
+  if (!session?.user) return { ok: false, error: "You've been signed out — sign in again" };
+  if (session.user.role === "CASHIER") return { ok: false, error: "Only managers and owners can correct an advance entry" };
+
+  const entry = await db.customerCredit.findUnique({ where: { id } });
+  if (!entry) return { ok: false, error: "This entry has been deleted" };
+  const c = await checked({ ...input, customerId: entry.customerId });
+  if (!c.ok) return c;
+
+  const paidIn = entry.amount >= 0;
+  const amount = paidIn ? c.amount : -c.amount;
+  const held = await creditHeld(entry.customerId);
+  if (held - entry.amount + amount < -0.01) {
+    return {
+      ok: false,
+      error: paidIn
+        ? `${rs(entry.amount - held)} of this advance has already been used or refunded, so it can't go below that`
+        : `Only ${rs(held - entry.amount)} is held, so the refund can't be more than that`,
+    };
+  }
+  await db.customerCredit.update({ where: { id }, data: { amount, method: input.method, date: c.date, note: c.note } });
+  refresh(entry.customerId);
+  return { ok: true, held: await creditHeld(entry.customerId) };
+}
+
 // Removing an entry rewrites a day's cash, so it sits with the other money
 // corrections: owner or manager. It goes to the Trash, not gone for good.
 export async function deleteCustomerCredit(id: string): Promise<Result> {

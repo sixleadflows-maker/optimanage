@@ -158,6 +158,12 @@ export function CustomerProfileClient({
             held={customer.credit}
             history={creditHistory}
             canManage={canEdit}
+            onEditUse={(paymentId) => {
+              // A use of the advance is a payment on an invoice: corrected there.
+              const sale = sales.find((s) => s.payments.some((p) => p.id === paymentId));
+              const payment = sale?.payments.find((p) => p.id === paymentId);
+              if (sale && payment) setEditingPayment({ sale, payment });
+            }}
           />
 
           {sharingNumber.length > 0 && (
@@ -344,6 +350,7 @@ export function CustomerProfileClient({
                             title="Everything on this invoice"
                             canEditPayments={canEdit}
                             onEditPayment={(payment) => setEditingPayment({ sale, payment })}
+                            onEditTill={sale.source === "POS" ? () => setEditingSale(sale) : undefined}
                           />
                         </div>
                       )}

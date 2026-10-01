@@ -474,6 +474,7 @@ export function SalesClient({
                 onUndoReturn={(ret) => setUndoingReturn({ sale: viewingSale, ret })}
                 canEditPayments={canEdit}
                 onEditPayment={(payment) => setEditingPayment({ sale: viewingSale, payment })}
+                onEditTill={viewingSale.source === "POS" ? () => { const sale = viewingSale; setViewingSale(null); setEditingSale(sale); } : undefined}
                 onEditReturn={(ret) => {
                   setEditingReturn(ret);
                   setReturnForm({ reason: ret.reason, refundMethod: "Cash", totalRefund: ret.totalRefund });

@@ -773,6 +773,21 @@ export function EditPaymentModal({
   const [takenAt, setTakenAt] = useState(() => toLocalInput(new Date(payment.date)));
   const [saving, setSaving] = useState(false);
   const [removing, setRemoving] = useState(false);
+  // The customer's advance: a payment can be moved onto it, or off it (back to
+  // cash, card...). What this payment already took from it counts as available.
+  const [creditHeld, setCreditHeld] = useState(0);
+  const [creditKnown, setCreditKnown] = useState(!sale.customerId);
+  useEffect(() => {
+    if (!sale.customerId) return;
+    let stale = false;
+    customerCreditHeld(sale.customerId)
+      .then((held) => { if (!stale) { setCreditHeld(held); setCreditKnown(true); } })
+      .catch(() => {});
+    return () => { stale = true; };
+  }, [sale.customerId]);
+  const wasCredit = payment.method === CREDIT_METHOD;
+  const creditAvailable = creditHeld + (wasCredit ? payment.amount : 0);
+  const fromCredit = method === CREDIT_METHOD;
 
   const takenAtDate = new Date(takenAt);
   const otherPayments = sale.paid - payment.amount;
@@ -782,6 +797,7 @@ export function EditPaymentModal({
     : takenAtDate.getTime() > Date.now() + 60_000 ? "That's in the future"
     : takenAtDate.getTime() < new Date(sale.dateTime).getTime() - 60_000 ? "That's before the invoice was made"
     : otherPayments + amount > sale.total + 0.01 ? `That takes the payments past the ${formatCurrency(sale.total)} total`
+    : fromCredit && creditKnown && amount > creditAvailable + 0.01 ? `Only ${formatCurrency(creditAvailable)} of advance is held for this customer`
     : "";
 
   const submit = async (remove = false) => {
@@ -822,20 +838,29 @@ export function EditPaymentModal({
           className="w-full px-3 py-2.5 glass-input text-sm" />
 
         <label className="text-xs font-medium text-muted-foreground mb-1.5 block mt-3">Paid by</label>
-        {payment.method === CREDIT_METHOD ? (
-          <p className="text-xs p-2.5 rounded-xl bg-success/10 text-success">
-            From the customer&apos;s advance. Lower or remove it and that money goes back onto their advance.
-          </p>
-        ) : (
-          <div className="grid grid-cols-4 gap-1.5">
-            {PAYMENT_METHODS.map((m) => (
-              <button key={m} onClick={() => setMethod(m)}
-                className={`py-2 rounded-xl text-[11px] font-medium transition-all ${method === m ? "bg-primary text-white" : "bg-surface hover:bg-surface-hover"}`}>
-                {m}
-              </button>
-            ))}
-          </div>
+        <div className="grid grid-cols-4 gap-1.5">
+          {PAYMENT_METHODS.map((m) => (
+            <button key={m} onClick={() => setMethod(m)}
+              className={`py-2 rounded-xl text-[11px] font-medium transition-all cursor-pointer ${method === m ? "bg-primary text-white" : "bg-surface hover:bg-surface-hover"}`}>
+              {m}
+            </button>
+          ))}
+        </div>
+        {(creditAvailable > 0 || wasCredit) && (
+          <button onClick={() => setMethod(CREDIT_METHOD)}
+            className={`w-full mt-1.5 py-2 rounded-xl text-[11px] font-medium transition-all cursor-pointer ${fromCredit ? "bg-success text-white" : "bg-success/10 text-success hover:bg-success/15"}`}>
+            {`From their advance — ${formatCurrency(creditAvailable)} available`}
+          </button>
         )}
+        {fromCredit ? (
+          <p className="text-[10px] text-muted-foreground mt-1">
+            Comes out of the advance they paid in, so no money changes hands. If they actually paid cash or card, pick that instead and the advance gets it back.
+          </p>
+        ) : wasCredit ? (
+          <p className="text-[10px] text-muted-foreground mt-1">
+            {`This was paid from their advance. Saving it as ${method} puts ${formatCurrency(payment.amount)} back onto the advance and counts the money as ${method} on the day above.`}
+          </p>
+        ) : null}
 
         <label className="text-xs font-medium text-muted-foreground mb-1.5 block mt-3">Received on</label>
         <input type="datetime-local" value={takenAt} onChange={(e) => setTakenAt(e.target.value)}

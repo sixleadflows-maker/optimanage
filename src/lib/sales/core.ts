@@ -922,17 +922,17 @@ export async function reviseSalePayment(
 
   const amount = change.remove ? 0 : Math.round((change.amount ?? payment.amount) * 100) / 100;
   const date = change.date ?? payment.date;
-  // A payment out of the customer's advance stays one: only its amount, date
-  // and note can change, and it can't take more than they have.
+  // Any payment can be moved onto or off the customer's advance. Paid from
+  // it, it can't take more than they have -- what this payment already took
+  // counts as theirs again. Moved off it, that money goes back onto the advance.
   const fromCredit = payment.method === CREDIT_METHOD;
+  const method = change.method ?? payment.method;
   if (!change.remove) {
-    if (!fromCredit && change.method === CREDIT_METHOD) {
-      throw new SaleError("To pay this from the customer's advance, remove this payment and receive it again as From advance");
-    }
-    if (fromCredit && amount > payment.amount) {
-      const held = sale.customerId ? await creditHeld(sale.customerId) : 0;
-      if (amount - payment.amount > held + 0.01) {
-        throw new SaleError(`Only ${formatRs(held)} more of advance is held for this customer`);
+    if (method === CREDIT_METHOD) {
+      if (!sale.customerId) throw new SaleError("This invoice has no customer, so there's no advance to pay it from");
+      const available = (await creditHeld(sale.customerId)) + (fromCredit ? payment.amount : 0);
+      if (amount > available + 0.01) {
+        throw new SaleError(available > 0 ? `Only ${formatRs(available)} of advance is held for this customer` : "This customer has no advance held");
       }
     }
     if (!(amount > 0)) throw new SaleError("Enter the amount received");
@@ -956,7 +956,7 @@ export async function reviseSalePayment(
     } else {
       await tx.salePayment.update({
         where: { id: paymentId },
-        data: { amount, date, method: fromCredit ? CREDIT_METHOD : change.method ?? payment.method, note: (change.note ?? payment.note).trim() },
+        data: { amount, date, method, note: (change.note ?? payment.note).trim() },
       });
     }
     await tx.sale.update({ where: { id: sale.id }, data: { paid, balance, paymentStatus: status } });

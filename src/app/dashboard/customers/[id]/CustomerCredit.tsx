@@ -4,12 +4,12 @@ import { useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import type { CreditEntryView } from "@/lib/data";
-import { addCustomerCredit, deleteCustomerCredit, refundCustomerCredit } from "@/lib/actions/credit";
+import { addCustomerCredit, deleteCustomerCredit, refundCustomerCredit, updateCustomerCredit } from "@/lib/actions/credit";
 import { PAYMENT_METHODS } from "@/lib/constants";
 import { formatCurrency, toLocalInput } from "@/lib/utils/format";
 import { useApp } from "@/lib/context";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
-import { Loader2, PiggyBank, Plus, Trash2, Undo2, X } from "lucide-react";
+import { Loader2, Pencil, PiggyBank, Plus, Trash2, Undo2, X } from "lucide-react";
 
 const when = (iso: string) =>
   new Date(iso).toLocaleString("en-PK", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -22,18 +22,22 @@ const KIND_LABEL = { in: "Received", used: "Used", refund: "Refunded" } as const
  * Bills are paid from it at the till or from Receive payment.
  */
 export function CustomerCredit({
-  customerId, customerLabel, held, history, canManage,
+  customerId, customerLabel, held, history, canManage, onEditUse,
 }: {
   customerId: string;
   customerLabel: string;
   held: number;
   history: CreditEntryView[];
-  // Owners and managers can remove an entry made by mistake.
+  // Owners and managers can correct or remove an entry made by mistake.
   canManage: boolean;
+  // A use of the advance is a payment on an invoice; this opens that payment.
+  onEditUse?: (paymentId: string) => void;
 }) {
   const { showToast } = useApp();
   const router = useRouter();
-  const [form, setForm] = useState<"add" | "refund" | null>(null);
+  const [form, setForm] = useState<"add" | "refund" | "edit" | null>(null);
+  // The entry being corrected, when form is "edit".
+  const [editing, setEditing] = useState<CreditEntryView | null>(null);
   const [amount, setAmount] = useState(0);
   const [method, setMethod] = useState<string>("Cash");
   const [at, setAt] = useState("");
@@ -48,13 +52,26 @@ export function CustomerCredit({
     setMethod("Cash");
     setAt(toLocalInput(new Date()));
     setNote("");
+    setEditing(null);
     setForm(kind);
   };
+
+  const openEdit = (entry: CreditEntryView) => {
+    setAmount(Math.abs(entry.amount));
+    setMethod(entry.method);
+    setAt(toLocalInput(new Date(entry.date)));
+    setNote(entry.note);
+    setEditing(entry);
+    setForm("edit");
+  };
+  // A refund being corrected can go up to what's held plus what it already handed back.
+  const refundLimit = form === "edit" && editing?.kind === "refund" ? held + Math.abs(editing.amount) : held;
+  const isRefund = form === "refund" || (form === "edit" && editing?.kind === "refund");
 
   const atDate = new Date(at);
   const problem =
     !(amount > 0) ? "Enter the amount"
-    : form === "refund" && amount > held + 0.01 ? `Only ${formatCurrency(held)} is held`
+    : isRefund && amount > refundLimit + 0.01 ? `Only ${formatCurrency(refundLimit)} is held`
     : !at || Number.isNaN(atDate.getTime()) ? "Enter the date and time"
     : "";
 
@@ -63,12 +80,16 @@ export function CustomerCredit({
     setSaving(true);
     try {
       const input = { customerId, amount, method, date: atDate.toISOString(), note };
-      const res = form === "add" ? await addCustomerCredit(input) : await refundCustomerCredit(input);
+      const res = form === "edit" && editing
+        ? await updateCustomerCredit(editing.id, input)
+        : form === "add" ? await addCustomerCredit(input) : await refundCustomerCredit(input);
       if (!res.ok) { showToast(res.error, "error"); return; }
       showToast(
-        form === "add"
-          ? `${formatCurrency(amount)} advance received — ${formatCurrency(res.held)} now held for ${customerLabel}`
-          : `${formatCurrency(amount)} handed back — ${res.held > 0 ? `${formatCurrency(res.held)} still held` : "nothing held now"}`,
+        form === "edit"
+          ? `Entry corrected — ${formatCurrency(res.held)} now held for ${customerLabel}`
+          : form === "add"
+            ? `${formatCurrency(amount)} advance received — ${formatCurrency(res.held)} now held for ${customerLabel}`
+            : `${formatCurrency(amount)} handed back — ${res.held > 0 ? `${formatCurrency(res.held)} still held` : "nothing held now"}`,
         "success",
       );
       setForm(null);
@@ -132,6 +153,13 @@ export function CustomerCredit({
                 <span className={`font-semibold ${e.amount > 0 ? "text-success" : "text-muted-foreground"}`}>
                   {`${e.amount > 0 ? "+" : "−"}${formatCurrency(Math.abs(e.amount))}`}
                 </span>
+                {canManage && (e.kind !== "used" || onEditUse) && (
+                  <button onClick={() => (e.kind === "used" ? onEditUse?.(e.id) : openEdit(e))}
+                    title={e.kind === "used" ? "Correct this payment from the advance" : "Correct this entry"}
+                    className="p-1 rounded-md hover:bg-surface-hover cursor-pointer">
+                    <Pencil className="w-3 h-3 text-muted-foreground" />
+                  </button>
+                )}
                 {canManage && e.kind !== "used" && (
                   <button onClick={() => setRemoving(e)} title="Entered by mistake — remove"
                     className="p-1 rounded-md hover:bg-surface-hover cursor-pointer">
@@ -155,13 +183,17 @@ export function CustomerCredit({
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setForm(null)}>
           <div className="glass-modal p-6 w-full max-w-md animate-rise text-left" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-1">
-              <h3 className="text-lg font-semibold">{form === "add" ? "Add advance" : "Refund advance"}</h3>
+              <h3 className="text-lg font-semibold">
+                {form === "edit" ? (isRefund ? "Correct refund" : "Correct advance") : form === "add" ? "Add advance" : "Refund advance"}
+              </h3>
               <button onClick={() => setForm(null)} className="cursor-pointer"><X className="w-5 h-5" /></button>
             </div>
             <p className="text-xs text-muted-foreground mb-4">
-              {form === "add"
-                ? `${customerLabel} is paying money ahead. It counts in today's takings and waits here until a bill uses it.`
-                : `Handing money back to ${customerLabel}. ${formatCurrency(held)} is held now.`}
+              {form === "edit"
+                ? `Change the amount, how, when or the note. The day's cash follows the change. ${formatCurrency(held)} is held now.`
+                : form === "add"
+                  ? `${customerLabel} is paying money ahead. It counts in today's takings and waits here until a bill uses it.`
+                  : `Handing money back to ${customerLabel}. ${formatCurrency(held)} is held now.`}
             </p>
 
             <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Amount</label>
@@ -169,15 +201,15 @@ export function CustomerCredit({
               <input type="number" min={0} value={amount || ""} autoFocus
                 onChange={(e) => setAmount(Math.max(0, Number(e.target.value) || 0))}
                 className="flex-1 px-3 py-2.5 glass-input text-sm" />
-              {form === "refund" && (
-                <button onClick={() => setAmount(held)}
+              {isRefund && (
+                <button onClick={() => setAmount(refundLimit)}
                   className="px-3 py-2.5 rounded-xl bg-surface hover:bg-surface-hover text-xs font-medium whitespace-nowrap cursor-pointer">
                   All of it
                 </button>
               )}
             </div>
 
-            <label className="text-xs font-medium text-muted-foreground mb-1.5 block mt-3">{form === "add" ? "Paid by" : "Handed back by"}</label>
+            <label className="text-xs font-medium text-muted-foreground mb-1.5 block mt-3">{isRefund ? "Handed back by" : "Paid by"}</label>
             <div className="grid grid-cols-4 gap-1.5">
               {PAYMENT_METHODS.map((m) => (
                 <button key={m} onClick={() => setMethod(m)}
@@ -202,7 +234,7 @@ export function CustomerCredit({
               <button onClick={save} disabled={saving || !!problem}
                 className="flex-1 py-2.5 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-primary-hover transition-colors disabled:opacity-60 flex items-center justify-center gap-2 cursor-pointer">
                 {saving && <Loader2 className="w-4 h-4 animate-spin" />}
-                {form === "add" ? `Receive ${amount > 0 ? formatCurrency(amount) : ""}` : `Hand back ${amount > 0 ? formatCurrency(amount) : ""}`}
+                {form === "edit" ? "Save changes" : form === "add" ? `Receive ${amount > 0 ? formatCurrency(amount) : ""}` : `Hand back ${amount > 0 ? formatCurrency(amount) : ""}`}
               </button>
             </div>
           </div>

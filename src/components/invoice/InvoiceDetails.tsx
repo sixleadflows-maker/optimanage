@@ -69,13 +69,15 @@ function RxCard({ rx }: { rx: Rx }) {
  * history, so both read the same.
  */
 export function InvoiceDetails({
-  sale, canUndoReturn = false, onUndoReturn, canEditPayments = false, onEditPayment, onEditReturn, title = "Details",
+  sale, canUndoReturn = false, onUndoReturn, canEditPayments = false, onEditPayment, onEditTill, onEditReturn, title = "Details",
 }: {
   sale: SaleView;
   canUndoReturn?: boolean;
   onUndoReturn?: (ret: SaleView["returns"][number]) => void;
   canEditPayments?: boolean;
   onEditPayment?: (payment: SaleView["payments"][number]) => void;
+  // What was taken at the till is part of the invoice itself: this opens its editor.
+  onEditTill?: () => void;
   onEditReturn?: (ret: SaleView["returns"][number]) => void;
   title?: string;
 }) {
@@ -175,12 +177,30 @@ export function InvoiceDetails({
         <p className="text-muted-foreground mb-1">Payments</p>
         <div className="space-y-1">
           {tillParts.map((p) => (
-            <div key={p.method} className="flex justify-between gap-3">
+            <div key={p.method} className="flex justify-between gap-3 items-start">
               <span>{when(sale.dateTime)} · {p.method} · at the till</span>
-              <span className="font-medium">{formatCurrency(p.amount)}</span>
+              <span className="flex items-center gap-1.5 flex-shrink-0">
+                <span className="font-medium">{formatCurrency(p.amount)}</span>
+                {canEditPayments && onEditTill && (
+                  <button onClick={onEditTill} title="Change what was taken at the till, or how it was paid"
+                    className="p-0.5 rounded hover:bg-surface-hover cursor-pointer">
+                    <Pencil className="w-3 h-3 text-muted-foreground" />
+                  </button>
+                )}
+              </span>
             </div>
           ))}
-          {tillParts.length === 0 && <p className="text-muted-foreground">Nothing paid at the till.</p>}
+          {tillParts.length === 0 && (
+            <div className="flex justify-between gap-3 items-start">
+              <p className="text-muted-foreground">Nothing paid at the till.</p>
+              {canEditPayments && onEditTill && (
+                <button onClick={onEditTill} title="Change what was taken at the till"
+                  className="p-0.5 rounded hover:bg-surface-hover cursor-pointer flex-shrink-0">
+                  <Pencil className="w-3 h-3 text-muted-foreground" />
+                </button>
+              )}
+            </div>
+          )}
           {sale.payments.map((p) => (
             <div key={p.id} className="flex justify-between gap-3 items-start">
               <span className="min-w-0">
