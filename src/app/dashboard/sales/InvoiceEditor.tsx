@@ -6,7 +6,7 @@ import { formatCurrency, toLocalInput } from "@/lib/utils/format";
 import { useApp } from "@/lib/context";
 import { cancelBalance, collectSalePayment, updateSale, updateSalePayment } from "@/lib/actions/sales";
 import { searchProductsForSale, type ProductSearchHit } from "@/lib/actions/products";
-import { CREDIT_METHOD, LENS_COLORS, PAYMENT_METHODS } from "@/lib/constants";
+import { CREDIT_METHOD, DISCOUNT_PERCENTAGES, LENS_COLORS, PAYMENT_METHODS } from "@/lib/constants";
 import { customerCreditHeld } from "@/lib/actions/credit";
 import { Loader2, Plus, Search, Trash2, Wallet, X, Pencil, AlertTriangle, CalendarClock, User } from "lucide-react";
 import { SPLIT_METHOD, paymentFromParts, primaryMethod } from "@/lib/sales/paymentSplit";
@@ -383,13 +383,20 @@ export function EditInvoiceModal({
   // at the counter can be corrected along with the rest of the invoice.
   const laterPaid = sale.payments.reduce((sum, p) => sum + p.amount, 0);
   const [paidAtTill, setPaidAtTill] = useState(Math.max(0, sale.paid - laterPaid));
+  // An invoice paid in full stays paid in full while it's edited: the till
+  // amount follows the new total, so a discount simply lowers what was paid.
+  // Typing an amount of your own (a customer paying less) takes over from that.
+  const [tillFollowsTotal, setTillFollowsTotal] = useState(sale.balance <= 0 && sale.paymentSplit.length === 0);
+  // Whatever's left owed after the edit, let off instead of chased.
+  const [cancelRest, setCancelRest] = useState(false);
 
   const lensColor = lensColorChoice === "Other" ? lensColorOther.trim() : lensColorChoice;
   const itemsTotal = lines.reduce((sum, l) => sum + l.unitPrice * l.quantity - l.discount, 0);
   const subtotal = itemsTotal + Math.max(0, customLensPrice) * customLensQty;
   const total = Math.max(0, subtotal - invoiceDiscount);
+  const fullAtTill = Math.max(0, total - laterPaid);
   // Split across methods: what the till took is the parts added up.
-  const tillAmount = isSplit ? splitAmountsTotal(splitAmounts) : paidAtTill;
+  const tillAmount = isSplit ? splitAmountsTotal(splitAmounts) : tillFollowsTotal ? fullAtTill : paidAtTill;
   const paid = tillAmount + laterPaid;
   const newBalance = total - paid;
   const overPaid = paid > total + 0.01;
@@ -433,6 +440,16 @@ export function EditInvoiceModal({
       showToast(res.error, "error");
       return;
     }
+    if (cancelRest && res.balance > 0) {
+      const cancelled = await cancelBalance(sale.id);
+      if (!cancelled.ok) {
+        showToast(`Invoice saved, but the balance wasn't cancelled: ${cancelled.error}`, "error");
+        onDone(`${sale.invoiceNo} updated — ${formatCurrency(res.balance)} now owed`);
+        return;
+      }
+      onDone(`${sale.invoiceNo} updated — ${formatCurrency(cancelled.amount)} balance cancelled, settled`);
+      return;
+    }
     onDone(
       res.balance > 0
         ? `${sale.invoiceNo} updated — ${formatCurrency(res.balance)} now owed`
@@ -450,7 +467,7 @@ export function EditInvoiceModal({
               <Pencil className="w-4 h-4 text-primary" /> Edit {sale.invoiceNo}
             </h3>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Stock moves by the difference only. {formatCurrency(sale.paid)} already paid stays on the invoice.
+              Stock moves by the difference only. Payments received after the sale stay as they are; what was taken at the till can be changed below.
             </p>
           </div>
           <button onClick={onClose} className="cursor-pointer"><X className="w-5 h-5" /></button>
@@ -704,10 +721,18 @@ export function EditInvoiceModal({
 
         <div className="mt-4 p-3 rounded-xl bg-surface text-xs space-y-1">
           <div className="flex justify-between"><span className="text-muted-foreground">Subtotal</span><span>{formatCurrency(subtotal)}</span></div>
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-2">
             <span className="text-muted-foreground">Invoice discount</span>
-            <input type="number" min={0} value={invoiceDiscount || ""} onChange={(e) => setInvoiceDiscount(Math.max(0, Number(e.target.value)))}
-              className="w-28 px-2 py-1 glass-input text-xs text-right" />
+            <span className="flex items-center gap-1.5">
+              <select value="" title="Pick a percentage and the amount is worked out for you"
+                onChange={(e) => { const pct = Number(e.target.value); if (pct) setInvoiceDiscount(Math.round((subtotal * pct) / 100)); }}
+                className="px-1.5 py-1 glass-input text-xs cursor-pointer">
+                <option value="">%</option>
+                {DISCOUNT_PERCENTAGES.map((pct) => <option key={pct} value={pct}>{pct}%</option>)}
+              </select>
+              <input type="number" min={0} value={invoiceDiscount || ""} placeholder="Rs." onChange={(e) => setInvoiceDiscount(Math.max(0, Number(e.target.value)))}
+                className="w-28 px-2 py-1 glass-input text-xs text-right" />
+            </span>
           </div>
           <div className="flex justify-between font-semibold text-sm border-t border-border pt-1.5 mt-1.5">
             <span>New total</span><span>{formatCurrency(total)}</span>
@@ -731,12 +756,15 @@ export function EditInvoiceModal({
               <span className="text-muted-foreground flex items-center gap-1.5">
                 Taken at the till
                 {total > 0 && (
-                  <button type="button" onClick={() => setPaidAtTill(Math.max(0, total - laterPaid))}
-                    className="text-primary font-semibold cursor-pointer">Paid in full</button>
+                  <button type="button" onClick={() => setTillFollowsTotal(true)}
+                    className={`font-semibold cursor-pointer ${tillFollowsTotal ? "text-success" : "text-primary"}`}>
+                    {tillFollowsTotal ? "Paid in full ✓" : "Paid in full"}
+                  </button>
                 )}
-                <button type="button" onClick={() => setPaidAtTill(0)} className="text-primary font-semibold cursor-pointer">Nothing</button>
+                <button type="button" onClick={() => { setTillFollowsTotal(false); setPaidAtTill(0); }} className="text-primary font-semibold cursor-pointer">Nothing</button>
               </span>
-              <input type="number" min={0} value={paidAtTill || ""} onChange={(e) => setPaidAtTill(Math.max(0, Number(e.target.value)))}
+              <input type="number" min={0} value={(tillFollowsTotal ? fullAtTill : paidAtTill) || ""}
+                onChange={(e) => { setTillFollowsTotal(false); setPaidAtTill(Math.max(0, Number(e.target.value))); }}
                 className="w-28 px-2 py-1 glass-input text-xs text-right" />
             </div>
           )}
@@ -760,6 +788,19 @@ export function EditInvoiceModal({
               {`The till took ${formatCurrency(sale.paid - laterPaid)} on this invoice — saving records ${formatCurrency(tillAmount)} instead, so the day's takings change. Hand back ${formatCurrency(sale.paid - laterPaid - tillAmount)} if the customer has already paid it.`}
             </p>
           </div>
+        )}
+        {/* The customer paying less than the bill: what they won't pay can be let off here. */}
+        {newBalance > 0.009 && !overPaid && (
+          <label className="mt-3 flex items-start gap-2 p-3 rounded-xl border border-border text-xs cursor-pointer">
+            <input type="checkbox" checked={cancelRest} onChange={(e) => setCancelRest(e.target.checked)} className="rounded mt-0.5" />
+            <span>
+              <span className="font-semibold">{`Customer won't pay the ${formatCurrency(newBalance)} — cancel it`}</span>
+              <span className="block text-muted-foreground">
+                Leave unticked to keep it owed. Ticked, it comes off as a discount and the invoice is settled; it shows as
+                &quot;Balance cancelled&quot; and can be undone from the invoice.
+              </span>
+            </span>
+          </label>
         )}
         {overPaid && (
           <div className="mt-3 p-3 rounded-xl bg-destructive/10 text-destructive text-xs flex gap-2">
