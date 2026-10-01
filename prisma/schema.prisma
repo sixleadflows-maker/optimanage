@@ -279,6 +279,12 @@ model Sale {
   // False for an old invoice entered from the paper records without touching
   // stock — deleting, restoring or editing it must not move stock either.
   stockDeducted   Boolean       @default(true)
+  // A balance the customer was let off ("cancel the rest"): it came off the
+  // bill as discount -- so total, profit and spend all dropped by it -- and is
+  // kept here so the invoice says so and it can be put back.
+  balanceCancelled   Float     @default(0)
+  balanceCancelledAt DateTime?
+  balanceCancelledBy String    @default("")
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 

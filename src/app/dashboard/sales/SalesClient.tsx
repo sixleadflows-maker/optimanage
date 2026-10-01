@@ -475,6 +475,7 @@ export function SalesClient({
                 canEditPayments={canEdit}
                 onEditPayment={(payment) => setEditingPayment({ sale: viewingSale, payment })}
                 onEditTill={viewingSale.source === "POS" ? () => { const sale = viewingSale; setViewingSale(null); setEditingSale(sale); } : undefined}
+                onChanged={(message) => { setViewingSale(null); showToast(message, "success"); router.refresh(); }}
                 onEditReturn={(ret) => {
                   setEditingReturn(ret);
                   setReturnForm({ reason: ret.reason, refundMethod: "Cash", totalRefund: ret.totalRefund });
@@ -521,6 +522,7 @@ export function SalesClient({
       {payingSale && (
         <CollectPaymentModal
           sale={payingSale}
+          canCancel={canEdit}
           onClose={() => setPayingSale(null)}
           onDone={(message) => {
             setPayingSale(null);

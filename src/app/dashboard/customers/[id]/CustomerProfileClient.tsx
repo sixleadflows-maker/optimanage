@@ -381,6 +381,7 @@ export function CustomerProfileClient({
       {payingSale && (
         <CollectPaymentModal
           sale={payingSale}
+          canCancel={canEdit}
           onClose={() => setPayingSale(null)}
           onDone={(message) => {
             setPayingSale(null);

@@ -212,6 +212,10 @@ export type SaleView = Sale & {
   paymentSplit: PaymentPart[];
   hasReturn: boolean;
   returns: { id: string; returnNo: string; date: string; totalRefund: number; reason: string }[];
+  // A balance the customer was let off (already inside `discount`), when and by whom.
+  balanceCancelled: number;
+  balanceCancelledAt: string;
+  balanceCancelledBy: string;
   // Every prescription taken with this sale, in the order they were entered.
   prescriptions: Prescription[];
 };
@@ -288,6 +292,9 @@ function mapSale(s: SaleRow): SaleView {
       receivedByName: p.receivedBy?.name ?? "",
     })),
     hasReturn: s.returns.length > 0,
+    balanceCancelled: s.balanceCancelled,
+    balanceCancelledAt: s.balanceCancelledAt ? s.balanceCancelledAt.toISOString() : "",
+    balanceCancelledBy: s.balanceCancelledBy,
     returns: s.returns.map((r) => ({ id: r.id, returnNo: r.returnNo, date: r.date.toISOString(), totalRefund: r.totalRefund, reason: r.reason })),
     prescriptions: s.prescriptions.map(mapPrescription),
     subtotal: s.subtotal,

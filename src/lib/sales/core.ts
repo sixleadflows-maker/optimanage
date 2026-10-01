@@ -969,6 +969,80 @@ export async function reviseSalePayment(
   return { ok: true as const, invoiceNo: sale.invoiceNo, paid, balance };
 }
 
+/**
+ * Lets the customer off what's still owed ("cancel the rest"): it comes off
+ * the invoice as discount, so the total, profit and the customer's spend all
+ * drop by it, and the invoice is settled. Nothing changes hands, so the day's
+ * cash is untouched. Remembered on the invoice so it can be put back.
+ */
+export async function cancelSaleBalance(saleId: string, by: string) {
+  const sale = await db.sale.findUnique({ where: { id: saleId } });
+  if (!sale) throw new SaleError("Invoice not found");
+  const amount = Math.round(sale.balance * 100) / 100;
+  if (!(amount > 0)) throw new SaleError("Nothing is owed on this invoice");
+  const total = Math.round((sale.total - amount) * 100) / 100;
+  const { balance, status } = settleInvoice(total, sale.paid, sale.paymentStatus);
+
+  await db.$transaction(async (tx) => {
+    await tx.sale.update({
+      where: { id: saleId },
+      data: {
+        discount: sale.discount + amount,
+        total,
+        profit: sale.profit - amount,
+        balance,
+        paymentStatus: status,
+        balanceCancelled: sale.balanceCancelled + amount,
+        balanceCancelledAt: new Date(),
+        balanceCancelledBy: by,
+      },
+    });
+    if (sale.customerId) {
+      await tx.customer.update({ where: { id: sale.customerId }, data: { totalSpend: { decrement: amount } } });
+    }
+  });
+
+  revalidatePath("/dashboard");
+  revalidatePath("/dashboard/sales");
+  revalidatePath("/dashboard/customers");
+  return { ok: true as const, invoiceNo: sale.invoiceNo, amount };
+}
+
+/** Puts a cancelled balance back on the invoice: it's owed again. */
+export async function restoreSaleBalance(saleId: string) {
+  const sale = await db.sale.findUnique({ where: { id: saleId } });
+  if (!sale) throw new SaleError("Invoice not found");
+  // An edit since may have lowered the discount; only what's still in it comes back.
+  const amount = Math.round(Math.min(sale.balanceCancelled, sale.discount) * 100) / 100;
+  if (!(amount > 0)) throw new SaleError("There's no cancelled balance on this invoice");
+  const total = Math.round((sale.total + amount) * 100) / 100;
+  const { balance, status } = settleInvoice(total, sale.paid, "BALANCE");
+
+  await db.$transaction(async (tx) => {
+    await tx.sale.update({
+      where: { id: saleId },
+      data: {
+        discount: sale.discount - amount,
+        total,
+        profit: sale.profit + amount,
+        balance,
+        paymentStatus: status,
+        balanceCancelled: 0,
+        balanceCancelledAt: null,
+        balanceCancelledBy: "",
+      },
+    });
+    if (sale.customerId) {
+      await tx.customer.update({ where: { id: sale.customerId }, data: { totalSpend: { increment: amount } } });
+    }
+  });
+
+  revalidatePath("/dashboard");
+  revalidatePath("/dashboard/sales");
+  revalidatePath("/dashboard/customers");
+  return { ok: true as const, invoiceNo: sale.invoiceNo, amount, balance };
+}
+
 function formatRs(n: number) {
   return `Rs.${Math.round(n).toLocaleString("en-PK")}`;
 }

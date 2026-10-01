@@ -1,6 +1,10 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { useApp } from "@/lib/context";
+import { undoCancelBalance } from "@/lib/actions/sales";
 import type { SaleView } from "@/lib/data";
 import { formatCurrency, formatDate } from "@/lib/utils/format";
 import { formatEyeValue, rxLensLabel } from "@/lib/utils/rx";
@@ -69,7 +73,7 @@ function RxCard({ rx }: { rx: Rx }) {
  * history, so both read the same.
  */
 export function InvoiceDetails({
-  sale, canUndoReturn = false, onUndoReturn, canEditPayments = false, onEditPayment, onEditTill, onEditReturn, title = "Details",
+  sale, canUndoReturn = false, onUndoReturn, canEditPayments = false, onEditPayment, onEditTill, onEditReturn, onChanged, title = "Details",
 }: {
   sale: SaleView;
   canUndoReturn?: boolean;
@@ -78,9 +82,29 @@ export function InvoiceDetails({
   onEditPayment?: (payment: SaleView["payments"][number]) => void;
   // What was taken at the till is part of the invoice itself: this opens its editor.
   onEditTill?: () => void;
+  // After a change made from here (putting a cancelled balance back).
+  onChanged?: (message: string) => void;
   onEditReturn?: (ret: SaleView["returns"][number]) => void;
   title?: string;
 }) {
+  const { showToast } = useApp();
+  const router = useRouter();
+  // Putting a cancelled balance back is asked once more before it's done.
+  const [undoing, setUndoing] = useState<"ask" | "saving" | null>(null);
+  const undoCancel = async () => {
+    setUndoing("saving");
+    try {
+      const res = await undoCancelBalance(sale.id);
+      if (!res.ok) { showToast(res.error, "error"); setUndoing("ask"); return; }
+      setUndoing(null);
+      const message = `${formatCurrency(res.amount)} is owed again on ${sale.invoiceNo}`;
+      if (onChanged) onChanged(message);
+      else { showToast(message, "success"); router.refresh(); }
+    } catch {
+      showToast("Couldn't put it back — check the connection and try again", "error");
+      setUndoing("ask");
+    }
+  };
   const laterTotal = sale.payments.reduce((sum, p) => sum + p.amount, 0);
   const takenAtTill = Math.max(0, Math.round((sale.paid - laterTotal) * 100) / 100);
   const tillParts = sale.paymentSplit.length ? sale.paymentSplit : takenAtTill > 0 ? [{ method: sale.paymentMethod, amount: takenAtTill }] : [];
@@ -223,8 +247,41 @@ export function InvoiceDetails({
             <span className="text-muted-foreground">Paid so far</span>
             <span className="font-medium text-success">{formatCurrency(sale.paid)}</span>
           </div>
+          {sale.balanceCancelled > 0 && (
+            <div className="flex justify-between gap-3 items-start">
+              <span className="min-w-0">
+                Balance cancelled
+                <span className="text-muted-foreground">
+                  {[sale.balanceCancelledAt && ` · ${when(sale.balanceCancelledAt)}`, sale.balanceCancelledBy && ` · ${sale.balanceCancelledBy}`].filter(Boolean).join("")}
+                </span>
+                <span className="block text-[10px] text-muted-foreground">The customer was let off this. It&apos;s part of the invoice discount above.</span>
+              </span>
+              <span className="flex items-center gap-1.5 flex-shrink-0">
+                <span className="font-medium text-muted-foreground line-through">{formatCurrency(sale.balanceCancelled)}</span>
+                {canEditPayments && !undoing && (
+                  <button onClick={() => setUndoing("ask")} title="Put this balance back: the customer owes it again"
+                    className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-surface hover:bg-surface-hover font-medium cursor-pointer">
+                    <Undo2 className="w-3 h-3" /> Undo
+                  </button>
+                )}
+              </span>
+            </div>
+          )}
+          {undoing && (
+            <div className="p-2.5 rounded-lg border border-border bg-surface space-y-2">
+              <p>{`Put the ${formatCurrency(sale.balanceCancelled)} back? The customer will owe it again and the invoice total goes back up.`}</p>
+              <div className="flex gap-2">
+                <button onClick={() => setUndoing(null)} disabled={undoing === "saving"}
+                  className="flex-1 py-1.5 rounded-lg bg-background/60 hover:bg-surface-hover font-medium cursor-pointer">Leave it cancelled</button>
+                <button onClick={undoCancel} disabled={undoing === "saving"}
+                  className="flex-1 py-1.5 rounded-lg bg-primary text-white font-semibold disabled:opacity-60 cursor-pointer">
+                  {undoing === "saving" ? "Putting it back…" : "Put it back"}
+                </button>
+              </div>
+            </div>
+          )}
           <div className="flex justify-between gap-3 font-semibold">
-            <span>{sale.balance > 0 ? "Balance still owed" : "Paid in full"}</span>
+            <span>{sale.balance > 0 ? "Balance still owed" : sale.balanceCancelled > 0 ? "Settled" : "Paid in full"}</span>
             <span className={sale.balance > 0 ? "text-destructive" : "text-success"}>{sale.balance > 0 ? formatCurrency(sale.balance) : "Nothing owed"}</span>
           </div>
         </div>

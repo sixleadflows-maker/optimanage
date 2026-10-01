@@ -8,6 +8,8 @@ import {
   reviseSale,
   recordSalePayment,
   reviseSalePayment,
+  cancelSaleBalance,
+  restoreSaleBalance,
   SaleError,
   type SalePrescriptionInput,
 } from "@/lib/sales/core";
@@ -314,6 +316,33 @@ export async function updateTillSale(input: CreateSaleInput) {
       orderTakenByName: staff.staffMap.get(staff.createdById)!.name,
       billGeneratedByName: staff.staffMap.get(staff.receivedById)!.name,
     };
+  } catch (e) {
+    if (e instanceof SaleError) return { ok: false as const, error: e.message };
+    throw e;
+  }
+}
+
+// Letting a customer off what they owe changes the shop's takings, so it sits
+// with the other invoice corrections: owner or manager, not cashiers.
+export async function cancelBalance(saleId: string) {
+  const session = await auth();
+  if (!session?.user) return { ok: false as const, error: "You've been signed out — sign in again" };
+  if (session.user.role === "CASHIER") return { ok: false as const, error: "Ask a manager or the owner to cancel a balance" };
+  try {
+    return await cancelSaleBalance(saleId, session.user.name ?? "");
+  } catch (e) {
+    if (e instanceof SaleError) return { ok: false as const, error: e.message };
+    throw e;
+  }
+}
+
+/** Undoes a cancelled balance: the customer owes it again. */
+export async function undoCancelBalance(saleId: string) {
+  const session = await auth();
+  if (!session?.user) return { ok: false as const, error: "You've been signed out — sign in again" };
+  if (session.user.role === "CASHIER") return { ok: false as const, error: "Ask a manager or the owner to put a balance back" };
+  try {
+    return await restoreSaleBalance(saleId);
   } catch (e) {
     if (e instanceof SaleError) return { ok: false as const, error: e.message };
     throw e;

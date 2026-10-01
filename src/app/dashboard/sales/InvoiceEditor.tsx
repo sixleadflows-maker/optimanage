@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { SaleView } from "@/lib/data";
 import { formatCurrency, toLocalInput } from "@/lib/utils/format";
 import { useApp } from "@/lib/context";
-import { collectSalePayment, updateSale, updateSalePayment } from "@/lib/actions/sales";
+import { cancelBalance, collectSalePayment, updateSale, updateSalePayment } from "@/lib/actions/sales";
 import { searchProductsForSale, type ProductSearchHit } from "@/lib/actions/products";
 import { CREDIT_METHOD, LENS_COLORS, PAYMENT_METHODS } from "@/lib/constants";
 import { customerCreditHeld } from "@/lib/actions/credit";
@@ -23,14 +23,30 @@ export interface EditorStaff { id: string; name: string }
 
 export function CollectPaymentModal({
   sale,
+  canCancel = false,
   onClose,
   onDone,
 }: {
   sale: SaleView;
+  // Owners and managers can let the customer off the rest.
+  canCancel?: boolean;
   onClose: () => void;
   onDone: (message: string) => void;
 }) {
   const { showToast } = useApp();
+  // "Won't pay the rest": asked once more before anything is written off.
+  const [cancelling, setCancelling] = useState<"ask" | "saving" | null>(null);
+  const cancelRest = async () => {
+    setCancelling("saving");
+    try {
+      const res = await cancelBalance(sale.id);
+      if (!res.ok) { showToast(res.error, "error"); setCancelling("ask"); return; }
+      onDone(`${formatCurrency(res.amount)} balance cancelled — ${sale.invoiceNo} is settled`);
+    } catch {
+      showToast("Couldn't cancel it — check the connection and try again", "error");
+      setCancelling("ask");
+    }
+  };
   const [amount, setAmount] = useState(sale.balance);
   const [method, setMethod] = useState(primaryMethod(sale) || "Cash");
   const [note, setNote] = useState("");
@@ -79,7 +95,7 @@ export function CollectPaymentModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-      <div className="glass-modal p-6 w-full max-w-md animate-rise" onClick={(e) => e.stopPropagation()}>
+      <div className="glass-modal p-6 w-full max-w-md animate-rise max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-semibold flex items-center gap-2">
             <Wallet className="w-4 h-4 text-primary" /> Receive payment
@@ -191,6 +207,32 @@ export function CollectPaymentModal({
             Receive {amount > 0 ? formatCurrency(amount) : ""}
           </button>
         </div>
+
+        {canCancel && (
+          cancelling ? (
+            <div className="mt-4 p-3 rounded-xl border border-destructive/30 bg-destructive/5 text-xs space-y-2">
+              <p>
+                {`Cancel the ${formatCurrency(sale.balance)} still owed? The customer won't be asked for it again. It comes off ${sale.invoiceNo} as a discount, so the invoice total drops to ${formatCurrency(sale.total - sale.balance)}. You can put it back from the invoice later.`}
+              </p>
+              <div className="flex gap-2">
+                <button onClick={() => setCancelling(null)} disabled={cancelling === "saving"}
+                  className="flex-1 py-2 rounded-lg bg-surface hover:bg-surface-hover font-medium cursor-pointer">
+                  Keep it owed
+                </button>
+                <button onClick={cancelRest} disabled={cancelling === "saving"}
+                  className="flex-1 py-2 rounded-lg bg-destructive text-white font-semibold hover:opacity-90 disabled:opacity-60 flex items-center justify-center gap-1.5 cursor-pointer">
+                  {cancelling === "saving" && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  {`Cancel ${formatCurrency(sale.balance)}`}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button onClick={() => setCancelling("ask")}
+              className="w-full mt-3 text-[11px] text-destructive font-medium hover:underline cursor-pointer">
+              {`Customer won't pay the rest? Cancel the ${formatCurrency(sale.balance)} balance`}
+            </button>
+          )
+        )}
       </div>
     </div>
   );
