@@ -71,6 +71,50 @@ export async function createPrescription(input: PrescriptionInput): Promise<Crea
   return { ok: true, id: created.id, date: created.date.toISOString(), attachedCustomer: attachCustomer };
 }
 
+/** One reading already on a customer's record, ready to load into a bill. */
+export interface SavedReading {
+  id: string;
+  date: string;
+  label: string;
+  rightSph: number; rightCyl: number; rightAxis: number; rightPd: number; rightAdd: number;
+  leftSph: number; leftCyl: number; leftAxis: number; leftPd: number; leftAdd: number;
+  rightSphText: string; rightCylText: string; rightAddText: string;
+  leftSphText: string; leftCylText: string; leftAddText: string;
+  // A note hidden in the history stays hidden here too.
+  notes: string;
+  isOwn: boolean;
+  // The invoice it's on, "" when it hasn't been put on one.
+  invoiceNo: string;
+}
+
+/**
+ * The readings on a customer's record, newest first, to pick one for a new bill
+ * ("use an earlier reading"). Fetched when asked for rather than sent with the
+ * whole customer list, which every till loads.
+ */
+export async function getCustomerReadings(customerId: string): Promise<SavedReading[]> {
+  const session = await auth();
+  if (!session?.user || !customerId) return [];
+  const rows = await db.prescription.findMany({
+    where: { customerId },
+    orderBy: [{ date: "desc" }, { createdAt: "desc" }],
+    take: 15,
+    include: { sale: { select: { invoiceNo: true } } },
+  });
+  return rows.map((r) => ({
+    id: r.id,
+    date: r.date.toISOString(),
+    label: r.label,
+    rightSph: r.rightSph, rightCyl: r.rightCyl, rightAxis: r.rightAxis, rightPd: r.rightPd, rightAdd: r.rightAdd,
+    leftSph: r.leftSph, leftCyl: r.leftCyl, leftAxis: r.leftAxis, leftPd: r.leftPd, leftAdd: r.leftAdd,
+    rightSphText: r.rightSphText, rightCylText: r.rightCylText, rightAddText: r.rightAddText,
+    leftSphText: r.leftSphText, leftCylText: r.leftCylText, leftAddText: r.leftAddText,
+    notes: r.notesHidden ? "" : r.notes,
+    isOwn: r.isOwnPrescription,
+    invoiceNo: r.sale?.invoiceNo ?? "",
+  }));
+}
+
 export async function updatePrescription(id: string, input: Omit<PrescriptionInput, "customerId">) {
   const session = await auth();
   if (!session?.user) return { ok: false as const, error: "You've been signed out — sign in again" };

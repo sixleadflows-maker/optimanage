@@ -3,10 +3,13 @@
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { auth } from "@/lib/auth";
+import { unexpectedFailure } from "@/lib/utils/serverFailure";
 
 export interface CustomerInput {
   name: string;
   phone: string;
+  // A second number, optional (left out or blank when there isn't one).
+  phone2?: string;
   serialNumber: string;
   email: string;
   address: string;
@@ -22,6 +25,7 @@ export interface CustomerSearchHit {
   id: string;
   name: string;
   phone: string;
+  phone2: string;
   serialNumber: string;
   lastVisit: string;
   visitCount: number;
@@ -55,10 +59,11 @@ export async function searchCustomers(query: string): Promise<CustomerSearchHit[
               { serialNumber: { contains: w, mode: "insensitive" as const } },
               { name: { contains: w, mode: "insensitive" as const } },
               { phone: { contains: w } },
+              { phone2: { contains: w } },
             ],
           })),
         },
-        ...(phoneLike ? [{ phone: { contains: digits } }] : []),
+        ...(phoneLike ? [{ phone: { contains: digits } }, { phone2: { contains: digits } }] : []),
       ],
     },
     orderBy: { lastVisit: "desc" },
@@ -70,6 +75,7 @@ export async function searchCustomers(query: string): Promise<CustomerSearchHit[
     id: c.id,
     name: c.name,
     phone: c.phone ?? "",
+    phone2: c.phone2 ?? "",
     serialNumber: c.serialNumber,
     lastVisit: c.lastVisit ? c.lastVisit.toISOString().slice(0, 10) : "",
     visitCount: c.visitCount,
@@ -89,61 +95,77 @@ export type CreateCustomerResult = { ok: true; id: string } | { ok: false; error
 export async function createCustomer(input: CustomerInput): Promise<CreateCustomerResult> {
   await requireAuth();
 
-  const name = input.name.trim();
-  const phone = input.phone.trim();
-  const serialNumber = input.serialNumber.trim();
+  try {
+    const name = input.name.trim();
+    // Only one number typed, and it went in the second box: it's their number.
+    const typed = [input.phone.trim(), (input.phone2 ?? "").trim()].filter(Boolean);
+    const phone = typed[0] ?? "";
+    const phone2 = typed[1] ?? "";
+    const serialNumber = input.serialNumber.trim();
 
-  // Save pressed twice in a row mustn't leave two identical records, now that
-  // the phone number no longer stops the second one.
-  const justAdded = await db.customer.findFirst({
-    where: { name, phone: phone || null, serialNumber, active: true, createdAt: { gt: new Date(Date.now() - 15_000) } },
-    select: { id: true },
-  });
-  if (justAdded) return { ok: true, id: justAdded.id };
+    // Save pressed twice in a row mustn't leave two identical records, now that
+    // the phone number no longer stops the second one.
+    const justAdded = await db.customer.findFirst({
+      where: { name, phone: phone || null, phone2: phone2 || null, serialNumber, active: true, createdAt: { gt: new Date(Date.now() - 15_000) } },
+      select: { id: true },
+    });
+    if (justAdded) return { ok: true, id: justAdded.id };
 
-  const customer = await db.customer.create({
-    data: {
-      name,
-      phone: phone || null,
-      serialNumber,
-      email: input.email.trim(),
-      address: input.address.trim(),
-      ...(input.lastVisit ? { lastVisit: new Date(input.lastVisit) } : {}),
-    },
-  });
-  revalidatePath("/dashboard/customers");
-  return { ok: true, id: customer.id };
+    const customer = await db.customer.create({
+      data: {
+        name,
+        phone: phone || null,
+        phone2: phone2 || null,
+        serialNumber,
+        email: input.email.trim(),
+        address: input.address.trim(),
+        ...(input.lastVisit ? { lastVisit: new Date(input.lastVisit) } : {}),
+      },
+    });
+    revalidatePath("/dashboard/customers");
+    return { ok: true, id: customer.id };
+  } catch (e) {
+    return unexpectedFailure("createCustomer", e);
+  }
 }
 
 export async function updateCustomer(id: string, input: CustomerInput) {
   await requireAuth();
 
-  const current = await db.customer.findUnique({ where: { id }, select: { id: true } });
-  if (!current) return { ok: false as const, error: "This customer is no longer on the system" };
-  // Sharing a number with another customer is fine, so there's nothing to check.
-  const phone = input.phone.trim();
+  try {
+    const current = await db.customer.findUnique({ where: { id }, select: { id: true } });
+    if (!current) return { ok: false as const, error: "This customer is no longer on the system" };
+    // Sharing a number with another customer is fine, so there's nothing to check.
+    const typed = [input.phone.trim(), (input.phone2 ?? "").trim()].filter(Boolean);
+    const phone = typed[0] ?? "";
+    const phone2 = typed[1] ?? "";
 
-  await db.customer.update({
-    where: { id },
-    data: {
-      name: input.name.trim(),
-      phone: phone || null,
-      serialNumber: input.serialNumber.trim(),
-      email: input.email.trim(),
-      address: input.address.trim(),
-      // Only overwrite last visit when a date was supplied; otherwise leave the
-      // auto-tracked value from the customer's sales untouched.
-      ...(input.lastVisit ? { lastVisit: new Date(input.lastVisit) } : {}),
-    },
-  });
-  // The name and phone show on invoices, prescriptions and lab orders too.
-  revalidatePath("/dashboard/customers");
-  revalidatePath(`/dashboard/customers/${id}`);
-  revalidatePath("/dashboard/pos");
-  revalidatePath("/dashboard/sales");
-  revalidatePath("/dashboard/prescriptions");
-  revalidatePath("/dashboard/lab-orders");
-  return { ok: true as const };
+    await db.customer.update({
+      where: { id },
+      data: {
+        name: input.name.trim(),
+        phone: phone || null,
+        // An older screen that doesn't know about the second number leaves it alone.
+        ...(input.phone2 !== undefined ? { phone2: phone2 || null } : {}),
+        serialNumber: input.serialNumber.trim(),
+        email: input.email.trim(),
+        address: input.address.trim(),
+        // Only overwrite last visit when a date was supplied; otherwise leave the
+        // auto-tracked value from the customer's sales untouched.
+        ...(input.lastVisit ? { lastVisit: new Date(input.lastVisit) } : {}),
+      },
+    });
+    // The name and phone show on invoices, prescriptions and lab orders too.
+    revalidatePath("/dashboard/customers");
+    revalidatePath(`/dashboard/customers/${id}`);
+    revalidatePath("/dashboard/pos");
+    revalidatePath("/dashboard/sales");
+    revalidatePath("/dashboard/prescriptions");
+    revalidatePath("/dashboard/lab-orders");
+    return { ok: true as const };
+  } catch (e) {
+    return unexpectedFailure("updateCustomer", e);
+  }
 }
 
 // Moves the customer to the Trash rather than erasing them: their invoices,

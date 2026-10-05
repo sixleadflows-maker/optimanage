@@ -160,7 +160,7 @@ export function SalesClient({
   const filtered = useMemo(() => {
     let result = sales.filter((s) => {
       const found = matchesSearch(search, [
-        s.invoiceNo, s.offlineRef, s.customerName, s.customerPhone, s.customerSerial,
+        s.invoiceNo, s.offlineRef, s.customerName, s.customerPhone, s.customerPhone2, s.customerSerial,
         ...s.items.flatMap((i) => [i.productName, i.description]),
       ]);
       const matchesStatus = statusFilter === "All" || s.paymentStatus === statusFilter;
@@ -226,7 +226,7 @@ export function SalesClient({
   };
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-6 animate-fade-in solid-sheet rounded-3xl p-4 sm:p-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">Sales & Invoices</h1>
@@ -441,7 +441,7 @@ export function SalesClient({
 
       {viewingSale && viewingInvoice && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setViewingSale(null)}>
-          <div className="glass-modal p-6 w-full max-w-3xl animate-rise max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+          <div className="glass-modal solid-sheet p-6 w-full max-w-3xl animate-rise max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-start justify-between gap-3 mb-4">
               <div>
                 <h3 className="text-lg font-semibold">{viewingSale.invoiceNo}</h3>
@@ -563,7 +563,7 @@ export function SalesClient({
 
       {returningSale && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setReturningSale(null)}>
-          <div className="glass-modal p-6 w-full max-w-lg animate-rise max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+          <div className="glass-modal solid-sheet p-6 w-full max-w-lg animate-rise max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold">Return / Refund — {returningSale.invoiceNo}</h3>
               <button onClick={() => setReturningSale(null)} className="cursor-pointer"><X className="w-5 h-5" /></button>
@@ -612,7 +612,7 @@ export function SalesClient({
 
       {deletingSale && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setDeletingSale(null)}>
-          <div className="glass-modal p-6 w-full max-w-sm animate-rise" onClick={(e) => e.stopPropagation()}>
+          <div className="glass-modal solid-sheet p-6 w-full max-w-sm animate-rise" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold">Delete Invoice</h3>
               <button onClick={() => setDeletingSale(null)} className="cursor-pointer"><X className="w-5 h-5" /></button>
@@ -643,7 +643,7 @@ export function SalesClient({
 
       {editingReturn && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setEditingReturn(null)}>
-          <div className="glass-modal p-6 w-full max-w-sm animate-rise" onClick={(e) => e.stopPropagation()}>
+          <div className="glass-modal solid-sheet p-6 w-full max-w-sm animate-rise" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold">Edit {editingReturn.returnNo}</h3>
               <button onClick={() => setEditingReturn(null)} className="cursor-pointer"><X className="w-5 h-5" /></button>

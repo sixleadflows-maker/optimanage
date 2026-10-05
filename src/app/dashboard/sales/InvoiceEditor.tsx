@@ -13,6 +13,23 @@ import { SPLIT_METHOD, paymentFromParts, primaryMethod } from "@/lib/sales/payme
 import { SplitPaymentFields, splitAmountsTotal, type SplitAmounts } from "@/components/invoice/SplitPaymentFields";
 import { CustomerFormModal, type CustomerFormData, type SavedCustomer } from "@/app/dashboard/customers/CustomerFormModal";
 import { matchesSearch } from "@/lib/utils/search";
+import { allNumbers } from "@/lib/utils/phone";
+import { unstable_isUnrecognizedActionError } from "next/navigation";
+import { reportOutdatedPage } from "@/components/layout/UpdateNotice";
+
+/**
+ * A save that got no answer at all: this page is from before an update (the
+ * server no longer recognises what it sends) or the connection dropped. Without
+ * this the Save button just kept spinning and nothing said why.
+ */
+function saveFailed(e: unknown, showToast: (message: string, type?: "success" | "error" | "info") => void) {
+  if (unstable_isUnrecognizedActionError(e)) {
+    reportOutdatedPage();
+    showToast("The system was updated while this page was open, so this didn't save. Refresh the page, then do it again.", "error");
+    return;
+  }
+  showToast("Couldn't save: check the connection and try again. Nothing was changed.", "error");
+}
 
 // Everything about a customer that the form can correct, so an edit from here
 // never blanks a detail the invoice screen didn't happen to show.
@@ -42,8 +59,8 @@ export function CollectPaymentModal({
       const res = await cancelBalance(sale.id);
       if (!res.ok) { showToast(res.error, "error"); setCancelling("ask"); return; }
       onDone(`${formatCurrency(res.amount)} balance cancelled — ${sale.invoiceNo} is settled`);
-    } catch {
-      showToast("Couldn't cancel it — check the connection and try again", "error");
+    } catch (e) {
+      saveFailed(e, showToast);
       setCancelling("ask");
     }
   };
@@ -80,22 +97,27 @@ export function CollectPaymentModal({
 
   const submit = async () => {
     setSaving(true);
-    const res = await collectSalePayment({ saleId: sale.id, amount, method, note, date: takenAtDate.toISOString() });
-    setSaving(false);
-    if (!res.ok) {
-      showToast(res.error, "error");
-      return;
+    try {
+      const res = await collectSalePayment({ saleId: sale.id, amount, method, note, date: takenAtDate.toISOString() });
+      if (!res.ok) {
+        showToast(res.error, "error");
+        return;
+      }
+      onDone(
+        res.balance > 0
+          ? `${formatCurrency(amount)} received — ${formatCurrency(res.balance)} still owed`
+          : `${sale.invoiceNo} is now paid in full`
+      );
+    } catch (e) {
+      saveFailed(e, showToast);
+    } finally {
+      setSaving(false);
     }
-    onDone(
-      res.balance > 0
-        ? `${formatCurrency(amount)} received — ${formatCurrency(res.balance)} still owed`
-        : `${sale.invoiceNo} is now paid in full`
-    );
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-      <div className="glass-modal p-6 w-full max-w-md animate-rise max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+      <div className="glass-modal solid-sheet p-6 w-full max-w-md animate-rise max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-semibold flex items-center gap-2">
             <Wallet className="w-4 h-4 text-primary" /> Receive payment
@@ -331,7 +353,7 @@ export function EditInvoiceModal({
 
   const customer = allCustomers.find((c) => c.id === customerId);
   const customerMatches = customerSearch.trim()
-    ? allCustomers.filter((c) => matchesSearch(customerSearch, [c.name, c.phone, c.serialNumber])).slice(0, 5)
+    ? allCustomers.filter((c) => matchesSearch(customerSearch, [c.name, c.phone, c.phone2, c.serialNumber])).slice(0, 5)
     : [];
 
   const [search, setSearch] = useState("");
@@ -409,8 +431,19 @@ export function EditInvoiceModal({
     const payment = isSplit
       ? paymentFromParts(Object.entries(splitAmounts).map(([method, amount]) => ({ method, amount })), "Cash")
       : { paymentMethod, paymentSplit: [] };
+    // A cleared or half-typed date used to throw here, leaving Save spinning for ever.
+    if (canBackdate && Number.isNaN(new Date(billDate).getTime())) {
+      showToast("Check the bill date and time", "error");
+      return;
+    }
+    if (![invoiceDiscount, customLensPrice, customLensQty, labCharges, fittingCharges, tillAmount].every((n) => Number.isFinite(n))) {
+      showToast("One of the amounts isn't a number — check the prices, discount and amount taken at the till", "error");
+      return;
+    }
     setSaving(true);
-    const res = await updateSale({
+    let res: Awaited<ReturnType<typeof updateSale>>;
+    try {
+      res = await updateSale({
       saleId: sale.id,
       date: canBackdate ? new Date(billDate).toISOString() : undefined,
       customerId: customerId || null,
@@ -434,20 +467,30 @@ export function EditInvoiceModal({
       lensDescription,
       labCharges,
       fittingCharges,
-    });
-    setSaving(false);
+      });
+    } catch (e) {
+      saveFailed(e, showToast);
+      return;
+    } finally {
+      setSaving(false);
+    }
     if (!res.ok) {
       showToast(res.error, "error");
       return;
     }
     if (cancelRest && res.balance > 0) {
-      const cancelled = await cancelBalance(sale.id);
-      if (!cancelled.ok) {
-        showToast(`Invoice saved, but the balance wasn't cancelled: ${cancelled.error}`, "error");
+      try {
+        const cancelled = await cancelBalance(sale.id);
+        if (!cancelled.ok) {
+          showToast(`Invoice saved, but the balance wasn't cancelled: ${cancelled.error}`, "error");
+          onDone(`${sale.invoiceNo} updated — ${formatCurrency(res.balance)} now owed`);
+          return;
+        }
+        onDone(`${sale.invoiceNo} updated — ${formatCurrency(cancelled.amount)} balance cancelled, settled`);
+      } catch {
+        showToast("Invoice saved, but the balance wasn't cancelled. Open the invoice's wallet to cancel it.", "error");
         onDone(`${sale.invoiceNo} updated — ${formatCurrency(res.balance)} now owed`);
-        return;
       }
-      onDone(`${sale.invoiceNo} updated — ${formatCurrency(cancelled.amount)} balance cancelled, settled`);
       return;
     }
     onDone(
@@ -460,7 +503,7 @@ export function EditInvoiceModal({
   return (
     <>
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-      <div className="glass-modal p-6 w-full max-w-2xl animate-rise max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+      <div className="glass-modal solid-sheet p-6 w-full max-w-2xl animate-rise max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between gap-3 mb-4">
           <div>
             <h3 className="text-lg font-semibold flex items-center gap-2">
@@ -507,7 +550,7 @@ export function EditInvoiceModal({
               </label>
               {customerId ? (
                 <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 bg-surface rounded-lg">
-                  <span className="text-xs truncate">{customer?.name ?? sale.customerName}{customer?.phone ? ` · ${customer.phone}` : ""}</span>
+                  <span className="text-xs truncate">{customer?.name ?? sale.customerName}{customer?.phone ? ` · ${allNumbers(customer, " · ")}` : ""}</span>
                   <span className="flex items-center gap-1.5 flex-shrink-0">
                     {customer && (
                       <button onClick={() => setCustomerForm("edit")} title="Correct this customer's name, phone or other details"
@@ -527,7 +570,7 @@ export function EditInvoiceModal({
                       {customerMatches.map((c) => (
                         <button key={c.id} onClick={() => { setCustomerId(c.id); setCustomerSearch(""); }}
                           className="w-full text-left px-3 py-1.5 rounded-lg hover:bg-surface-hover text-xs cursor-pointer">
-                          {c.name}{c.phone ? ` · ${c.phone}` : ""}
+                          {c.name}{c.phone ? ` · ${allNumbers(c, " · ")}` : ""}
                         </button>
                       ))}
                     </div>
@@ -885,26 +928,31 @@ export function EditPaymentModal({
 
   const submit = async (remove = false) => {
     remove ? setRemoving(true) : setSaving(true);
-    const res = await updateSalePayment({
-      paymentId: payment.id,
-      ...(remove ? { remove: true } : { amount, method, note, date: takenAtDate.toISOString() }),
-    });
-    setSaving(false);
-    setRemoving(false);
-    if (!res.ok) {
-      showToast(res.error, "error");
-      return;
+    try {
+      const res = await updateSalePayment({
+        paymentId: payment.id,
+        ...(remove ? { remove: true } : { amount, method, note, date: takenAtDate.toISOString() }),
+      });
+      if (!res.ok) {
+        showToast(res.error, "error");
+        return;
+      }
+      onDone(
+        remove
+          ? `Payment moved to the Trash — ${res.balance > 0 ? `${formatCurrency(res.balance)} now owed` : "paid in full"}. Restore it from there if that was a mistake.`
+          : `Payment updated — ${res.balance > 0 ? `${formatCurrency(res.balance)} still owed` : "paid in full"}`
+      );
+    } catch (e) {
+      saveFailed(e, showToast);
+    } finally {
+      setSaving(false);
+      setRemoving(false);
     }
-    onDone(
-      remove
-        ? `Payment moved to the Trash — ${res.balance > 0 ? `${formatCurrency(res.balance)} now owed` : "paid in full"}. Restore it from there if that was a mistake.`
-        : `Payment updated — ${res.balance > 0 ? `${formatCurrency(res.balance)} still owed` : "paid in full"}`
-    );
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-      <div className="glass-modal p-6 w-full max-w-md animate-rise" onClick={(e) => e.stopPropagation()}>
+      <div className="glass-modal solid-sheet p-6 w-full max-w-md animate-rise" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-semibold flex items-center gap-2">
             <Pencil className="w-4 h-4 text-primary" /> Correct payment

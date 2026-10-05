@@ -48,6 +48,9 @@ export const PRODUCT_CATEGORIES = [
 
 export type ProductCategory = (typeof PRODUCT_CATEGORIES)[number];
 
+// Eyewear that takes a lens: the till offers lenses when one of these is added.
+export const FRAME_CATEGORIES: readonly string[] = ["Frames", "Sunglasses", "Sports Sunglasses", "Kids Frames", "Kids Sunglasses"];
+
 // Offered at the till when a prescription lens is sold; staff can also type
 // anything that isn't on the list.
 export const LENS_COLORS = [

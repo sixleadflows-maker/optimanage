@@ -152,6 +152,59 @@ h1, h2, h3 {
     0 10px 24px rgba(0, 0, 0, 0.35);
 }
 
+/* ── Flat white sheet ────────────────────────────────────────
+   The invoice screens: plain white with nothing showing through, whatever the
+   theme. The light palette is restated inside so text, inputs and status chips
+   stay readable when the rest of the app is dark. */
+.solid-sheet,
+.dark .solid-sheet {
+  --foreground: #191a23;
+  --surface: #f3f4f8;
+  --surface-hover: #e8eaf1;
+  --border-color: rgba(23, 20, 60, 0.12);
+  --muted: #eef0f5;
+  --muted-fg: #62636f;
+  --card-bg: #ffffff;
+  --accent: #edeafd;
+  --accent-fg: #191a23;
+  --glass-bg: #ffffff;
+  --glass-border: #e3e5ee;
+  background: #ffffff;
+  color: #191a23;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  color-scheme: light;
+}
+
+.glass-modal.solid-sheet,
+.dark .glass-modal.solid-sheet {
+  border: 1px solid #e3e5ee;
+  box-shadow: 0 30px 70px rgba(30, 20, 70, 0.28), 0 8px 20px rgba(30, 20, 70, 0.12);
+}
+
+.solid-sheet .glass-card {
+  background: #ffffff;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border: 1px solid #e3e5ee;
+  box-shadow: none;
+}
+
+.solid-sheet .glass-card:hover {
+  transform: none;
+  box-shadow: none;
+}
+
+.solid-sheet .glass-input {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.dark .solid-sheet .chip-paid, .dark .solid-sheet .chip-full-payment { background: rgba(16, 185, 129, 0.13); color: #059669; }
+.dark .solid-sheet .chip-advance { background: rgba(245, 158, 11, 0.13); color: #d97706; }
+.dark .solid-sheet .chip-balance { background: rgba(239, 68, 68, 0.13); color: #dc2626; }
+.dark .solid-sheet .glass-card, .dark .solid-sheet .glass-card:hover { box-shadow: none; }
+
 .glass-card {
   background: var(--card-bg);
   backdrop-filter: blur(18px) saturate(170%);

@@ -13,7 +13,7 @@ import { Eye, Save, Search, Loader2, Pencil, Trash2, X, EyeOff, UserPlus } from 
 import { CustomerFormModal, type SavedCustomer } from "@/app/dashboard/customers/CustomerFormModal";
 import { matchesSearch } from "@/lib/utils/search";
 
-interface RxCustomer { id: string; name: string; phone: string; serialNumber: string; }
+interface RxCustomer { id: string; name: string; phone: string; phone2?: string; serialNumber: string; }
 
 const empty = {
   rightSph: "", rightCyl: "", rightAxis: "", rightPd: "", rightAdd: "",
@@ -91,7 +91,7 @@ export function PrescriptionsClient({
   const customerById = useMemo(() => new Map(allCustomers.map((c) => [c.id, c])), [allCustomers]);
 
   const filteredCustomers = customerSearch.trim()
-    ? allCustomers.filter((c) => matchesSearch(customerSearch, [c.name, c.phone, c.serialNumber])).slice(0, 5)
+    ? allCustomers.filter((c) => matchesSearch(customerSearch, [c.name, c.phone, c.phone2, c.serialNumber])).slice(0, 5)
     : [];
 
   // Find a customer's prescription by name, serial number or phone, newest first.
@@ -99,7 +99,7 @@ export function PrescriptionsClient({
     if (!listSearch.trim()) return prescriptions;
     return prescriptions.filter((rx) => {
       const c = customerById.get(rx.customerId);
-      return matchesSearch(listSearch, [rx.customerName, c?.serialNumber, c?.phone, rx.label]);
+      return matchesSearch(listSearch, [rx.customerName, c?.serialNumber, c?.phone, c?.phone2, rx.label]);
     });
   }, [prescriptions, listSearch, customerById]);
 
@@ -138,6 +138,19 @@ export function PrescriptionsClient({
     const looksLikePhone = /^[+\d][\d\s-]{5,}$/.test(typed);
     return { name: looksLikePhone ? "" : typed, phone: looksLikePhone ? typed : "" };
   })();
+
+  // Their earlier readings, to start a new one from ("same as last time, but...").
+  const customerReadings = !editing && selectedCustomer ? prescriptions.filter((p) => p.customerId === selectedCustomer) : [];
+  const readingSummary = (rx: PrescriptionView) => {
+    const eye = (e: PrescriptionView["rightEye"]) =>
+      [formatEyeValue("Sph", e), e.cyl || e.cylText ? `/ ${formatEyeValue("Cyl", e)}` : "", e.axis ? `× ${e.axis}` : ""].filter(Boolean).join(" ");
+    return `R ${eye(rx.rightEye)}  ·  L ${eye(rx.leftEye)}`;
+  };
+  const copyReading = (rx: PrescriptionView) => {
+    setForm({ ...formFromRx(rx), notes: rx.notesHidden ? "" : rx.notes });
+    setIsOwn(rx.isOwnPrescription);
+    showToast(`Filled in from the reading of ${formatDate(rx.date)} — change what's different, then save`, "info");
+  };
 
   const startEdit = (rx: PrescriptionView) => {
     setEditing(rx);
@@ -257,7 +270,7 @@ export function PrescriptionsClient({
                 {filteredCustomers.map((c) => (
                   <button key={c.id} onClick={() => { setSelectedCustomer(c.id); setCustomerSearch(c.name); }}
                     className="w-full text-left px-3 py-1.5 rounded-lg hover:bg-surface-hover text-xs">
-                    {[c.name, c.serialNumber && `Serial ${c.serialNumber}`, c.phone].filter(Boolean).join(" · ")}
+                    {[c.name, c.serialNumber && `Serial ${c.serialNumber}`, c.phone, c.phone2].filter(Boolean).join(" · ")}
                   </button>
                 ))}
               </div>
@@ -272,6 +285,26 @@ export function PrescriptionsClient({
               </button>
             )}
           </div>
+
+          {customerReadings.length > 0 && (
+            <div className="mb-4">
+              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Start from an earlier reading</label>
+              <div className="rounded-xl border border-border max-h-40 overflow-y-auto divide-y divide-border">
+                {customerReadings.map((rx) => (
+                  <button key={rx.id} type="button" onClick={() => copyReading(rx)}
+                    className="w-full text-left px-3 py-2 hover:bg-surface-hover transition-colors cursor-pointer">
+                    <span className="block text-xs font-medium">
+                      {formatDate(rx.date)}
+                      {rx.label && <span className="font-normal text-muted-foreground">{` · ${rx.label}`}</span>}
+                      {rx.isOwnPrescription && <span className="font-normal text-muted-foreground">{" · own prescription"}</span>}
+                    </span>
+                    <span className="block text-[10px] text-muted-foreground tabular-nums">{readingSummary(rx)}</span>
+                  </button>
+                ))}
+              </div>
+              <p className="text-[10px] text-muted-foreground mt-1">It fills in the boxes below. The earlier reading stays as it was.</p>
+            </div>
+          )}
 
           {(["Right Eye (OD)", "Left Eye (OS)"] as const).map((eye) => {
             const prefix = eye.includes("Right") ? "right" : "left";

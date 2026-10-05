@@ -150,6 +150,7 @@ export async function getCustomers(): Promise<CustomerView[]> {
     id: c.id,
     name: c.name,
     phone: c.phone ?? "",
+    phone2: c.phone2 ?? "",
     serialNumber: c.serialNumber,
     email: c.email,
     address: c.address,
@@ -171,6 +172,7 @@ export async function getCustomer(id: string): Promise<CustomerView | null> {
     id: c.id,
     name: c.name,
     phone: c.phone ?? "",
+    phone2: c.phone2 ?? "",
     serialNumber: c.serialNumber,
     email: c.email,
     address: c.address,
@@ -187,6 +189,8 @@ export type SaleView = Sale & {
   // Everything needed to reopen and reprint a past invoice exactly as it was billed.
   dateTime: string;
   customerPhone: string;
+  // Their second number, "" when there isn't one.
+  customerPhone2: string;
   // The customer's own serial number, so an invoice can be found by it.
   customerSerial: string;
   customLensName: string;
@@ -258,6 +262,7 @@ function mapSale(s: SaleRow): SaleView {
     customerId: s.customerId ?? "",
     customerName: s.customer ? customerLabel(s.customer) : "Walk-in",
     customerPhone: s.customer?.phone ?? "",
+    customerPhone2: s.customer?.phone2 ?? "",
     customerSerial: s.customer?.serialNumber ?? "",
     items: s.items.map((it) => ({
       id: it.id,

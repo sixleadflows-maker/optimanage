@@ -17,6 +17,8 @@ import { trashInvoice, TrashError } from "@/lib/trash/snapshots";
 import type { PaymentPart } from "@/lib/sales/paymentSplit";
 import { customersWithPhone } from "@/lib/trash/heldValues";
 import { sameName } from "@/lib/utils/phone";
+import { unexpectedFailure } from "@/lib/utils/serverFailure";
+
 
 export interface CartItemInput {
   // Correcting an invoice: the line this already is, so it's changed in place.
@@ -74,7 +76,7 @@ export interface CreateSaleInput {
   offlineRef?: string;
   // A customer added at the till while offline, created (or matched on phone)
   // when the bill syncs.
-  newCustomer?: { name: string; phone: string };
+  newCustomer?: { name: string; phone: string; phone2?: string };
 }
 
 // An old invoice is one dated this far before now; anything closer is just the
@@ -86,20 +88,21 @@ const BACKDATE_AFTER_MS = 10 * 60_000;
  * so they're matched on number and name together; anyone else is added as a
  * new customer, the same as when the till is online.
  */
-async function customerForOfflineBill(c: { name: string; phone: string }) {
+async function customerForOfflineBill(c: { name: string; phone: string; phone2?: string }) {
   const name = c.name.trim();
   const phone = c.phone.trim();
+  const phone2 = (c.phone2 ?? "").trim();
   if (phone) {
     // Saved with only a number: the record on that number that has no name yet.
     const same = (await customersWithPhone(phone)).find((x) => (name ? sameName(x.name, name) : !x.name.trim()));
     if (same) return same.id;
   }
-  const created = await db.customer.create({ data: { name, phone: phone || null } });
+  const created = await db.customer.create({ data: { name, phone: phone || null, phone2: phone2 || null } });
   return created.id;
 }
 
 /** A customer can be added with just a number, or just a name. */
-const hasNameOrPhone = (c: { name: string; phone: string }) => !!(c.name.trim() || c.phone.trim());
+const hasNameOrPhone = (c: { name: string; phone: string; phone2?: string }) => !!(c.name.trim() || c.phone.trim() || (c.phone2 ?? "").trim());
 
 /**
  * Who took the order vs. who generated the bill, defaulting to the signed-in
@@ -177,7 +180,7 @@ export async function createSale(input: CreateSaleInput) {
     };
   } catch (e) {
     if (e instanceof SaleError) return { ok: false as const, error: e.message };
-    throw e;
+    return unexpectedFailure("createSale", e);
   }
 }
 
@@ -205,7 +208,7 @@ export async function collectSalePayment(input: CollectPaymentInput) {
     });
   } catch (e) {
     if (e instanceof SaleError) return { ok: false as const, error: e.message };
-    throw e;
+    return unexpectedFailure("collectSalePayment", e);
   }
 }
 
@@ -251,7 +254,7 @@ export async function updateSale(input: UpdateSaleInput) {
     });
   } catch (e) {
     if (e instanceof SaleError) return { ok: false as const, error: e.message };
-    throw e;
+    return unexpectedFailure("updateSale", e);
   }
 }
 
@@ -318,7 +321,7 @@ export async function updateTillSale(input: CreateSaleInput) {
     };
   } catch (e) {
     if (e instanceof SaleError) return { ok: false as const, error: e.message };
-    throw e;
+    return unexpectedFailure("updateTillSale", e);
   }
 }
 
@@ -332,7 +335,7 @@ export async function cancelBalance(saleId: string) {
     return await cancelSaleBalance(saleId, session.user.name ?? "");
   } catch (e) {
     if (e instanceof SaleError) return { ok: false as const, error: e.message };
-    throw e;
+    return unexpectedFailure("cancelBalance", e);
   }
 }
 
@@ -345,7 +348,7 @@ export async function undoCancelBalance(saleId: string) {
     return await restoreSaleBalance(saleId);
   } catch (e) {
     if (e instanceof SaleError) return { ok: false as const, error: e.message };
-    throw e;
+    return unexpectedFailure("undoCancelBalance", e);
   }
 }
 
@@ -378,7 +381,7 @@ export async function updateSalePayment(input: UpdatePaymentInput) {
     });
   } catch (e) {
     if (e instanceof SaleError) return { ok: false as const, error: e.message };
-    throw e;
+    return unexpectedFailure("updateSalePayment", e);
   }
 }
 

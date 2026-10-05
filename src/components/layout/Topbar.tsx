@@ -241,7 +241,7 @@ export function Topbar({ user, branches }: { user: TopbarUser; branches: BranchV
                             <span className="truncate">{c.name || "No name yet"}</span>
                           </span>
                           <span className="block text-[11px] text-muted-foreground truncate">
-                            {[c.serialNumber && `Serial ${c.serialNumber}`, c.phone, c.prescriptionCount > 0 && `${c.prescriptionCount} prescription${c.prescriptionCount === 1 ? "" : "s"}`]
+                            {[c.serialNumber && `Serial ${c.serialNumber}`, c.phone, c.phone2, c.prescriptionCount > 0 && `${c.prescriptionCount} prescription${c.prescriptionCount === 1 ? "" : "s"}`]
                               .filter(Boolean).join(" · ")}
                           </span>
                         </span>

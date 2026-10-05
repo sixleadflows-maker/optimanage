@@ -61,6 +61,8 @@ model Customer {
   // Not unique: one contact number can carry several customers -- a family on
   // one phone, or a separate record for each order.
   phone         String?
+  // A second contact number (a relative's, or their other phone). Optional.
+  phone2        String?
   serialNumber  String         @default("")
   email         String         @default("")
   address       String         @default("")

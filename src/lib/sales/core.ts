@@ -192,6 +192,13 @@ async function priceSale(input: {
   if (!input.items.length && customLensPrice <= 0) throw new SaleError("Cart is empty");
   if (customLensPrice > 0 && !customLensName) throw new SaleError("Custom lens name is required");
 
+  // A price, quantity or discount that isn't a number (an emptied box can send
+  // NaN) would be saved as one and wreck the day's totals.
+  const amounts = [input.invoiceDiscount, customLensPrice, input.labCharges ?? 0, input.fittingCharges ?? 0, ...input.items.flatMap((i) => [i.quantity, i.unitPrice, i.discount])];
+  if (!amounts.every((n) => Number.isFinite(n))) {
+    throw new SaleError("One of the prices, quantities or discounts isn't a number — check them and try again");
+  }
+
   const productIds = input.items.flatMap((i) => (i.productId ? [i.productId] : []));
   const products = await db.product.findMany({ where: { id: { in: productIds } } });
   const productMap = new Map(products.map((p) => [p.id, p]));

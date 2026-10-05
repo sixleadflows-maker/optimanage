@@ -4,10 +4,10 @@ import { useState, useMemo, useRef, useEffect } from "react";
 import type { Product } from "@/lib/mock/types";
 import { formatCurrency, toLocalInput } from "@/lib/utils/format";
 import { useApp } from "@/lib/context";
-import { DISCOUNT_PERCENTAGES, LENS_COLORS, PAYMENT_TYPE_LABEL } from "@/lib/constants";
+import { DISCOUNT_PERCENTAGES, FRAME_CATEGORIES, LENS_COLORS, PAYMENT_TYPE_LABEL } from "@/lib/constants";
 import { createSale, updateTillSale, type CreateSaleInput } from "@/lib/actions/sales";
 import { createCustomer } from "@/lib/actions/customers";
-import { createPrescription, updatePrescription } from "@/lib/actions/prescriptions";
+import { createPrescription, updatePrescription, getCustomerReadings, type SavedReading } from "@/lib/actions/prescriptions";
 import { getDrafts, addDraft, replaceDraft, removeDraft, markDraftFailed, makeOfflineRef, type OfflineDraft } from "@/lib/offlineDrafts";
 import { useRouter, unstable_isUnrecognizedActionError } from "next/navigation";
 import { reportOutdatedPage } from "@/components/layout/UpdateNotice";
@@ -17,17 +17,18 @@ import {
   Search, Plus, Minus, Trash2, X, User, CreditCard,
   Banknote, Building2, Smartphone, Printer, MessageCircle, Receipt,
   Glasses, ChevronDown, ChevronUp, Lock, Edit3,
-  WifiOff, UploadCloud, ScanLine, UserPlus, PenLine, CalendarClock, Save, Check, Split,
+  WifiOff, UploadCloud, ScanLine, UserPlus, PenLine, CalendarClock, Save, Check, Split, AlertTriangle, History,
 } from "lucide-react";
 import { SPLIT_METHOD, paymentFromParts } from "@/lib/sales/paymentSplit";
 import { SplitPaymentFields, splitAmountsTotal, type SplitAmounts } from "@/components/invoice/SplitPaymentFields";
 import { firstImage } from "@/lib/utils/images";
 import { LensLoader } from "@/components/ui/LensLoader";
 import { RxPowerInput } from "@/components/ui/RxPowerInput";
-import { isPowerField, parseRxText, rxFieldText, rxFormTexts, type RxTextColumns } from "@/lib/utils/rx";
+import { isPowerField, parseRxText, rxFieldText, rxFormTexts, formatRxPower, type RxTextColumns } from "@/lib/utils/rx";
 import { ThermalReceipt, A4Invoice, lensNote, type InvoiceData, type ShopDetails } from "@/components/invoice/InvoiceDocuments";
 import { matchesSearch } from "@/lib/utils/search";
-import { samePhone } from "@/lib/utils/phone";
+import { LensPicker, type PickedLens } from "./LensPicker";
+import { shareNumber, allNumbers } from "@/lib/utils/phone";
 
 interface CartItem {
   // productId for an inventory item; a generated key for a typed-in one.
@@ -39,6 +40,11 @@ interface CartItem {
   price: number;
   quantity: number;
   discount: number;
+  // A frame (from the stock, or typed in): lenses are offered for it.
+  isFrame?: boolean;
+  // Set on a lens bought for a frame: that frame's key. It sits under the frame
+  // and goes when the frame does.
+  forKey?: string;
 }
 
 export interface POSRx extends RxTextColumns {
@@ -55,6 +61,8 @@ interface POSCustomer {
   id: string;
   name: string;
   phone: string;
+  // A second number, if they gave one.
+  phone2?: string;
   serialNumber: string;
   // Their most recent prescription, to start the Rx form from.
   latestRx?: POSRx | null;
@@ -130,8 +138,8 @@ const EMPTY_RX = {
   lensName: "", lensPrice: "", lensQty: 1, lensColorChoice: "", lensColorOther: "", lensDescription: "", lensSearch: "",
 };
 
-const EMPTY_MANUAL_ITEM = { name: "", description: "", price: "", quantity: "1" };
-const EMPTY_NEW_CUSTOMER = { name: "", phone: "", serialNumber: "" };
+const EMPTY_MANUAL_ITEM = { name: "", description: "", price: "", quantity: "1", frame: true };
+const EMPTY_NEW_CUSTOMER = { name: "", phone: "", phone2: "", serialNumber: "" };
 
 // A bill dated this far back is an old invoice being entered from the records.
 const OLD_BILL_AFTER_MS = 10 * 60_000;
@@ -349,8 +357,24 @@ export function POSClient({
   const [rxTouched, setRxTouched] = useState(false);
   const [rxPrefilledFrom, setRxPrefilledFrom] = useState<string | null>(null);
   const [savingRx, setSavingRx] = useState<string | null>(null);
+  // "Use an earlier reading": the customer's saved readings, fetched when the
+  // list is opened (they aren't sent with every customer on the till).
+  const [readingsOpen, setReadingsOpen] = useState(false);
+  const [readings, setReadings] = useState<{ customerId: string; list: SavedReading[] } | null>(null);
+  const [loadingReadings, setLoadingReadings] = useState(false);
   const [poppedId, setPoppedId] = useState<string | null>(null);
   const popTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // The frame (its cart key) a lens is being chosen for, and whether adding a
+  // frame brings that up by itself. The choice is remembered on this computer.
+  const [lensFor, setLensFor] = useState<string | null>(null);
+  const [offerLens, setOfferLens] = useState(() => {
+    try { return localStorage.getItem("optimanage:offerLens") !== "0"; } catch { return true; }
+  });
+  const changeOfferLens = (offer: boolean) => {
+    setOfferLens(offer);
+    try { localStorage.setItem("optimanage:offerLens", offer ? "1" : "0"); } catch { /* not remembered */ }
+  };
 
   // Typing in an item that isn't in the inventory.
   const [showManualItem, setShowManualItem] = useState(false);
@@ -517,7 +541,7 @@ export function POSClient({
 
   const filteredCustomers = useMemo(() => {
     if (!customerSearch.trim()) return allCustomers.slice(0, 5);
-    return allCustomers.filter((c) => matchesSearch(customerSearch, [c.name, c.phone, c.serialNumber]));
+    return allCustomers.filter((c) => matchesSearch(customerSearch, [c.name, c.phone, c.phone2, c.serialNumber]));
   }, [allCustomers, customerSearch]);
 
   const filteredLensProducts = useMemo(() => {
@@ -531,6 +555,8 @@ export function POSClient({
     const product = products.find((p) => p.id === productId);
     if (!product) return;
     pop(productId);
+    const isNew = !cart.some((i) => i.key === productId);
+    const isFrame = FRAME_CATEGORIES.includes(product.category);
     setCart((prev) => {
       const existing = prev.find((i) => i.key === productId);
       if (existing) {
@@ -540,10 +566,37 @@ export function POSClient({
       }
       return [...prev, {
         key: productId, productId, name: product.name, brand: product.brand,
-        description: product.description, price: product.salePrice, quantity: 1, discount: 0,
+        description: product.description, price: product.salePrice, quantity: 1, discount: 0, isFrame,
       }];
     });
+    // A frame just added (scanned or picked): offer the lenses for it.
+    if (isNew && isFrame && offerLens) setLensFor(productId);
   };
+
+  // A lens bought for a frame goes in the cart under it, described as that
+  // frame's lens, and is billed and taken out of stock like any other item.
+  const addLensToFrame = (frameKey: string, lens: PickedLens) => {
+    const frame = cart.find((i) => i.key === frameKey);
+    if (!frame) { setLensFor(null); return; }
+    const frameLabel = [frame.brand, frame.name].filter(Boolean).join(" ");
+    manualCounter.current += 1;
+    const key = lens.productId ? `lens-${frameKey}-${lens.productId}` : `lens-${frameKey}-typed-${manualCounter.current}`;
+    setCart((prev) => {
+      if (prev.some((i) => i.key === key)) {
+        return prev.map((i) => (i.key === key ? { ...i, quantity: i.quantity + lens.quantity } : i));
+      }
+      return [...prev, {
+        key, productId: lens.productId, name: lens.name, brand: lens.brand,
+        description: `Lens for ${frameLabel}`, price: lens.price, quantity: lens.quantity, discount: 0, forKey: frameKey,
+      }];
+    });
+    pop(key);
+    setLensFor(null);
+    showToast(`${[lens.brand, lens.name].filter(Boolean).join(" ")} added for ${frameLabel}`, "success");
+  };
+
+  // A frame leaving the cart takes its lenses with it.
+  const withoutOrphanLenses = (items: CartItem[]) => items.filter((i) => !i.forKey || items.some((f) => f.key === i.forKey));
 
   const addManualItem = () => {
     const name = manualItem.name.trim();
@@ -555,20 +608,25 @@ export function POSClient({
     const key = `manual-${Date.now()}-${manualCounter.current}`;
     setCart((prev) => [...prev, {
       key, productId: null, name, brand: "", description: manualItem.description.trim(), price, quantity, discount: 0,
+      isFrame: manualItem.frame,
     }]);
     pop(key);
+    const offerFor = manualItem.frame && offerLens;
     setManualItem({ ...EMPTY_MANUAL_ITEM });
     setShowManualItem(false);
     showToast(`Added ${name}`, "success");
+    if (offerFor) setLensFor(key);
   };
 
   const updateQuantity = (key: string, delta: number) => {
     setCart((prev) =>
-      prev
-        .map((i) =>
-          i.key === key ? { ...i, quantity: Math.max(0, i.quantity + delta) } : i
-        )
-        .filter((i) => i.quantity > 0)
+      withoutOrphanLenses(
+        prev
+          .map((i) =>
+            i.key === key ? { ...i, quantity: Math.max(0, i.quantity + delta) } : i
+          )
+          .filter((i) => i.quantity > 0)
+      )
     );
   };
 
@@ -593,7 +651,7 @@ export function POSClient({
 
   // Who's already on the number being typed. It never blocks adding: several
   // customers can share one number (a family, or a record per order).
-  const onNewCustomerNumber = showNewCustomer ? allCustomers.filter((c) => samePhone(c.phone, newCustomer.phone)) : [];
+  const onNewCustomerNumber = showNewCustomer ? allCustomers.filter((c) => shareNumber(c, newCustomer)) : [];
 
   const pickCustomerOnNumber = (id: string) => {
     setSelectedCustomer(id);
@@ -605,14 +663,17 @@ export function POSClient({
   const saveNewCustomer = async () => {
     if (savingCustomer) return;
     const name = newCustomer.name.trim();
-    const phone = newCustomer.phone.trim();
+    // Only one number typed, and it went in the second box: it's their number.
+    const typed = [newCustomer.phone.trim(), newCustomer.phone2.trim()].filter(Boolean);
+    const phone = typed[0] ?? "";
+    const phone2 = typed[1] ?? "";
     // A number on its own is enough -- the name can be added later.
     if (!name && !phone) { showToast("Enter a name or a phone number", "error"); return; }
     const label = name || phone;
     setSavingCustomer(true);
     try {
       const res = await createCustomer({
-        name, phone: newCustomer.phone, serialNumber: newCustomer.serialNumber,
+        name, phone, phone2, serialNumber: newCustomer.serialNumber,
         email: "", address: "", lastVisit: "",
       });
       if (!res.ok) {
@@ -622,7 +683,7 @@ export function POSClient({
       const id = res.id;
       setAddedCustomers((prev) => prev.some((c) => c.id === id)
         ? prev
-        : [...prev, { id, name, phone: newCustomer.phone.trim(), serialNumber: newCustomer.serialNumber.trim() }]);
+        : [...prev, { id, name, phone, phone2, serialNumber: newCustomer.serialNumber.trim() }]);
       setSelectedCustomer(id);
       showToast(
         onNewCustomerNumber.length
@@ -639,7 +700,7 @@ export function POSClient({
       // on file already).
       const id = `local-${crypto.randomUUID()}`;
       setAddedCustomers((prev) => [...prev, {
-        id, name, phone: newCustomer.phone.trim(), serialNumber: newCustomer.serialNumber.trim(), local: true,
+        id, name, phone, phone2, serialNumber: newCustomer.serialNumber.trim(), local: true,
       }]);
       setSelectedCustomer(id);
       setShowNewCustomer(false);
@@ -652,6 +713,11 @@ export function POSClient({
   };
 
   const cartSubtotal = cart.reduce((sum, i) => sum + i.price * i.quantity - i.discount, 0);
+  // The cart as shown: each frame followed by the lenses bought for it.
+  const cartRows = [
+    ...cart.filter((i) => !i.forKey).flatMap((i) => [i, ...cart.filter((l) => l.forKey === i.key)]),
+    ...cart.filter((l) => l.forKey && !cart.some((f) => f.key === l.forKey)),
+  ];
   const lensColor = lensColorChoice === "Other" ? lensColorOther.trim() : lensColorChoice;
   const customLensAmount = useCustomLens ? customLensPrice * customLensQty : 0;
   const rxLensColor = (e: RxEntry) => (e.lensColorChoice === "Other" ? e.lensColorOther.trim() : e.lensColorChoice);
@@ -708,6 +774,36 @@ export function POSClient({
 
   const choosePaymentType = (pt: "Full" | "Advance" | "Balance") => setPaymentType(pt);
 
+  // What's stopping Complete Sale, if anything. It's shown above the button as
+  // well as in the pop-up, so a bill that "isn't saving" says why and stays said.
+  const saleBlocker: string | null = (() => {
+    if (payType === "Advance" && advancePaid <= 0) {
+      return isSplit ? "Enter how much was paid by each method" : "Enter the advance amount received";
+    }
+    if (isSplit && payType === "Full" && Math.abs(splitPaid - due) > 0.01) {
+      return splitPaid < due
+        ? `The split payment is ${formatCurrency(due - splitPaid)} short of the ${formatCurrency(due)} to pay`
+        : `The split payment is ${formatCurrency(splitPaid - due)} more than the ${formatCurrency(due)} to pay`;
+    }
+    if (payType !== "Full" && advancePaid > due + 0.01) {
+      return `${formatCurrency(advancePaid)} is more than the ${formatCurrency(due)} to pay — choose Full Payment instead`;
+    }
+    if (recordRx && !selectedCustomer) {
+      return "Pick a customer above to save the prescription, or untick Record prescription (Rx)";
+    }
+    if (useCustomLens && (!customLensName.trim() || customLensPrice <= 0)) {
+      return "Enter a name and price for the custom lens, or take it off";
+    }
+    // A typed-in lens on a further prescription, half filled in.
+    const halfLens = recordRx
+      ? rxList.findIndex((e, i) => i > 0 && e.lensCustom && (e.lensName.trim() !== "" || e.lensPrice !== "") && (!e.lensName.trim() || !(Number(e.lensPrice) > 0)))
+      : -1;
+    if (halfLens > 0) {
+      return `Enter a name and price for the lens on prescription ${halfLens + 1} (${rxList[halfLens].label.trim() || "no name yet"})`;
+    }
+    return null;
+  })();
+
   // Which lens went with which prescription, for the record: the first one's
   // is the lens chosen in the Lens box, the others carry their own.
   const rxLens = (entry: RxEntry) => {
@@ -736,22 +832,67 @@ export function POSClient({
 
   // The first prescription starts from the customer's last one -- most visits
   // are a small change to it, not a new one -- unless staff already typed.
-  const rxFromCustomer = (c?: POSCustomer): RxEntry => {
-    const last = c?.latestRx;
-    if (!last) return blankRx();
-    return {
-      ...blankRx(),
-      rightSph: rxFieldText("Sph", last.rightSph, last.rightSphText), rightCyl: rxFieldText("Cyl", last.rightCyl, last.rightCylText),
-      rightAxis: rxFieldText("Axis", last.rightAxis), rightPd: rxFieldText("Pd", last.rightPd),
-      rightAdd: rxFieldText("Add", last.rightAdd, last.rightAddText),
-      leftSph: rxFieldText("Sph", last.leftSph, last.leftSphText), leftCyl: rxFieldText("Cyl", last.leftCyl, last.leftCylText),
-      leftAxis: rxFieldText("Axis", last.leftAxis), leftPd: rxFieldText("Pd", last.leftPd),
-      leftAdd: rxFieldText("Add", last.leftAdd, last.leftAddText),
-      label: last.label,
-      notes: last.notes,
-      isOwn: last.isOwn,
-      fromRecordId: last.id,
-    };
+  const rxFromRecord = (last: POSRx | SavedReading): RxEntry => ({
+    ...blankRx(),
+    rightSph: rxFieldText("Sph", last.rightSph, last.rightSphText), rightCyl: rxFieldText("Cyl", last.rightCyl, last.rightCylText),
+    rightAxis: rxFieldText("Axis", last.rightAxis), rightPd: rxFieldText("Pd", last.rightPd),
+    rightAdd: rxFieldText("Add", last.rightAdd, last.rightAddText),
+    leftSph: rxFieldText("Sph", last.leftSph, last.leftSphText), leftCyl: rxFieldText("Cyl", last.leftCyl, last.leftCylText),
+    leftAxis: rxFieldText("Axis", last.leftAxis), leftPd: rxFieldText("Pd", last.leftPd),
+    leftAdd: rxFieldText("Add", last.leftAdd, last.leftAddText),
+    label: last.label,
+    notes: last.notes,
+    isOwn: last.isOwn,
+    fromRecordId: last.id,
+  });
+  const rxFromCustomer = (c?: POSCustomer): RxEntry => (c?.latestRx ? rxFromRecord(c.latestRx) : blankRx());
+
+  // One line for a saved reading in the list: "R -1.50 / -0.50 × 90 · L -1.25".
+  const readingSummary = (r: SavedReading) => {
+    const eye = (sph: number, sphText: string, cyl: number, cylText: string, axis: number) =>
+      [formatRxPower(sph, sphText), cyl || cylText ? `/ ${formatRxPower(cyl, cylText)}` : "", axis ? `× ${axis}` : ""].filter(Boolean).join(" ");
+    return `R ${eye(r.rightSph, r.rightSphText, r.rightCyl, r.rightCylText, r.rightAxis)}  ·  L ${eye(r.leftSph, r.leftSphText, r.leftCyl, r.leftCylText, r.leftAxis)}`;
+  };
+
+  const showReadings = async () => {
+    if (!customer || customer.local) return;
+    setReadingsOpen(true);
+    if (readings?.customerId === customer.id) return;
+    setLoadingReadings(true);
+    try {
+      const list = await getCustomerReadings(customer.id);
+      setReadings({ customerId: customer.id, list });
+    } catch (e) {
+      if (unstable_isUnrecognizedActionError(e)) reportOutdatedPage();
+      showToast("Couldn't load their readings — check the connection and try again", "error");
+      setReadingsOpen(false);
+    } finally {
+      setLoadingReadings(false);
+    }
+  };
+
+  // One click from the bill: opens the prescription box with the list showing.
+  const startReadingPick = () => {
+    setShowJob(true);
+    setRecordRx(true);
+    void showReadings();
+  };
+
+  // Loads the picked reading into the bill. If nothing has been typed yet it
+  // takes the place of the starting one (and is attached as it is); otherwise it
+  // comes in as another prescription on the slip.
+  const pickReading = (r: SavedReading) => {
+    const entry = rxFromRecord(r);
+    if (rxList.length === 0 || (rxList.length === 1 && !rxTouched)) {
+      setRxList([entry]);
+      setRxPrefilledFrom(r.date);
+      setRxTouched(false);
+    } else {
+      setRxList((prev) => [...prev, entry]);
+      setRxTouched(true);
+    }
+    setReadingsOpen(false);
+    showToast(`${customerLabel}'s reading from ${new Date(r.date).toLocaleDateString("en-GB")} is on this bill`, "success");
   };
 
   useEffect(() => {
@@ -868,6 +1009,7 @@ export function POSClient({
     setSplitAmounts({});
     setSaleResult(null);
     setShowJob(false);
+    setLensFor(null);
     setLensProductId("");
     setLensSearch("");
     setUseCustomLens(false);
@@ -886,6 +1028,7 @@ export function POSClient({
     setFittingCharges(0);
     setRecordRx(false);
     setRxList([]);
+    setReadingsOpen(false);
     setOrderTakenBy(lastStaff.orderTakenBy);
     setBillGeneratedBy(lastStaff.billGeneratedBy);
     setEditingBill(false);
@@ -964,37 +1107,12 @@ export function POSClient({
 
   const completeSale = async () => {
     if (!hasSaleableItems) return;
-    if (payType === "Advance" && advancePaid <= 0) {
-      showToast(isSplit ? "Enter how much was paid by each method" : "Enter the advance amount received", "error");
+    if (saleBlocker) {
+      showToast(saleBlocker, "error");
       return;
     }
-    if (isSplit && payType === "Full" && Math.abs(splitPaid - due) > 0.01) {
-      showToast(
-        splitPaid < due
-          ? `The split payment is ${formatCurrency(due - splitPaid)} short of the ${formatCurrency(due)} to pay`
-          : `The split payment is ${formatCurrency(splitPaid - due)} more than the ${formatCurrency(due)} to pay`,
-        "error",
-      );
-      return;
-    }
-    if (payType !== "Full" && advancePaid > due + 0.01) {
-      showToast(`${formatCurrency(advancePaid)} is more than the ${formatCurrency(due)} to pay — choose Full Payment instead`, "error");
-      return;
-    }
-    if (recordRx && !selectedCustomer) {
-      showToast("Select a customer to save the prescription", "error");
-      return;
-    }
-    if (useCustomLens && (!customLensName.trim() || customLensPrice <= 0)) {
-      showToast("Enter a name and price for the custom lens", "error");
-      return;
-    }
-    // A typed-in lens on a further prescription, half filled in.
-    const halfLens = recordRx
-      ? rxList.findIndex((e, i) => i > 0 && e.lensCustom && (e.lensName.trim() !== "" || e.lensPrice !== "") && (!e.lensName.trim() || !(Number(e.lensPrice) > 0)))
-      : -1;
-    if (halfLens > 0) {
-      showToast(`Enter a name and price for the lens on prescription ${halfLens + 1} (${rxList[halfLens].label.trim() || "no name yet"})`, "error");
+    if (!Number.isFinite(total) || !Number.isFinite(paidNow)) {
+      showToast("One of the amounts isn't a number — check the prices, discount and amount paid", "error");
       return;
     }
     if (billDateValue && (Number.isNaN(billDateValue.getTime()) || billDateValue.getTime() > Date.now() + 60_000)) {
@@ -1013,7 +1131,7 @@ export function POSClient({
           : { name: l.name, description: l.description, quantity: l.quantity, unitPrice: l.price, discount: 0 })),
       ],
       customerId: customer && !customer.local ? customer.id : undefined,
-      newCustomer: customer?.local ? { name: customer.name, phone: customer.phone } : undefined,
+      newCustomer: customer?.local ? { name: customer.name, phone: customer.phone, phone2: customer.phone2 } : undefined,
       paymentMethod: billPayment.paymentMethod,
       paymentSplit: billPayment.paymentSplit.length ? billPayment.paymentSplit : undefined,
       paymentType: payType,
@@ -1159,7 +1277,7 @@ export function POSClient({
       orderTakenBy: saleResult.orderTakenByName,
       billGeneratedBy: saleResult.billGeneratedByName,
       customerName: customer ? customer.name || customer.phone || "Customer" : null,
-      customerPhone: customer?.phone ?? "",
+      customerPhone: customer ? allNumbers(customer) : "",
       lines: [
         ...cart.map((item) => ({
           key: item.key,
@@ -1197,7 +1315,7 @@ export function POSClient({
     };
 
     return (
-      <div className="animate-slide-right">
+      <div className="animate-slide-right solid-sheet rounded-3xl p-4 sm:p-6">
         <div className="flex items-center justify-between mb-6 no-print">
           <h1 className="text-2xl font-bold">Invoice Preview</h1>
           <div className="flex items-center gap-2">
@@ -1276,6 +1394,10 @@ export function POSClient({
           placeholder="Waiting for scan..."
           className="w-full max-w-sm px-4 py-3 glass-input text-sm text-center"
         />
+        <button onClick={() => { setEntryMode("manual"); setShowManualItem(true); }}
+          className="text-xs text-primary font-semibold cursor-pointer">
+          Frame not in the system? Type it in with its price
+        </button>
         <button onClick={() => setEntryMode("choose")} className="text-xs text-muted-foreground hover:text-foreground underline cursor-pointer">
           ← Back
         </button>
@@ -1295,7 +1417,7 @@ export function POSClient({
             <User className="w-4 h-4 text-primary" />
             <span>
               New invoice for <span className="font-semibold">{customerLabel}</span>
-              {customer.phone ? <span className="text-muted-foreground"> · {customer.phone}</span> : null}
+              {customer.phone ? <span className="text-muted-foreground"> · {allNumbers(customer, " · ")}</span> : null}
             </span>
             <button onClick={() => setSelectedCustomer("")} title="Bill someone else" className="cursor-pointer">
               <X className="w-3.5 h-3.5" />
@@ -1393,13 +1515,13 @@ export function POSClient({
                 className={`flex items-center justify-center gap-1.5 px-3.5 py-2.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
                   showManualItem ? "bg-primary text-white" : "bg-primary/10 text-primary hover:bg-primary/15"
                 }`}>
-                <PenLine className="w-3.5 h-3.5" /> Item not in list
+                <PenLine className="w-3.5 h-3.5" /> Frame / item not in list
               </button>
             </div>
 
             {showManualItem && (
               <div className="mb-4 p-3 rounded-xl border border-primary/30 bg-primary/5 animate-fade-in">
-                <p className="text-xs font-semibold mb-0.5">Enter an item that isn&apos;t in the inventory</p>
+                <p className="text-xs font-semibold mb-0.5">Type a frame or item that isn&apos;t in the inventory</p>
                 <p className="text-[10px] text-muted-foreground mb-2">It&apos;s billed by name and price only — no stock is deducted.</p>
                 <div className="grid grid-cols-2 sm:grid-cols-12 gap-2">
                   <input type="text" value={manualItem.name} autoFocus
@@ -1419,6 +1541,11 @@ export function POSClient({
                     onKeyDown={(e) => { if (e.key === "Enter") addManualItem(); }}
                     placeholder="Qty" title="Quantity" className="sm:col-span-2 px-3 py-2 glass-input text-xs" />
                 </div>
+                <label className="flex items-center gap-2 text-[11px] mt-2 cursor-pointer">
+                  <input type="checkbox" className="rounded" checked={manualItem.frame}
+                    onChange={(e) => setManualItem({ ...manualItem, frame: e.target.checked })} />
+                  It&apos;s a frame — offer a lens for it
+                </label>
                 <div className="flex gap-2 mt-2">
                   <button onClick={addManualItem}
                     className="flex items-center gap-1.5 px-4 py-2 bg-primary text-white rounded-lg text-xs font-semibold hover:bg-primary-hover transition-colors cursor-pointer">
@@ -1440,6 +1567,13 @@ export function POSClient({
                   Enter it manually →
                 </button>
               </div>
+            )}
+
+            {search && filteredProducts.length > 0 && !showManualItem && (
+              <button onClick={() => { setManualItem({ ...EMPTY_MANUAL_ITEM, name: search }); setShowManualItem(true); }}
+                className="mb-3 text-[11px] text-primary font-semibold cursor-pointer">
+                Not the one? Type this frame in by hand →
+              </button>
             )}
 
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
@@ -1505,7 +1639,7 @@ export function POSClient({
                     onClick={() => { setSelectedCustomer(c.id); setCustomerSearch(""); }}
                     className="w-full text-left px-3 py-1.5 rounded-lg hover:bg-surface-hover text-xs"
                   >
-                    {[c.name, c.phone].filter(Boolean).join(" · ") || "No name yet"}
+                    {[c.name, c.phone, c.phone2].filter(Boolean).join(" · ") || "No name yet"}
                   </button>
                 ))}
               </div>
@@ -1524,12 +1658,16 @@ export function POSClient({
                   <input type="text" value={newCustomer.phone}
                     onChange={(e) => setNewCustomer({ ...newCustomer, phone: e.target.value })}
                     onKeyDown={(e) => { if (e.key === "Enter") saveNewCustomer(); }}
-                    placeholder="Phone" className="w-full px-3 py-2 glass-input text-xs" />
-                  <input type="text" value={newCustomer.serialNumber}
-                    onChange={(e) => setNewCustomer({ ...newCustomer, serialNumber: e.target.value })}
+                    placeholder="Main number" className="w-full px-3 py-2 glass-input text-xs" />
+                  <input type="text" value={newCustomer.phone2}
+                    onChange={(e) => setNewCustomer({ ...newCustomer, phone2: e.target.value })}
                     onKeyDown={(e) => { if (e.key === "Enter") saveNewCustomer(); }}
-                    placeholder="Serial no. (optional)" className="w-full px-3 py-2 glass-input text-xs" />
+                    placeholder="Second number (optional)" className="w-full px-3 py-2 glass-input text-xs" />
                 </div>
+                <input type="text" value={newCustomer.serialNumber}
+                  onChange={(e) => setNewCustomer({ ...newCustomer, serialNumber: e.target.value })}
+                  onKeyDown={(e) => { if (e.key === "Enter") saveNewCustomer(); }}
+                  placeholder="Serial no. (optional)" className="w-full px-3 py-2 glass-input text-xs" />
                 {onNewCustomerNumber.length > 0 && (
                   <div className="rounded-lg bg-surface p-2 text-[11px] space-y-1">
                     <p className="font-semibold">{`Already on this number — ${onNewCustomerNumber.length} customer${onNewCustomerNumber.length === 1 ? "" : "s"}`}</p>
@@ -1559,9 +1697,17 @@ export function POSClient({
               </div>
             )}
             {customer && !showNewCustomer && (
-              <div className="flex items-center justify-between mt-2 px-2 py-1.5 bg-primary/5 rounded-lg">
-                <span className="text-xs font-medium">{[customer.name, customer.phone].filter(Boolean).join(" · ") || "No name yet"}</span>
-                <button onClick={() => setSelectedCustomer("")}><X className="w-3.5 h-3.5" /></button>
+              <div className="mt-2 space-y-1.5">
+                <div className="flex items-center justify-between px-2 py-1.5 bg-primary/5 rounded-lg">
+                  <span className="text-xs font-medium">{[customer.name, customer.phone, customer.phone2].filter(Boolean).join(" · ") || "No name yet"}</span>
+                  <button onClick={() => setSelectedCustomer("")}><X className="w-3.5 h-3.5" /></button>
+                </div>
+                {customer.latestRx && !customer.local && (
+                  <button onClick={startReadingPick}
+                    className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-primary/10 text-primary text-[11px] font-semibold hover:bg-primary/15 transition-colors cursor-pointer">
+                    <History className="w-3.5 h-3.5" /> Use an earlier reading
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -1729,12 +1875,47 @@ export function POSClient({
                     {customer ? (
                       <p className="text-[10px] text-muted-foreground leading-relaxed">
                         {rxPrefilledFrom && !rxTouched
-                          ? `Filled in from ${customerLabel}'s last prescription (${new Date(rxPrefilledFrom).toLocaleDateString("en-GB")}) — change anything that's different. `
+                          ? `Filled in from ${customerLabel}'s reading of ${new Date(rxPrefilledFrom).toLocaleDateString("en-GB")} — change anything that's different, or pick another with "Use an earlier reading". `
                           : ""}
                         {`Saved to ${customerLabel}'s prescription record when you complete the sale.`}
                       </p>
                     ) : (
                       <p className="text-[10px] text-warning">Select a customer above to save the prescription.</p>
+                    )}
+
+                    {customer && !customer.local && (
+                      <div>
+                        <button onClick={() => (readingsOpen ? setReadingsOpen(false) : void showReadings())}
+                          className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-surface hover:bg-surface-hover text-[11px] font-medium cursor-pointer">
+                          <span className="flex items-center gap-1.5"><History className="w-3.5 h-3.5 text-primary" /> Use an earlier reading</span>
+                          {readingsOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                        </button>
+                        {readingsOpen && (
+                          <div className="mt-1 rounded-lg border border-border max-h-56 overflow-y-auto divide-y divide-border">
+                            {loadingReadings && <p className="px-3 py-2 text-[11px] text-muted-foreground">Loading their readings…</p>}
+                            {!loadingReadings && readings?.customerId === customer.id && readings.list.length === 0 && (
+                              <p className="px-3 py-2 text-[11px] text-muted-foreground">{`No saved readings for ${customerLabel} yet.`}</p>
+                            )}
+                            {!loadingReadings && readings?.customerId === customer.id && readings.list.map((r) => (
+                              <div key={r.id} className="px-3 py-2 flex items-start justify-between gap-2">
+                                <div className="min-w-0">
+                                  <p className="text-[11px] font-semibold">
+                                    {new Date(r.date).toLocaleDateString("en-GB")}
+                                    {r.label && <span className="font-normal text-muted-foreground">{` · ${r.label}`}</span>}
+                                    {r.isOwn && <span className="font-normal text-muted-foreground">{" · own prescription"}</span>}
+                                  </p>
+                                  <p className="text-[10px] text-muted-foreground tabular-nums">{readingSummary(r)}</p>
+                                  {r.invoiceNo && <p className="text-[10px] text-muted-foreground">{`On ${r.invoiceNo}`}</p>}
+                                </div>
+                                <button onClick={() => pickReading(r)}
+                                  className="px-2.5 py-1 rounded-md bg-primary/10 text-primary text-[10px] font-semibold flex-shrink-0 cursor-pointer">
+                                  Use this
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     )}
 
                     {rxList.map((entry, index) => (
@@ -1837,8 +2018,9 @@ export function POSClient({
             </div>
           ) : (
             <div className="space-y-2 mb-4 max-h-72 overflow-y-auto">
-              {cart.map((item) => (
-                <div key={item.key} className={`py-2 px-1.5 -mx-1.5 border-b border-border ${poppedId === item.key ? "animate-cart-pop" : ""}`}>
+              {cartRows.map((item) => (
+                <div key={item.key}
+                  className={`py-2 border-b border-border ${item.forKey ? "pl-3 pr-1.5 ml-3 border-l-2 border-l-primary/40" : "px-1.5 -mx-1.5"} ${poppedId === item.key ? "animate-cart-pop" : ""}`}>
                   <div className="flex items-center gap-2">
                     <div className="flex-1 min-w-0">
                       <p className="text-xs font-medium truncate">{item.name}</p>
@@ -1865,7 +2047,8 @@ export function POSClient({
                       />
                     </div>
                     <p className="w-16 text-right text-xs font-semibold">{formatCurrency(item.price * item.quantity - item.discount)}</p>
-                    <button onClick={() => setCart((prev) => prev.filter((i) => i.key !== item.key))}>
+                    <button onClick={() => setCart((prev) => withoutOrphanLenses(prev.filter((i) => i.key !== item.key)))}
+                      aria-label={`Remove ${item.name}`}>
                       <Trash2 className="w-3.5 h-3.5 text-destructive" />
                     </button>
                   </div>
@@ -1887,6 +2070,13 @@ export function POSClient({
                     <button onClick={() => setEditingDetailsKey(item.key)}
                       className="mt-1 text-[10px] text-primary/80 hover:text-primary font-medium cursor-pointer">
                       + Add details
+                    </button>
+                  )}
+                  {item.isFrame && (
+                    <button onClick={() => setLensFor(item.key)}
+                      className="mt-1 text-[10px] text-primary font-semibold flex items-center gap-1 cursor-pointer">
+                      <Glasses className="w-3 h-3" />
+                      {cart.some((l) => l.forKey === item.key) ? "Add another lens" : "Add a lens for this frame"}
                     </button>
                   )}
                 </div>
@@ -2111,6 +2301,12 @@ export function POSClient({
                   </div>
                 )}
 
+                {saleBlocker && (
+                  <p className="flex items-start gap-1.5 text-[11px] font-medium text-destructive" role="alert">
+                    <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-px" />
+                    <span>{saleBlocker}</span>
+                  </p>
+                )}
                 <button
                   onClick={completeSale}
                   disabled={saving}
@@ -2128,6 +2324,20 @@ export function POSClient({
           )}
         </div>
       </div>
+      {lensFor && (() => {
+        const frame = cart.find((i) => i.key === lensFor);
+        if (!frame) return null;
+        return (
+          <LensPicker
+            frameName={[frame.brand, frame.name].filter(Boolean).join(" ")}
+            lenses={lensProducts}
+            offerEveryTime={offerLens}
+            onOfferChange={changeOfferLens}
+            onPick={(lens) => addLensToFrame(lensFor, lens)}
+            onClose={() => setLensFor(null)}
+          />
+        );
+      })()}
     </div>
   );
 }

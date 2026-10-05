@@ -27,6 +27,8 @@ export interface Customer {
   id: string;
   name: string;
   phone: string;
+  // A second number; "" when there isn't one.
+  phone2: string;
   serialNumber: string;
   email: string;
   address: string;

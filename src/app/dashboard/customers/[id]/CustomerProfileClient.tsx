@@ -10,7 +10,7 @@ import { deleteCustomer } from "@/lib/actions/customers";
 import { setPrescriptionNotesHidden } from "@/lib/actions/prescriptions";
 import { paymentStatusChipClass } from "@/lib/constants";
 import { formatEyeValue, rxLensLabel } from "@/lib/utils/rx";
-import { samePhone } from "@/lib/utils/phone";
+import { shareNumber, allNumbers } from "@/lib/utils/phone";
 import { CollectPaymentModal, EditInvoiceModal, EditPaymentModal, type EditorCustomer, type EditorStaff } from "@/app/dashboard/sales/InvoiceEditor";
 import { InvoiceDetails } from "@/components/invoice/InvoiceDetails";
 import { CustomerFormModal } from "../CustomerFormModal";
@@ -49,7 +49,7 @@ export function CustomerProfileClient({
     });
   const owed = sales.reduce((sum, s) => sum + s.balance, 0);
   // Other customers on the same contact number (a family, or a record per order).
-  const sharingNumber = customers.filter((c) => c.id !== customer.id && samePhone(c.phone, customer.phone));
+  const sharingNumber = customers.filter((c) => c.id !== customer.id && shareNumber(c, customer));
 
   // Hiding a note applies everywhere, so the customer's own screen at the
   // counter never shows it until someone chooses to.
@@ -131,6 +131,11 @@ export function CustomerProfileClient({
             <h2 className="font-bold text-lg">{customer.name}</h2>
             <div className="space-y-2 mt-4 text-sm text-muted-foreground">
               <p className="flex items-center gap-2 justify-center"><Phone className="w-3.5 h-3.5" /> {customer.phone || "No phone on file"}</p>
+              {customer.phone2 && (
+                <p className="flex items-center gap-2 justify-center">
+                  <Phone className="w-3.5 h-3.5" /> {customer.phone2} <span className="text-[10px]">(second number)</span>
+                </p>
+              )}
               {customer.email && <p className="flex items-center gap-2 justify-center"><Mail className="w-3.5 h-3.5" /> {customer.email}</p>}
               {customer.address && <p className="flex items-center gap-2 justify-center"><MapPin className="w-3.5 h-3.5" /> {customer.address}</p>}
             </div>
@@ -170,7 +175,7 @@ export function CustomerProfileClient({
             <div className="glass-card p-5">
               <h3 className="text-sm font-semibold flex items-center gap-1.5"><Users className="w-4 h-4 text-primary" /> Also on this number</h3>
               <p className="text-[11px] text-muted-foreground mt-0.5 mb-3">
-                {`${sharingNumber.length} other customer${sharingNumber.length === 1 ? "" : "s"} on ${customer.phone} — each keeps their own orders.`}
+                {`${sharingNumber.length} other customer${sharingNumber.length === 1 ? "" : "s"} on ${allNumbers(customer, " or ")} — each keeps their own orders.`}
               </p>
               <div className="space-y-1.5">
                 {sharingNumber.map((o) => (

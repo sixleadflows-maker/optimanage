@@ -53,7 +53,7 @@ export function CustomersClient({ customers, canDelete }: { customers: CustomerV
   }, [customers]);
 
   const filtered = useMemo(() => {
-    return customers.filter((c) => matchesSearch(search, [c.name, c.phone, c.serialNumber, c.email, c.address]));
+    return customers.filter((c) => matchesSearch(search, [c.name, c.phone, c.phone2, c.serialNumber, c.email, c.address]));
   }, [customers, search]);
 
   return (
@@ -117,6 +117,7 @@ export function CustomersClient({ customers, canDelete }: { customers: CustomerV
                   <td className="py-3 px-3 text-muted-foreground text-xs font-mono">{c.serialNumber || "—"}</td>
                   <td className="py-3 px-3 text-muted-foreground">
                     {c.phone || "—"}
+                    {c.phone2 && <span className="block text-xs">{c.phone2}</span>}
                     {(onNumber.get(phoneKey(c.phone)) ?? 0) > 1 && (
                       <button onClick={() => setSearch(c.phone)} title="Show everyone on this number"
                         className="chip bg-primary/10 text-primary ml-2 cursor-pointer whitespace-nowrap">

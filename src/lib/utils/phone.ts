@@ -21,3 +21,21 @@ export function sameName(a: string, b: string) {
   const tidy = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ");
   return tidy(a) !== "" && tidy(a) === tidy(b);
 }
+
+/** A customer's numbers: the main one, then the second if they have one. */
+export function numbersOf(c: { phone?: string | null; phone2?: string | null }): string[] {
+  return [c.phone, c.phone2].filter((n): n is string => !!n && n.trim() !== "");
+}
+
+/** True when any number of one customer is any number of the other. */
+export function shareNumber(
+  a: { phone?: string | null; phone2?: string | null },
+  b: { phone?: string | null; phone2?: string | null },
+) {
+  return numbersOf(a).some((x) => numbersOf(b).some((y) => samePhone(x, y)));
+}
+
+/** "0300 1110001 / 0321 5550000": both numbers, for a screen or a printed bill. */
+export function allNumbers(c: { phone?: string | null; phone2?: string | null }, separator = " / ") {
+  return numbersOf(c).join(separator);
+}

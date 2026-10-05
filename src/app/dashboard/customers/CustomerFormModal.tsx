@@ -6,13 +6,15 @@ import Link from "next/link";
 import { X, Loader2, Users } from "lucide-react";
 import { useApp } from "@/lib/context";
 import { createCustomer, updateCustomer } from "@/lib/actions/customers";
-import { samePhone } from "@/lib/utils/phone";
+import { shareNumber } from "@/lib/utils/phone";
 
 /** Everything the form shows about a customer already on file. */
 export interface CustomerFormData {
   id: string;
   name: string;
   phone: string;
+  // A second number; left out or "" when there isn't one.
+  phone2?: string;
   serialNumber: string;
   email: string;
   address: string;
@@ -28,7 +30,7 @@ export interface CustomerFormData {
 export type SavedCustomer = CustomerFormData & { existing?: boolean };
 
 /** Enough about a customer on file to show who else is on a phone number. */
-export interface CustomerOnFile { id: string; name: string; phone: string; serialNumber: string }
+export interface CustomerOnFile { id: string; name: string; phone: string; phone2?: string; serialNumber: string }
 
 /** Adding a customer, or correcting the details of one already on file. */
 export function CustomerFormModal({
@@ -40,7 +42,7 @@ export function CustomerFormModal({
 }: {
   customer?: CustomerFormData | null;
   // Where a new customer's form starts from -- what was typed into a search box.
-  initial?: { name?: string; phone?: string };
+  initial?: { name?: string; phone?: string; phone2?: string };
   // The customers on file, to show who already uses the number being typed.
   others?: CustomerOnFile[];
   onClose: () => void;
@@ -52,6 +54,7 @@ export function CustomerFormModal({
   const [form, setForm] = useState({
     name: customer?.name ?? initial?.name ?? "",
     phone: customer?.phone ?? initial?.phone ?? "",
+    phone2: customer?.phone2 ?? initial?.phone2 ?? "",
     serialNumber: customer?.serialNumber ?? "",
     email: customer?.email ?? "",
     address: customer?.address ?? "",
@@ -61,27 +64,30 @@ export function CustomerFormModal({
 
   // One number can carry several customers (a family, or a record per order),
   // so this never blocks saving -- it only shows who's already there.
-  const onNumber = others.filter((o) => o.id !== customer?.id && samePhone(o.phone, form.phone));
+  const onNumber = others.filter((o) => o.id !== customer?.id && shareNumber(o, form));
 
   const save = async () => {
     if (saving) return;
     setSaving(true);
     try {
+      // Only one number typed, and it went in the second box: it's their number.
+      const typed = [form.phone.trim(), form.phone2.trim()].filter(Boolean);
       const trimmed = {
         name: form.name.trim(),
-        phone: form.phone.trim(),
+        phone: typed[0] ?? "",
+        phone2: typed[1] ?? "",
         serialNumber: form.serialNumber.trim(),
         email: form.email.trim(),
         address: form.address.trim(),
         lastVisit: form.lastVisit,
       };
       if (customer) {
-        const res = await updateCustomer(customer.id, form);
+        const res = await updateCustomer(customer.id, { ...form, phone: trimmed.phone, phone2: trimmed.phone2 });
         if (!res.ok) { showToast(res.error, "error"); return; }
         showToast(`${trimmed.name || "Customer"}'s details saved`, "success");
         onSaved?.({ id: customer.id, ...trimmed });
       } else {
-        const res = await createCustomer(form);
+        const res = await createCustomer({ ...form, phone: trimmed.phone, phone2: trimmed.phone2 });
         if (!res.ok) { showToast(res.error, "error"); return; }
         showToast(
           onNumber.length ? `Customer added — ${onNumber.length + 1} customers now share this number` : "Customer added",
@@ -100,7 +106,7 @@ export function CustomerFormModal({
 
   const pickExisting = (o: CustomerOnFile) => {
     showToast(`${o.name || "Customer"} selected`, "info");
-    onSaved?.({ id: o.id, name: o.name, phone: o.phone, serialNumber: o.serialNumber, email: "", address: "", lastVisit: "", existing: true });
+    onSaved?.({ id: o.id, name: o.name, phone: o.phone, phone2: o.phone2 ?? "", serialNumber: o.serialNumber, email: "", address: "", lastVisit: "", existing: true });
     onClose();
   };
 
@@ -124,12 +130,12 @@ export function CustomerFormModal({
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Phone</label>
+              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Main number</label>
               <input type="text" placeholder="+92 3XX XXXXXXX" {...field("phone")} />
             </div>
             <div>
-              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Serial Number</label>
-              <input type="text" placeholder="e.g. SN-0142" {...field("serialNumber")} />
+              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Second number (optional)</label>
+              <input type="text" placeholder="Leave empty if none" {...field("phone2")} />
             </div>
           </div>
           {onNumber.length > 0 && (
@@ -169,17 +175,23 @@ export function CustomerFormModal({
           )}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Email</label>
-              <input type="email" {...field("email")} />
+              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Serial Number</label>
+              <input type="text" placeholder="e.g. SN-0142" {...field("serialNumber")} />
             </div>
             <div>
               <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Last Visit Date</label>
               <input type="date" {...field("lastVisit")} />
             </div>
           </div>
-          <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Address</label>
-            <input type="text" {...field("address")} />
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Email</label>
+              <input type="email" {...field("email")} />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Address</label>
+              <input type="text" {...field("address")} />
+            </div>
           </div>
           {customer && (
             <p className="text-[11px] text-muted-foreground">

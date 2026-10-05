@@ -315,7 +315,7 @@ function withNote(description: string, note: string) {
 }
 
 export function invoiceFromSale(sale: {
-  invoiceNo: string; dateTime: string; customerId: string; customerName: string; customerPhone: string;
+  invoiceNo: string; dateTime: string; customerId: string; customerName: string; customerPhone: string; customerPhone2?: string;
   createdByName: string; receivedByName: string;
   items: { id: string; productId: string; productName: string; description: string; quantity: number; unitPrice: number; discount: number; total: number }[];
   customLensName: string; customLensPrice: number; customLensQty: number;
@@ -349,7 +349,7 @@ export function invoiceFromSale(sale: {
     orderTakenBy: sale.createdByName,
     billGeneratedBy: sale.receivedByName,
     customerName: sale.customerId ? sale.customerName : null,
-    customerPhone: sale.customerPhone,
+    customerPhone: [sale.customerPhone, sale.customerPhone2].filter(Boolean).join(" / "),
     lines,
     subtotal: sale.subtotal,
     discount: sale.discount,

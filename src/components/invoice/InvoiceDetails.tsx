@@ -123,7 +123,7 @@ export function InvoiceDetails({
         <div><p className="text-[10px] text-muted-foreground">Date &amp; time</p><p className="font-medium">{when(sale.dateTime)}</p></div>
         <div><p className="text-[10px] text-muted-foreground">Order taken by</p><p className="font-medium">{sale.createdByName || "—"}</p></div>
         <div><p className="text-[10px] text-muted-foreground">Bill made by</p><p className="font-medium">{sale.receivedByName || "—"}</p></div>
-        <div><p className="text-[10px] text-muted-foreground">Customer</p><p className="font-medium">{sale.customerName}{sale.customerPhone && <span className="text-muted-foreground font-normal">{` · ${sale.customerPhone}`}</span>}</p></div>
+        <div><p className="text-[10px] text-muted-foreground">Customer</p><p className="font-medium">{sale.customerName}{sale.customerPhone && <span className="text-muted-foreground font-normal">{` · ${[sale.customerPhone, sale.customerPhone2].filter(Boolean).join(" / ")}`}</span>}</p></div>
         <div><p className="text-[10px] text-muted-foreground">Paid by</p><p className="font-medium">{sale.paymentMethod || "—"}</p></div>
         <div>
           <p className="text-[10px] text-muted-foreground">Status</p>
