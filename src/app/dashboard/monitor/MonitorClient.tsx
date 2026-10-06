@@ -25,11 +25,15 @@ export function MonitorClient({
   const marginPct = totalRevenue > 0 ? (dashboard.totalProfit / totalRevenue) * 100 : 0;
 
   const kpis = [
-    { label: "Today's Sales", value: formatCurrency(dashboard.todayRevenue), icon: DollarSign, color: "text-success" },
-    { label: "Total Invoices", value: dashboard.totalInvoices.toString(), icon: FileText, color: "text-primary" },
-    { label: "Outstanding Balance", value: formatCurrency(dashboard.outstanding), icon: TrendingUp, color: "text-warning" },
+    {
+      label: "Today's Sales", value: formatCurrency(dashboard.todayRevenue), icon: DollarSign, color: "text-success",
+      // Money in today, which also takes in balances paid off on older invoices.
+      note: `${formatCurrency(dashboard.todayReceived)} received today${dashboard.todayFromEarlier > 0 ? ` · ${formatCurrency(dashboard.todayFromEarlier)} of it from earlier invoices` : ""}`,
+    },
+    { label: "Total Invoices", value: dashboard.totalInvoices.toString(), icon: FileText, color: "text-primary", note: "" },
+    { label: "Outstanding Balance", value: formatCurrency(dashboard.outstanding), icon: TrendingUp, color: "text-warning", note: "" },
     ...(canSeeCosts
-      ? [{ label: "Total Profit", value: `${formatCurrency(dashboard.totalProfit)} · ${marginPct.toFixed(0)}%`, icon: TrendingUp, color: "text-success" }]
+      ? [{ label: "Total Profit", value: `${formatCurrency(dashboard.totalProfit)} · ${marginPct.toFixed(0)}%`, icon: TrendingUp, color: "text-success", note: "" }]
       : []),
   ];
 
@@ -48,6 +52,7 @@ export function MonitorClient({
             </div>
             <p className="text-xl font-bold tracking-tight font-display">{kpi.value}</p>
             <p className="text-xs text-muted-foreground mt-1">{kpi.label}</p>
+            {kpi.note && <p className="text-[11px] font-medium text-success mt-1.5">{kpi.note}</p>}
           </div>
         ))}
       </div>

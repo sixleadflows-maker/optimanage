@@ -34,11 +34,13 @@ export default async function POSPage({ searchParams }: { searchParams: Promise<
   const currentUserId = session?.user?.id ?? "";
   // Start with whoever was on the last bill (if they're still on the staff).
   const stillHere = (id: string | null) => (id && staff.some((m) => m.id === id) ? id : currentUserId);
-  // No cost/profit is passed to the till at all — the screen faces customers,
-  // and those figures live in Analytics instead.
+  // Cost prices go to the till only for owners and managers (the Monitor page
+  // follows the same rule). A cashier's till isn't sent them at all.
+  const canSeeCosts = !!session?.user && session.user.role !== "CASHIER";
   return (
     <POSClient
-      products={products}
+      products={canSeeCosts ? products : products.map((p) => ({ ...p, costPrice: 0 }))}
+      canSeeCosts={canSeeCosts}
       customers={posCustomers}
       staff={staff}
       currentUserId={currentUserId}

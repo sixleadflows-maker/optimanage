@@ -5,6 +5,7 @@ import { Search, X, PenLine, Plus } from "lucide-react";
 import type { Product } from "@/lib/mock/types";
 import { formatCurrency } from "@/lib/utils/format";
 import { matchesSearch } from "@/lib/utils/search";
+import { CostMargin } from "./CostMargin";
 
 /** A lens chosen for a frame: from the lens stock, or typed in (no productId). */
 export interface PickedLens {
@@ -21,10 +22,12 @@ export interface PickedLens {
  * A lens barcode scanned here is picked straight away.
  */
 export function LensPicker({
-  frameName, lenses, offerEveryTime, onOfferChange, onPick, onClose,
+  frameName, lenses, showCosts, offerEveryTime, onOfferChange, onPick, onClose,
 }: {
   frameName: string;
   lenses: Product[];
+  // Cost and profit under each lens (owners and managers, when switched on).
+  showCosts: boolean;
   offerEveryTime: boolean;
   onOfferChange: (offer: boolean) => void;
   onPick: (lens: PickedLens) => void;
@@ -124,6 +127,11 @@ export function LensPicker({
                 <span className="min-w-0">
                   <span className="block text-sm font-medium truncate">{`${p.brand} ${p.name}`.trim()}</span>
                   <span className="block text-[11px] text-muted-foreground truncate">{[p.category, detail].filter(Boolean).join(" · ")}</span>
+                  {showCosts && (
+                    <span className="block text-[11px] leading-snug">
+                      <CostMargin cost={p.costPrice} price={p.salePrice} />
+                    </span>
+                  )}
                 </span>
                 <span className="flex-shrink-0 text-right">
                   <span className="block text-sm font-bold text-primary">{formatCurrency(p.salePrice)}</span>

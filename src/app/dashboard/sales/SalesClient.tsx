@@ -12,7 +12,7 @@ import { PrintPortal } from "@/components/ui/PrintPortal";
 import { createReturn, deleteReturn, updateReturn } from "@/lib/actions/returns";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { updateOnlineOrderStatus, deleteSale, type OnlineOrderStatusValue } from "@/lib/actions/sales";
-import { PAYMENT_STATUS, paymentStatusChipClass } from "@/lib/constants";
+import { CREDIT_METHOD, PAYMENT_STATUS, paymentStatusChipClass } from "@/lib/constants";
 import { primaryMethod } from "@/lib/sales/paymentSplit";
 import { ThermalReceipt, A4Invoice, invoiceFromSale, type ShopDetails } from "@/components/invoice/InvoiceDocuments";
 import { InvoiceDetails } from "@/components/invoice/InvoiceDetails";
@@ -204,6 +204,21 @@ export function SalesClient({
     }
   };
 
+  // Money received inside the chosen dates on invoices made before them -- a
+  // balance paid off days later. Those invoices aren't in the list for these
+  // dates, so without this the payment would be nowhere to be seen.
+  const earlierPayments = useMemo(() => {
+    if (!fromDate && !toDate) return [];
+    const inRange = (day: string) => (!fromDate || day >= fromDate) && (!toDate || day <= toDate);
+    return sales
+      .filter((s) => !inRange(localDay(s.dateTime)))
+      .flatMap((s) => s.payments
+        .filter((p) => p.method !== CREDIT_METHOD && inRange(localDay(p.date)))
+        .map((p) => ({ sale: s, payment: p })))
+      .sort((a, b) => b.payment.date.localeCompare(a.payment.date));
+  }, [sales, fromDate, toDate]);
+  const earlierTotal = earlierPayments.reduce((sum, e) => sum + e.payment.amount, 0);
+
   const totalRevenue = filtered.reduce((sum, s) => sum + s.total, 0);
   const totalPaid = filtered.reduce((sum, s) => sum + s.paid, 0);
   const totalBalance = filtered.reduce((sum, s) => sum + s.balance, 0);
@@ -255,6 +270,34 @@ export function SalesClient({
           <p className="text-xl font-bold mt-1 text-destructive">{formatCurrency(totalBalance)}</p>
         </div>
       </div>
+
+      {earlierPayments.length > 0 && (
+        <div className="glass-card p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold">Also received in these dates, on earlier invoices</p>
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                Balances paid off after the invoice was made. They aren&apos;t in the list below because those invoices are older.
+              </p>
+            </div>
+            <p className="text-lg font-bold text-success whitespace-nowrap">{formatCurrency(earlierTotal)}</p>
+          </div>
+          <div className="mt-3 divide-y divide-border">
+            {earlierPayments.slice(0, 8).map(({ sale, payment }) => (
+              <div key={payment.id} className="py-2 flex items-center justify-between gap-3 text-xs">
+                <span className="min-w-0 truncate">
+                  <button onClick={() => setViewingSale(sale)} className="font-semibold text-primary hover:underline cursor-pointer">{sale.invoiceNo}</button>
+                  <span className="text-muted-foreground">{` · ${sale.customerName} · invoice of ${formatDate(sale.dateTime)} · received ${formatDate(payment.date)} · ${payment.method}`}</span>
+                </span>
+                <span className="font-semibold flex-shrink-0">{formatCurrency(payment.amount)}</span>
+              </div>
+            ))}
+            {earlierPayments.length > 8 && (
+              <p className="pt-2 text-[11px] text-muted-foreground">{`…and ${earlierPayments.length - 8} more`}</p>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="glass-card p-4">
         <div className="flex flex-col sm:flex-row gap-3 mb-3">

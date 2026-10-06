@@ -17,7 +17,7 @@ import {
   Search, Plus, Minus, Trash2, X, User, CreditCard,
   Banknote, Building2, Smartphone, Printer, MessageCircle, Receipt,
   Glasses, ChevronDown, ChevronUp, Lock, Edit3,
-  WifiOff, UploadCloud, ScanLine, UserPlus, PenLine, CalendarClock, Save, Check, Split, AlertTriangle, History,
+  WifiOff, UploadCloud, ScanLine, UserPlus, PenLine, CalendarClock, Save, Check, Split, AlertTriangle, History, Eye, EyeOff,
 } from "lucide-react";
 import { SPLIT_METHOD, paymentFromParts } from "@/lib/sales/paymentSplit";
 import { SplitPaymentFields, splitAmountsTotal, type SplitAmounts } from "@/components/invoice/SplitPaymentFields";
@@ -28,6 +28,7 @@ import { isPowerField, parseRxText, rxFieldText, rxFormTexts, formatRxPower, typ
 import { ThermalReceipt, A4Invoice, lensNote, type InvoiceData, type ShopDetails } from "@/components/invoice/InvoiceDocuments";
 import { matchesSearch } from "@/lib/utils/search";
 import { LensPicker, type PickedLens } from "./LensPicker";
+import { CostMargin } from "./CostMargin";
 import { shareNumber, allNumbers } from "@/lib/utils/phone";
 
 interface CartItem {
@@ -269,7 +270,7 @@ function RxLensPicker({
 
 export function POSClient({
   products, customers, staff, currentUserId, defaultOrderTakenBy, defaultBillGeneratedBy, shop, canBackdate, canEditBill,
-  initialCustomerId,
+  canSeeCosts, initialCustomerId,
 }: {
   products: Product[];
   customers: POSCustomer[];
@@ -285,6 +286,9 @@ export function POSClient({
   canBackdate: boolean;
   // ...and correct a bill after it's been rung up.
   canEditBill: boolean;
+  // Owners and managers see what items cost and what a bill earns; cashiers
+  // aren't even sent the cost prices.
+  canSeeCosts: boolean;
 }) {
   const { showToast } = useApp();
   const router = useRouter();
@@ -364,6 +368,17 @@ export function POSClient({
   const [loadingReadings, setLoadingReadings] = useState(false);
   const [poppedId, setPoppedId] = useState<string | null>(null);
   const popTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Cost and profit beside the prices. On by default for those allowed to see
+  // it; one click hides it while a customer is looking at the screen.
+  const [showCosts, setShowCosts] = useState(() => {
+    try { return localStorage.getItem("optimanage:showCosts") !== "0"; } catch { return true; }
+  });
+  const changeShowCosts = (show: boolean) => {
+    setShowCosts(show);
+    try { localStorage.setItem("optimanage:showCosts", show ? "1" : "0"); } catch { /* not remembered */ }
+  };
+  const costsOn = canSeeCosts && showCosts;
 
   // The frame (its cart key) a lens is being chosen for, and whether adding a
   // frame brings that up by itself. The choice is remembered on this computer.
@@ -740,6 +755,18 @@ export function POSClient({
   const extraLensAmount = extraLensLines.reduce((sum, l) => sum + l.price * l.quantity, 0);
   const subtotal = cartSubtotal + customLensAmount + extraLensAmount;
   const total = subtotal - invoiceDiscount;
+  // Cost and profit exactly as the sale records them: stock items at their cost
+  // price, a typed-in item at nothing (its cost isn't known), a typed-in job lens
+  // at its whole price, plus the lab and fitting charges.
+  const costOf = (productId: string | null | undefined) => (productId ? products.find((p) => p.id === productId)?.costPrice ?? 0 : 0);
+  const billCost =
+    cart.reduce((sum, i) => sum + costOf(i.productId) * i.quantity, 0) +
+    extraLensLines.reduce((sum, l) => sum + costOf(l.productId) * l.quantity, 0) +
+    (lensProductId && !cart.some((i) => i.productId === lensProductId) ? costOf(lensProductId) : 0) +
+    customLensAmount + labCharges + fittingCharges;
+  const billProfit = Math.max(0, total) - billCost;
+  const billMargin = total > 0 ? (billProfit / total) * 100 : 0;
+  const hasTypedItems = cart.some((i) => !i.productId);
   const customer = allCustomers.find((c) => c.id === selectedCustomer);
   // What to call them on screen: a customer saved with only a number goes by it.
   const customerLabel = customer ? customer.name || customer.phone || "this customer" : "";
@@ -1377,7 +1404,7 @@ export function POSClient({
 
   if (cart.length === 0 && entryMode === "scan") {
     return (
-      <div className="animate-fade-in flex flex-col items-center justify-center min-h-[60vh] gap-6 text-center px-4">
+      <div className="animate-fade-in solid-sheet rounded-3xl flex flex-col items-center justify-center min-h-[60vh] gap-6 text-center p-4 sm:p-6">
         <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-[#6d5ef0]/15 to-[#14b8a6]/15 flex items-center justify-center">
           <ScanLine className="w-7 h-7 text-primary" />
         </div>
@@ -1407,7 +1434,7 @@ export function POSClient({
 
   if (cart.length === 0 && entryMode === "choose") {
     return (
-      <div className="animate-fade-in flex flex-col items-center justify-center min-h-[60vh] gap-6 text-center px-4">
+      <div className="animate-fade-in solid-sheet rounded-3xl flex flex-col items-center justify-center min-h-[60vh] gap-6 text-center p-4 sm:p-6">
         <div>
           <h1 className="text-2xl font-bold">Point of Sale</h1>
           <p className="text-sm text-muted-foreground mt-1">How would you like to start this order?</p>
@@ -1447,7 +1474,7 @@ export function POSClient({
   }
 
   return (
-    <div className="animate-fade-in">
+    <div className="animate-fade-in solid-sheet rounded-3xl p-4 sm:p-6">
       <h1 className="text-2xl font-bold mb-6">Point of Sale</h1>
       {editingBill && saleResult && (
         <div className="glass-card p-3 mb-4 flex items-center justify-between gap-3 border border-primary/30">
@@ -1511,6 +1538,17 @@ export function POSClient({
                   className="w-full pl-10 pr-4 py-2.5 glass-input text-sm"
                 />
               </div>
+              {canSeeCosts && (
+                <button onClick={() => changeShowCosts(!showCosts)}
+                  title={showCosts ? "Hide cost and profit (when a customer is looking)" : "Show cost and profit beside the prices"}
+                  aria-pressed={showCosts}
+                  className={`flex items-center justify-center gap-1.5 px-3.5 py-2.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
+                    showCosts ? "bg-success/10 text-success hover:bg-success/15" : "bg-surface text-muted-foreground hover:bg-surface-hover"
+                  }`}>
+                  {showCosts ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                  {showCosts ? "Cost & profit: on" : "Cost & profit: off"}
+                </button>
+              )}
               <button onClick={() => setShowManualItem((v) => !v)}
                 className={`flex items-center justify-center gap-1.5 px-3.5 py-2.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
                   showManualItem ? "bg-primary text-white" : "bg-primary/10 text-primary hover:bg-primary/15"
@@ -1591,13 +1629,18 @@ export function POSClient({
                     )}
                   </div>
                   <p className="text-xs font-medium truncate">{product.name}</p>
-                  <p className="text-[10px] text-muted-foreground">{product.brand}</p>
+                  <p className="text-[10px] text-muted-foreground truncate">{[product.brand, product.colour].filter(Boolean).join(" · ")}</p>
                   <div className="flex items-center justify-between mt-1.5">
                     <span className="text-sm font-bold text-primary">{formatCurrency(product.salePrice)}</span>
                     <span className={`text-[10px] ${product.stock <= product.lowStockThreshold ? "text-destructive" : "text-muted-foreground"}`}>
                       {product.stock} left
                     </span>
                   </div>
+                  {costsOn && (
+                    <p className="mt-1 text-[10px] leading-snug">
+                      <CostMargin cost={product.costPrice} price={product.salePrice} />
+                    </p>
+                  )}
                 </button>
               ))}
             </div>
@@ -2025,8 +2068,17 @@ export function POSClient({
                     <div className="flex-1 min-w-0">
                       <p className="text-xs font-medium truncate">{item.name}</p>
                       <p className="text-[10px] text-muted-foreground">
-                        {item.productId ? item.brand : "Not in inventory"} · {formatCurrency(item.price)}
+                        {item.productId
+                          ? [item.brand, products.find((p) => p.id === item.productId)?.colour].filter(Boolean).join(" · ")
+                          : "Not in inventory"} · {formatCurrency(item.price)}
                       </p>
+                      {costsOn && (
+                        <p className="text-[10px] leading-snug">
+                          {item.productId
+                            ? <CostMargin cost={costOf(item.productId)} price={item.price} quantity={item.quantity} discount={item.discount} />
+                            : <span className="text-muted-foreground">Cost not known</span>}
+                        </p>
+                      )}
                     </div>
                     <div className="flex items-center gap-1">
                       <button onClick={() => updateQuantity(item.key, -1)} className="w-6 h-6 rounded-lg bg-surface flex items-center justify-center hover:bg-surface-hover">
@@ -2139,6 +2191,25 @@ export function POSClient({
                   <span>Total</span>
                   <span className="text-primary">{formatCurrency(total)}</span>
                 </div>
+                {costsOn && (
+                  <div className="rounded-xl bg-surface p-2.5 text-xs space-y-1">
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">{labCharges + fittingCharges > 0 ? "Cost (items, lab & fitting)" : "Cost"}</span>
+                      <span className="tabular-nums">{formatCurrency(billCost)}</span>
+                    </div>
+                    <div className="flex justify-between font-semibold">
+                      <span>Profit</span>
+                      <span className={`tabular-nums ${billProfit <= 0 ? "text-destructive" : billMargin < 20 ? "text-warning" : "text-success"}`}>
+                        {`${formatCurrency(billProfit)} · ${billMargin.toFixed(0)}%`}
+                      </span>
+                    </div>
+                    {hasTypedItems && (
+                      <p className="text-[10px] text-muted-foreground">
+                        Typed-in items have no cost on record, so their whole price counts as profit.
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div className="mt-4 space-y-3">
@@ -2331,6 +2402,7 @@ export function POSClient({
           <LensPicker
             frameName={[frame.brand, frame.name].filter(Boolean).join(" ")}
             lenses={lensProducts}
+            showCosts={costsOn}
             offerEveryTime={offerLens}
             onOfferChange={changeOfferLens}
             onPick={(lens) => addLensToFrame(lensFor, lens)}

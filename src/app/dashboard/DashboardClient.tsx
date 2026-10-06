@@ -97,10 +97,14 @@ function HBarChart({ data }: { data: { label: string; value: number }[] }) {
 
 export function DashboardClient({ data }: { data: DashboardData }) {
   const kpis = [
-    { label: "Today's Sales", raw: data.todayRevenue, format: formatCurrency, change: "today", up: true, icon: DollarSign, color: "text-success" },
-    { label: "Total Invoices", raw: data.totalInvoices, format: (n: number) => n.toString(), change: "all-time", up: true, icon: FileText, color: "text-primary" },
-    { label: "Outstanding", raw: data.outstanding, format: formatCurrency, change: "due", up: false, icon: TrendingUp, color: "text-warning" },
-    { label: "Low Stock Items", raw: data.lowStockCount, format: (n: number) => n.toString(), change: `${data.lowStockCount} items`, up: false, icon: AlertTriangle, color: "text-destructive" },
+    {
+      label: "Today's Sales", raw: data.todayRevenue, format: formatCurrency, change: "today", up: true, icon: DollarSign, color: "text-success",
+      // Money in today, which also takes in balances paid off on older invoices.
+      note: `${formatCurrency(data.todayReceived)} received today${data.todayFromEarlier > 0 ? ` · ${formatCurrency(data.todayFromEarlier)} of it from earlier invoices` : ""}`,
+    },
+    { label: "Total Invoices", raw: data.totalInvoices, format: (n: number) => n.toString(), change: "all-time", up: true, icon: FileText, color: "text-primary", note: "" },
+    { label: "Outstanding", raw: data.outstanding, format: formatCurrency, change: "due", up: false, icon: TrendingUp, color: "text-warning", note: "" },
+    { label: "Low Stock Items", raw: data.lowStockCount, format: (n: number) => n.toString(), change: `${data.lowStockCount} items`, up: false, icon: AlertTriangle, color: "text-destructive", note: "" },
   ];
 
   return (
@@ -124,6 +128,7 @@ export function DashboardClient({ data }: { data: DashboardData }) {
             </div>
             <p className="text-2xl font-bold tracking-tight font-display"><AnimatedCounter value={kpi.raw} format={kpi.format} /></p>
             <p className="text-xs text-muted-foreground mt-1">{kpi.label}</p>
+            {kpi.note && <p className="text-[11px] font-medium text-success mt-1.5">{kpi.note}</p>}
           </div>
         ))}
       </div>

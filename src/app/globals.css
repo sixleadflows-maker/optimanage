@@ -200,6 +200,14 @@ h1, h2, h3 {
   -webkit-backdrop-filter: none;
 }
 
+/* Menus and pop-overs inside a sheet are solid too. */
+.solid-sheet .glass {
+  background: #ffffff;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border: 1px solid #e3e5ee;
+}
+
 .dark .solid-sheet .chip-paid, .dark .solid-sheet .chip-full-payment { background: rgba(16, 185, 129, 0.13); color: #059669; }
 .dark .solid-sheet .chip-advance { background: rgba(245, 158, 11, 0.13); color: #d97706; }
 .dark .solid-sheet .chip-balance { background: rgba(239, 68, 68, 0.13); color: #dc2626; }

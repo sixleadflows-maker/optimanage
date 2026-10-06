@@ -1059,7 +1059,15 @@ async function openingCashFor(start: Date, branchId?: string) {
 
 // ─── Dashboard aggregates ───────────────────────────────────
 export interface DashboardData {
+  // Invoices made today, at their full value.
   todayRevenue: number;
+  // Money actually received today: what was taken on today's invoices, plus every
+  // payment received today on any invoice -- a balance paid off days later counts
+  // on the day it's paid. Advances paid in aren't sales, and a bill paid from an
+  // advance brings in nothing new.
+  todayReceived: number;
+  // The part of todayReceived that was paid on invoices made before today.
+  todayFromEarlier: number;
   totalInvoices: number;
   outstanding: number;
   lowStockCount: number;
@@ -1072,19 +1080,35 @@ export interface DashboardData {
 
 export async function getDashboardData(branchId?: string): Promise<DashboardData> {
   const saleWhere = branchId ? { branchId } : {};
-  const [products, sales] = await Promise.all([
+  const today = new Date().toISOString().slice(0, 10);
+  const { start, end } = dayRange(today);
+  const [products, sales, paymentsToday] = await Promise.all([
     db.product.findMany({ where: { active: true } }),
     db.sale.findMany({
       where: saleWhere,
       orderBy: { date: "desc" },
-      include: { customer: true, items: true },
+      include: { customer: true, items: true, payments: { select: { amount: true } } },
+    }),
+    // Every payment received today, on an invoice of any date.
+    db.salePayment.findMany({
+      where: { date: { gte: start, lt: end }, ...(branchId ? { sale: { branchId } } : {}) },
+      select: { amount: true, method: true, sale: { select: { date: true } } },
     }),
   ]);
 
   const productBrand = new Map(products.map((p) => [p.id, p.brand]));
-  const today = new Date().toISOString().slice(0, 10);
 
-  const todayRevenue = sales.filter((s) => iso(s.date) === today).reduce((sum, s) => sum + s.total, 0);
+  const todaySales = sales.filter((s) => iso(s.date) === today);
+  const todayRevenue = todaySales.reduce((sum, s) => sum + s.total, 0);
+  // What was taken at the till on today's invoices (a sale's `paid` includes
+  // anything collected later, so those are taken back out and counted on their own day).
+  const atTillToday = todaySales
+    .flatMap((s) => tillParts(s, s.paid - s.payments.reduce((sum, p) => sum + p.amount, 0)))
+    .filter((c) => c.method !== CREDIT_METHOD)
+    .reduce((sum, c) => sum + c.amount, 0);
+  const receivedToday = paymentsToday.filter((p) => p.method !== CREDIT_METHOD);
+  const todayReceived = atTillToday + receivedToday.reduce((sum, p) => sum + p.amount, 0);
+  const todayFromEarlier = receivedToday.filter((p) => p.sale.date < start).reduce((sum, p) => sum + p.amount, 0);
   const outstanding = sales.filter((s) => s.paymentStatus !== "PAID").reduce((sum, s) => sum + s.balance, 0);
   const totalProfit = sales.reduce((sum, s) => sum + s.profit, 0);
   const lowStock = products.filter((p) => p.stock <= p.lowStockThreshold);
@@ -1122,6 +1146,8 @@ export async function getDashboardData(branchId?: string): Promise<DashboardData
 
   return {
     todayRevenue,
+    todayReceived,
+    todayFromEarlier,
     totalInvoices: sales.length,
     outstanding,
     lowStockCount: lowStock.length,
