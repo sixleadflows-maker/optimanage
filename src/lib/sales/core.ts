@@ -19,6 +19,9 @@ export interface SaleCoreItem {
   quantity: number;
   unitPrice: number;
   discount: number;
+  // What one of a typed-in item cost the shop (its purchase price), so profit
+  // comes out right. Stock items use the product's cost price instead.
+  unitCost?: number;
   // An invoice being corrected: the line this already is, so it's changed in
   // place. A return points at the line it came back against.
   id?: string;
@@ -65,6 +68,8 @@ export interface PersistSaleInput {
   customLensName?: string;
   customLensPrice?: number;
   customLensQty?: number;
+  // What one of those lenses cost to buy, when staff entered it.
+  customLensCost?: number;
   // Printed under the lens on the bill, whichever lens was chosen.
   lensColor?: string;
   lensDescription?: string;
@@ -183,18 +188,26 @@ async function priceSale(input: {
   customLensName?: string;
   customLensPrice?: number;
   customLensQty?: number;
+  customLensCost?: number;
   deliveryFee?: number;
 }) {
   const customLensPrice = Math.max(0, input.customLensPrice ?? 0);
   const customLensQty = customLensPrice > 0 ? Math.max(1, Math.floor(input.customLensQty ?? 1)) : 1;
   const customLensTotal = customLensPrice * customLensQty;
   const customLensName = customLensPrice > 0 ? (input.customLensName ?? "").trim() : "";
+  // With its purchase price entered, a typed-in lens costs what it cost; without
+  // one, its whole price counts as cost (no profit claimed on it), as before.
+  const customLensCost = customLensPrice > 0 ? Math.max(0, input.customLensCost ?? 0) : 0;
+  const customLensCostTotal = customLensCost > 0 ? customLensCost * customLensQty : customLensTotal;
   if (!input.items.length && customLensPrice <= 0) throw new SaleError("Cart is empty");
   if (customLensPrice > 0 && !customLensName) throw new SaleError("Custom lens name is required");
 
   // A price, quantity or discount that isn't a number (an emptied box can send
   // NaN) would be saved as one and wreck the day's totals.
-  const amounts = [input.invoiceDiscount, customLensPrice, input.labCharges ?? 0, input.fittingCharges ?? 0, ...input.items.flatMap((i) => [i.quantity, i.unitPrice, i.discount])];
+  const amounts = [
+    input.invoiceDiscount, customLensPrice, customLensCost, input.labCharges ?? 0, input.fittingCharges ?? 0,
+    ...input.items.flatMap((i) => [i.quantity, i.unitPrice, i.discount, i.unitCost ?? 0]),
+  ];
   if (!amounts.every((n) => Number.isFinite(n))) {
     throw new SaleError("One of the prices, quantities or discounts isn't a number — check them and try again");
   }
@@ -213,13 +226,17 @@ async function priceSale(input: {
       if (!name) throw new SaleError("Enter a name for the item that isn't in the inventory");
       if (i.quantity <= 0 || i.unitPrice < 0) throw new SaleError(`Check the price and quantity for "${name}"`);
       subtotal += lineTotal;
-      // No cost is known for a typed-in item, so it adds nothing to the cost side.
+      // A typed-in item costs what staff said it cost to buy -- nothing, when
+      // they didn't say.
+      const unitCost = Math.max(0, i.unitCost ?? 0);
+      itemCost += unitCost * i.quantity;
       return {
         productId: null,
         productName: name,
         description: (i.description ?? "").trim(),
         quantity: i.quantity,
         unitPrice: i.unitPrice,
+        unitCost,
         discount: i.discount,
         total: lineTotal,
       };
@@ -241,6 +258,7 @@ async function priceSale(input: {
       description: (i.description ?? product.description).trim(),
       quantity: i.quantity,
       unitPrice: i.unitPrice,
+      unitCost: product.costPrice,
       discount: i.discount,
       total: lineTotal,
     };
@@ -259,11 +277,11 @@ async function priceSale(input: {
     const lens = await db.product.findUnique({ where: { id: input.lensProductId } });
     if (lens) lensCost = lens.costPrice;
   }
-  const totalCost = itemCost + lensCost + customLensTotal + labCharges + fittingCharges;
+  const totalCost = itemCost + lensCost + customLensCostTotal + labCharges + fittingCharges;
 
   return {
     saleItems, productMap, subtotal, total, deliveryFee,
-    labCharges, fittingCharges, customLensName, customLensPrice, customLensQty,
+    labCharges, fittingCharges, customLensName, customLensPrice, customLensQty, customLensCost,
     lensCost, totalCost, profit: total - totalCost,
   };
 }
@@ -279,7 +297,7 @@ export async function persistSale(input: PersistSaleInput, meta: PersistSaleMeta
   const priced = await priceSale({ ...input, deliveryFee: meta.deliveryFee });
   const {
     saleItems, productMap, subtotal, total, deliveryFee,
-    labCharges, fittingCharges, customLensName, customLensPrice, customLensQty, lensCost, totalCost, profit,
+    labCharges, fittingCharges, customLensName, customLensPrice, customLensQty, customLensCost, lensCost, totalCost, profit,
   } = priced;
 
   // Part (or all) of the bill paid from the advance the customer has with the shop.
@@ -365,6 +383,7 @@ export async function persistSale(input: PersistSaleInput, meta: PersistSaleMeta
         customLensName,
         customLensPrice,
         customLensQty,
+        customLensCost,
         lensColor: (input.lensColor ?? "").trim(),
         lensDescription: (input.lensDescription ?? "").trim(),
         labCharges,
@@ -534,6 +553,11 @@ async function billPrescriptionIds(saleId: string) {
   return rows.map((r) => r.id);
 }
 
+/** True when a stored prescription already holds exactly these figures and words. */
+function sameRxFields(row: Record<string, unknown>, fields: Record<string, unknown>) {
+  return Object.entries(fields).every(([k, v]) => row[k] === v);
+}
+
 /** The columns a prescription on a bill is stored with. */
 function prescriptionFields(p: SalePrescriptionInput) {
   return {
@@ -567,6 +591,7 @@ export interface ReviseSaleInput {
   customLensName?: string;
   customLensPrice?: number;
   customLensQty?: number;
+  customLensCost?: number;
   lensColor?: string;
   lensDescription?: string;
   // What was taken at the counter, when the correction says: an amount, or
@@ -731,6 +756,7 @@ export async function reviseSale(saleId: string, input: ReviseSaleInput) {
         customLensName: priced.customLensName,
         customLensPrice: priced.customLensPrice,
         customLensQty: priced.customLensQty,
+        customLensCost: priced.customLensCost,
         lensColor: (input.lensColor ?? "").trim(),
         lensDescription: (input.lensDescription ?? "").trim(),
         labCharges: priced.labCharges,
@@ -818,18 +844,26 @@ async function replaceBillPrescriptions(
     const row = p.id ? onBill.find((r) => r.id === p.id && !kept.has(r.id)) : undefined;
     // Only another customer's earlier prescription (left from before the bill
     // was moved to this customer) isn't theirs to change -- it comes off below.
-    if (row && (thisVisit(row) || row.customerId === customerId)) {
+    // The customer's own earlier prescription is never written over either: left
+    // as it was it stays on the bill, but changed, the bill gets a new one with
+    // the new figures and the earlier one stays on their record with its date.
+    if (row && thisVisit(row)) {
       await tx.prescription.update({
         where: { id: row.id },
-        data: { customerId, ...(thisVisit(row) ? { date: bill.date } : {}), ...prescriptionFields(p) },
+        data: { customerId, date: bill.date, ...prescriptionFields(p) },
       });
+      kept.add(row.id);
+      ids.push(row.id);
+      continue;
+    }
+    if (row && row.customerId === customerId && sameRxFields(row, prescriptionFields(p))) {
       kept.add(row.id);
       ids.push(row.id);
       continue;
     }
     // Saved to the customer's record from the till while the bill was being
     // corrected: that record becomes the final one.
-    if (!row && p.id) {
+    if (!row && p.id && !onBill.some((r) => r.id === p.id)) {
       const saved = await tx.prescription.updateMany({
         where: { id: p.id, customerId, saleId: null },
         data: { ...prescriptionFields(p), saleId: bill.saleId },

@@ -30,6 +30,8 @@ export interface CartItemInput {
   quantity: number;
   unitPrice: number;
   discount: number;
+  // Typed-in items: what one cost the shop (purchase price), for profit.
+  unitCost?: number;
 }
 
 export interface CreateSaleInput {
@@ -55,6 +57,8 @@ export interface CreateSaleInput {
   customLensName?: string;
   customLensPrice?: number;
   customLensQty?: number;
+  // What one typed-in lens cost to buy, when given.
+  customLensCost?: number;
   lensColor?: string;
   lensDescription?: string;
   // Staff tracking: who took the order vs. who generated the bill
@@ -233,6 +237,7 @@ export interface UpdateSaleInput {
   customLensName?: string;
   customLensPrice?: number;
   customLensQty?: number;
+  customLensCost?: number;
   lensColor?: string;
   lensDescription?: string;
 }
@@ -303,6 +308,7 @@ export async function updateTillSale(input: CreateSaleInput) {
       customLensName: input.customLensName,
       customLensPrice: input.customLensPrice,
       customLensQty: input.customLensQty,
+      customLensCost: input.customLensCost,
       lensColor: input.lensColor,
       lensDescription: input.lensDescription,
       payment: input.paymentType === "Full"

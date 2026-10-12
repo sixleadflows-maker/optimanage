@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { Fragment, useState, useEffect, useCallback } from "react";
 import type { AnalyticsData } from "@/lib/data";
 import { formatCurrency } from "@/lib/utils/format";
-import { verifyAnalyticsPin, getMonthlyAnalytics, type MonthlyAnalyticsData } from "@/lib/actions/analytics";
+import { verifyAnalyticsPin, getMonthlyAnalytics, type MonthlyAnalyticsData, type MonthDay } from "@/lib/actions/analytics";
 import { changeAnalyticsPin, resetAnalyticsPinWithPassword } from "@/lib/actions/settings";
 import { Lock, Loader2, ChevronLeft, ChevronRight, ArrowUpRight, ArrowDownRight, Package, ChevronDown, ChevronUp } from "lucide-react";
 
@@ -106,6 +106,74 @@ function DonutChart({ data, size = 180 }: { data: { name: string; value: number 
   );
 }
 
+/**
+ * The month day by day: each day's sales (the payments made that day), the
+ * profit on them and the invoices made. A day opens to show every payment.
+ */
+function DayByDay({ days }: { days: MonthDay[] }) {
+  const [open, setOpen] = useState<string | null>(null);
+  if (days.length === 0) return <p className="text-sm text-muted-foreground text-center py-6">Nothing sold or paid this month yet</p>;
+  const day = (iso: string) => new Date(iso).toLocaleDateString("en-GB", { weekday: "short", day: "2-digit", month: "short" });
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-xs tabular-nums">
+        <thead>
+          <tr className="text-muted-foreground text-left">
+            <th className="font-medium py-2">Day</th>
+            <th className="font-medium py-2 text-right">Sales</th>
+            <th className="font-medium py-2 text-right">Profit</th>
+            <th className="font-medium py-2 text-right">Margin</th>
+            <th className="font-medium py-2 text-right">Invoices made</th>
+            <th className="w-6" aria-hidden="true"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {days.map((d) => {
+            const isOpen = open === d.date;
+            const margin = d.sales > 0 ? (d.profit / d.sales) * 100 : 0;
+            return (
+              <Fragment key={d.date}>
+                <tr onClick={() => setOpen(isOpen ? null : d.date)}
+                  className="border-t border-border cursor-pointer hover:bg-surface-hover">
+                  <td className="py-2 font-medium whitespace-nowrap">{day(d.date)}</td>
+                  <td className="py-2 text-right font-semibold">{formatCurrency(d.sales)}</td>
+                  <td className={`py-2 text-right font-semibold ${d.profit < 0 ? "text-destructive" : "text-success"}`}>{formatCurrency(d.profit)}</td>
+                  <td className="py-2 text-right text-muted-foreground">{d.sales > 0 ? `${margin.toFixed(0)}%` : "—"}</td>
+                  <td className="py-2 text-right">{d.invoices}</td>
+                  <td className="py-2 text-right">
+                    {d.payments.length > 0 && (isOpen ? <ChevronUp className="w-3.5 h-3.5 inline" /> : <ChevronDown className="w-3.5 h-3.5 inline" />)}
+                  </td>
+                </tr>
+                {isOpen && d.payments.length > 0 && (
+                  <tr>
+                    <td colSpan={6} className="pb-3">
+                      <div className="rounded-xl bg-surface p-2.5 space-y-1.5">
+                        {d.payments.map((p, i) => (
+                          <div key={i} className="flex items-center justify-between gap-3">
+                            <span className="min-w-0 truncate">
+                              <span className="font-semibold">{p.invoiceNo}</span>
+                              <span className="text-muted-foreground">{` · ${p.customer}${p.method ? ` · ${p.method}` : ""}`}</span>
+                              {p.earlier && <span className="chip bg-primary/10 text-primary ml-1.5">earlier invoice</span>}
+                            </span>
+                            <span className="flex-shrink-0 text-right">
+                              <span className="font-semibold">{formatCurrency(p.amount)}</span>
+                              <span className={`ml-2 ${p.profit < 0 ? "text-destructive" : "text-success"}`}>{`profit ${formatCurrency(p.profit)}`}</span>
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function MonthlyPerformance() {
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
@@ -157,12 +225,16 @@ function MonthlyPerformance() {
         <div className="flex items-center justify-center py-16"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /></div>
       ) : (
         <>
+          <p className="text-[11px] text-muted-foreground -mt-2 mb-4">
+            Every payment counts on the day it&apos;s paid: an Rs.8,000 bill paid Rs.4,000 on one day and Rs.4,000 two days later is
+            Rs.4,000 of sales on each day. Profit follows the money in the same proportion.
+          </p>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-5">
             {[
-              { label: "Total Sales", value: formatCurrency(data.totalSales), delta: delta(data.totalSales, data.prevMonthSales) },
-              { label: "Net Profit", value: formatCurrency(data.netProfit), delta: delta(data.netProfit, data.prevMonthNetProfit) },
-              { label: "Number of Orders", value: data.totalOrders.toString(), delta: delta(data.totalOrders, data.prevMonthOrders) },
-              { label: "Avg Order Value", value: formatCurrency(data.avgOrderValue), delta: null as number | null },
+              { label: "Sales (money paid in)", value: formatCurrency(data.totalSales), delta: delta(data.totalSales, data.prevMonthSales) },
+              { label: "Profit on those sales", value: formatCurrency(data.grossProfit), delta: null as number | null },
+              { label: "Net profit (after expenses)", value: formatCurrency(data.netProfit), delta: delta(data.netProfit, data.prevMonthNetProfit) },
+              { label: "Invoices made", value: data.totalOrders.toString(), delta: delta(data.totalOrders, data.prevMonthOrders) },
             ].map((k) => (
               <div key={k.label} className="p-3 bg-surface rounded-xl">
                 <p className="text-xs text-muted-foreground">{k.label}</p>
@@ -185,6 +257,10 @@ function MonthlyPerformance() {
               <p className="text-xs font-medium text-muted-foreground mb-2">Top Brands This Month</p>
               <VBarChart data={data.topBrands} height={180} />
             </div>
+          </div>
+          <div className="mt-5">
+            <p className="text-xs font-medium text-muted-foreground mb-1">Day by day — tap a day to see each payment</p>
+            <DayByDay days={data.days} />
           </div>
         </>
       )}
@@ -401,8 +477,8 @@ export function AnalyticsClient({ data }: { data: AnalyticsData }) {
   }
 
   const incomeExpense = [
-    { name: "Revenue", amount: data.totalRevenue },
-    { name: "COGS", amount: data.totalCost },
+    { name: "Sales (all payments)", amount: data.totalRevenue },
+    { name: "Cost of goods sold", amount: data.totalCost },
     { name: "Gross Profit", amount: data.grossProfit },
     { name: "Expenses", amount: data.totalExpenses },
     { name: "Net Profit", amount: data.netProfit },
@@ -432,7 +508,7 @@ export function AnalyticsClient({ data }: { data: AnalyticsData }) {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="glass-card p-5">
-          <h3 className="text-sm font-semibold mb-4">Daily Sales Trend</h3>
+          <h3 className="text-sm font-semibold mb-4">Daily Sales (by the day each payment was made)</h3>
           <AreaChart data={data.dailySales} />
         </div>
         <div className="glass-card p-5">

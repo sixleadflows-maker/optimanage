@@ -75,6 +75,8 @@ export interface SaleItem {
   description: string;
   quantity: number;
   unitPrice: number;
+  // What one cost the shop (a typed-in item's purchase price; 0 when not given).
+  unitCost: number;
   discount: number;
   total: number;
   returnedQuantity: number;

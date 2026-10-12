@@ -272,6 +272,8 @@ interface EditLine {
   quantity: number;
   unitPrice: number;
   discount: number;
+  // A typed-in line's purchase price, per unit (kept so profit stays right).
+  unitCost: number;
 }
 
 export function EditInvoiceModal({
@@ -301,12 +303,14 @@ export function EditInvoiceModal({
       quantity: it.quantity,
       unitPrice: it.unitPrice,
       discount: it.discount,
+      unitCost: it.unitCost ?? 0,
     }))
   );
   const [invoiceDiscount, setInvoiceDiscount] = useState(sale.discount);
   const [customLensName, setCustomLensName] = useState(sale.customLensName);
   const [customLensPrice, setCustomLensPrice] = useState(sale.customLensPrice);
   const [customLensQty, setCustomLensQty] = useState(sale.customLensQty || 1);
+  const [customLensCost, setCustomLensCost] = useState(sale.customLensCost ?? 0);
   const [lensColorChoice, setLensColorChoice] = useState(
     !sale.lensColor ? "" : (LENS_COLORS as readonly string[]).includes(sale.lensColor) ? sale.lensColor : "Other"
   );
@@ -387,7 +391,7 @@ export function EditInvoiceModal({
   const addProduct = (hit: ProductSearchHit) => {
     setLines((prev) => [
       ...prev,
-      { key: `new-${hit.id}-${Date.now()}`, returned: 0, productId: hit.id, name: hit.label, description: "", quantity: 1, unitPrice: hit.salePrice, discount: 0 },
+      { key: `new-${hit.id}-${Date.now()}`, returned: 0, productId: hit.id, name: hit.label, description: "", quantity: 1, unitPrice: hit.salePrice, discount: 0, unitCost: 0 },
     ]);
     setSearch("");
     setHits([]);
@@ -397,7 +401,7 @@ export function EditInvoiceModal({
     manualCounter.current += 1;
     setLines((prev) => [
       ...prev,
-      { key: `manual-${manualCounter.current}-${Date.now()}`, returned: 0, productId: "", name: "", description: "", quantity: 1, unitPrice: 0, discount: 0 },
+      { key: `manual-${manualCounter.current}-${Date.now()}`, returned: 0, productId: "", name: "", description: "", quantity: 1, unitPrice: 0, discount: 0, unitCost: 0 },
     ]);
   };
 
@@ -436,7 +440,7 @@ export function EditInvoiceModal({
       showToast("Check the bill date and time", "error");
       return;
     }
-    if (![invoiceDiscount, customLensPrice, customLensQty, labCharges, fittingCharges, tillAmount].every((n) => Number.isFinite(n))) {
+    if (![invoiceDiscount, customLensPrice, customLensQty, customLensCost, labCharges, fittingCharges, tillAmount, ...lines.map((l) => l.unitCost)].every((n) => Number.isFinite(n))) {
       showToast("One of the amounts isn't a number — check the prices, discount and amount taken at the till", "error");
       return;
     }
@@ -454,7 +458,7 @@ export function EditInvoiceModal({
       items: lines.map((l) =>
         l.productId
           ? { id: l.saleItemId, productId: l.productId, description: l.description, quantity: l.quantity, unitPrice: l.unitPrice, discount: l.discount }
-          : { id: l.saleItemId, name: l.name.trim(), description: l.description, quantity: l.quantity, unitPrice: l.unitPrice, discount: l.discount }
+          : { id: l.saleItemId, name: l.name.trim(), description: l.description, quantity: l.quantity, unitPrice: l.unitPrice, discount: l.discount, unitCost: l.unitCost }
       ),
       invoiceDiscount,
       paidAtTill: tillAmount,
@@ -463,6 +467,7 @@ export function EditInvoiceModal({
       customLensName,
       customLensPrice,
       customLensQty,
+      customLensCost,
       lensColor,
       lensDescription,
       labCharges,
@@ -638,7 +643,7 @@ export function EditInvoiceModal({
                   {`${line.returned} returned — this line stays, with at least ${line.returned}.`}
                 </p>
               )}
-              <div className="grid grid-cols-4 gap-2 mt-2">
+              <div className={`grid gap-2 mt-2 ${line.productId ? "grid-cols-4" : "grid-cols-5"}`}>
                 <div>
                   <label className="text-[10px] text-muted-foreground block mb-1">Qty</label>
                   <input type="number" min={Math.max(1, line.returned)} value={line.quantity}
@@ -651,6 +656,14 @@ export function EditInvoiceModal({
                     onChange={(e) => setLine(line.key, { unitPrice: Math.max(0, Number(e.target.value)) })}
                     className="w-full px-2 py-1.5 glass-input text-xs" />
                 </div>
+                {!line.productId && (
+                  <div>
+                    <label className="text-[10px] text-muted-foreground block mb-1" title="What one cost the shop to buy — for the profit">Purchase price</label>
+                    <input type="number" min={0} value={line.unitCost || ""} placeholder="0"
+                      onChange={(e) => setLine(line.key, { unitCost: Math.max(0, Number(e.target.value)) })}
+                      className="w-full px-2 py-1.5 glass-input text-xs" />
+                  </div>
+                )}
                 <div>
                   <label className="text-[10px] text-muted-foreground block mb-1">Discount</label>
                   <input type="number" min={0} value={line.discount}
@@ -710,10 +723,15 @@ export function EditInvoiceModal({
               <input type="text" value={customLensName} onChange={(e) => setCustomLensName(e.target.value)}
                 placeholder="Only if the lens isn't a line above" className="w-full px-2.5 py-1.5 glass-input text-xs" />
             </div>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-3 gap-2">
               <div>
                 <label className="text-[10px] text-muted-foreground block mb-1">Price per lens</label>
                 <input type="number" min={0} value={customLensPrice || ""} onChange={(e) => setCustomLensPrice(Math.max(0, Number(e.target.value)))}
+                  className="w-full px-2.5 py-1.5 glass-input text-xs" />
+              </div>
+              <div>
+                <label className="text-[10px] text-muted-foreground block mb-1" title="What one lens cost the shop to buy — for the profit">Purchase price</label>
+                <input type="number" min={0} value={customLensCost || ""} placeholder="0" onChange={(e) => setCustomLensCost(Math.max(0, Number(e.target.value)))}
                   className="w-full px-2.5 py-1.5 glass-input text-xs" />
               </div>
               <div>

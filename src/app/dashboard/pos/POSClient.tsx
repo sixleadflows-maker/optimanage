@@ -23,8 +23,8 @@ import { SPLIT_METHOD, paymentFromParts } from "@/lib/sales/paymentSplit";
 import { SplitPaymentFields, splitAmountsTotal, type SplitAmounts } from "@/components/invoice/SplitPaymentFields";
 import { firstImage } from "@/lib/utils/images";
 import { LensLoader } from "@/components/ui/LensLoader";
-import { RxPowerInput } from "@/components/ui/RxPowerInput";
-import { isPowerField, parseRxText, rxFieldText, rxFormTexts, formatRxPower, type RxTextColumns } from "@/lib/utils/rx";
+import { RxEntryTable } from "@/components/ui/RxEntryTable";
+import { parseRxText, rxFieldText, rxFormTexts, formatRxPower, type RxTextColumns } from "@/lib/utils/rx";
 import { ThermalReceipt, A4Invoice, lensNote, type InvoiceData, type ShopDetails } from "@/components/invoice/InvoiceDocuments";
 import { matchesSearch } from "@/lib/utils/search";
 import { LensPicker, type PickedLens } from "./LensPicker";
@@ -46,7 +46,12 @@ interface CartItem {
   // Set on a lens bought for a frame: that frame's key. It sits under the frame
   // and goes when the frame does.
   forKey?: string;
+  // A typed-in item's purchase price (per unit), so its profit is right.
+  unitCost?: number;
 }
+
+// What a lens the customer brought in is called on the bill and the record.
+const OWN_LENS = "Customer's own lens";
 
 export interface POSRx extends RxTextColumns {
   id: string;
@@ -113,11 +118,15 @@ interface RxEntry {
   onBillId?: string;
   // The lens made up for this prescription. The first prescription's lens is
   // the one picked in the "Lens" box above; every further one carries its own
-  // here -- from the catalog (lensProductId) or typed in (lensCustom).
+  // here -- from the catalog (lensProductId), typed in (lensCustom), or the
+  // customer's own lens (lensOwn: lensPrice is then any fitting charge).
   lensProductId?: string;
   lensCustom?: boolean;
+  lensOwn?: boolean;
   lensName: string;
   lensPrice: string;
+  // A typed-in lens's purchase price, per lens.
+  lensCost: string;
   lensQty: number;
   lensColorChoice: string;
   lensColorOther: string;
@@ -136,10 +145,10 @@ const EMPTY_RX = {
   rightSph: "", rightCyl: "", rightAxis: "", rightPd: "", rightAdd: "",
   leftSph: "", leftCyl: "", leftAxis: "", leftPd: "", leftAdd: "",
   notes: "",
-  lensName: "", lensPrice: "", lensQty: 1, lensColorChoice: "", lensColorOther: "", lensDescription: "", lensSearch: "",
+  lensName: "", lensPrice: "", lensCost: "", lensQty: 1, lensColorChoice: "", lensColorOther: "", lensDescription: "", lensSearch: "",
 };
 
-const EMPTY_MANUAL_ITEM = { name: "", description: "", price: "", quantity: "1", frame: true };
+const EMPTY_MANUAL_ITEM = { name: "", description: "", price: "", cost: "", quantity: "1", frame: true };
 const EMPTY_NEW_CUSTOMER = { name: "", phone: "", phone2: "", serialNumber: "" };
 
 // A bill dated this far back is an old invoice being entered from the records.
@@ -175,10 +184,12 @@ function LensQty({ value, onChange, max }: { value: number; onChange: (n: number
  * as its own line and saved on that prescription's record.
  */
 function RxLensPicker({
-  entry, lenses, onChange,
+  entry, lenses, canEnterCost, onChange,
 }: {
   entry: RxEntry;
   lenses: Product[];
+  // Owners and managers can put in a typed-in lens's purchase price.
+  canEnterCost: boolean;
   onChange: (patch: Partial<RxEntry>) => void;
 }) {
   const picked = entry.lensProductId ? lenses.find((p) => p.id === entry.lensProductId) : undefined;
@@ -191,21 +202,42 @@ function RxLensPicker({
     <div className="p-2 rounded-lg bg-primary/5 space-y-1.5">
       <div className="flex items-center justify-between gap-2">
         <label className="text-[10px] font-medium text-muted-foreground">Lens for this prescription (adds to the bill)</label>
-        {!picked && (
-          <button type="button" onClick={() => onChange({ lensCustom: !entry.lensCustom, lensSearch: "" })}
-            className="text-[10px] text-primary font-medium flex items-center gap-1 cursor-pointer flex-shrink-0">
-            {entry.lensCustom ? <><Search className="w-3 h-3" /> Search catalog</> : <><Edit3 className="w-3 h-3" /> Enter manually</>}
-          </button>
+        {!picked && !entry.lensOwn && (
+          <span className="flex items-center gap-2 flex-shrink-0">
+            <button type="button" onClick={() => onChange({ lensOwn: true, lensCustom: false, lensSearch: "", lensPrice: "" })}
+              className="text-[10px] text-primary font-medium cursor-pointer">
+              Own lens
+            </button>
+            <button type="button" onClick={() => onChange({ lensCustom: !entry.lensCustom, lensSearch: "" })}
+              className="text-[10px] text-primary font-medium flex items-center gap-1 cursor-pointer">
+              {entry.lensCustom ? <><Search className="w-3 h-3" /> Search catalog</> : <><Edit3 className="w-3 h-3" /> Enter manually</>}
+            </button>
+          </span>
         )}
       </div>
 
-      {entry.lensCustom ? (
+      {entry.lensOwn ? (
+        <div className="px-2.5 py-1.5 bg-surface rounded-lg space-y-1">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[11px] font-medium">{OWN_LENS}</p>
+            <button type="button" onClick={() => onChange({ lensOwn: false, lensPrice: "" })} title="Choose a lens instead" className="cursor-pointer">
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+          <input type="number" min={0} value={entry.lensPrice} onChange={(e) => onChange({ lensPrice: e.target.value })}
+            placeholder="Fitting charge (optional)" className="w-full px-2.5 py-1.5 glass-input text-[11px]" />
+        </div>
+      ) : entry.lensCustom ? (
         <div className="space-y-1">
           <input type="text" value={entry.lensName} onChange={(e) => onChange({ lensName: e.target.value })}
             placeholder="Lens name" className="w-full px-2.5 py-1.5 glass-input text-[11px]" />
-          <div className="grid grid-cols-[1fr_auto] gap-2">
+          <div className={`grid gap-2 ${canEnterCost ? "grid-cols-[1fr_1fr_auto]" : "grid-cols-[1fr_auto]"}`}>
             <input type="number" min={0} value={entry.lensPrice} onChange={(e) => onChange({ lensPrice: e.target.value })}
               placeholder="Price per lens" className="w-full px-2.5 py-1.5 glass-input text-[11px]" />
+            {canEnterCost && (
+              <input type="number" min={0} value={entry.lensCost} onChange={(e) => onChange({ lensCost: e.target.value })}
+                placeholder="Purchase price" title="What one lens cost the shop to buy" className="w-full px-2.5 py-1.5 glass-input text-[11px]" />
+            )}
             <LensQty value={entry.lensQty} onChange={(q) => onChange({ lensQty: q })} />
           </div>
           {price > 0 && entry.lensQty > 1 && (
@@ -338,6 +370,8 @@ export function POSClient({
   const [customLensName, setCustomLensName] = useState("");
   const [customLensPrice, setCustomLensPrice] = useState(0);
   const [customLensQty, setCustomLensQty] = useState(1);
+  // What one typed-in job lens cost the shop (0 = not given).
+  const [customLensCost, setCustomLensCost] = useState(0);
   // An old invoice: the date it really happened ("" = now), and whether it
   // should take items out of stock (off -- see createSale).
   const [billDate, setBillDate] = useState("");
@@ -595,14 +629,18 @@ export function POSClient({
     if (!frame) { setLensFor(null); return; }
     const frameLabel = [frame.brand, frame.name].filter(Boolean).join(" ");
     manualCounter.current += 1;
-    const key = lens.productId ? `lens-${frameKey}-${lens.productId}` : `lens-${frameKey}-typed-${manualCounter.current}`;
+    const key = lens.own
+      ? `lens-${frameKey}-own`
+      : lens.productId ? `lens-${frameKey}-${lens.productId}` : `lens-${frameKey}-typed-${manualCounter.current}`;
     setCart((prev) => {
       if (prev.some((i) => i.key === key)) {
-        return prev.map((i) => (i.key === key ? { ...i, quantity: i.quantity + lens.quantity } : i));
+        return prev.map((i) => (i.key === key ? { ...i, quantity: lens.own ? 1 : i.quantity + lens.quantity, price: lens.own ? lens.price : i.price } : i));
       }
       return [...prev, {
         key, productId: lens.productId, name: lens.name, brand: lens.brand,
-        description: `Lens for ${frameLabel}`, price: lens.price, quantity: lens.quantity, discount: 0, forKey: frameKey,
+        description: lens.own ? `Fitted in ${frameLabel}` : `Lens for ${frameLabel}`,
+        price: lens.price, quantity: lens.quantity, discount: 0, forKey: frameKey,
+        unitCost: lens.productId ? undefined : lens.unitCost,
       }];
     });
     pop(key);
@@ -623,7 +661,7 @@ export function POSClient({
     const key = `manual-${Date.now()}-${manualCounter.current}`;
     setCart((prev) => [...prev, {
       key, productId: null, name, brand: "", description: manualItem.description.trim(), price, quantity, discount: 0,
-      isFrame: manualItem.frame,
+      isFrame: manualItem.frame, unitCost: Math.max(0, Number(manualItem.cost) || 0),
     }]);
     pop(key);
     const offerFor = manualItem.frame && offerLens;
@@ -742,31 +780,44 @@ export function POSClient({
   const extraLensLines = recordRx
     ? rxList.slice(1).flatMap((e, i) => {
         const description = [`Lens for ${e.label.trim() || `prescription ${i + 2}`}`, lensNote(rxLensColor(e), e.lensDescription)].filter(Boolean).join(" · ");
+        if (e.lensOwn) {
+          // On the bill even at Rs.0, so it shows the lens was the customer's.
+          const ownNote = [`For ${e.label.trim() || `prescription ${i + 2}`}`, lensNote(rxLensColor(e), e.lensDescription)].filter(Boolean).join(" · ");
+          return [{ key: `rx-lens-${e.key}`, productId: undefined as string | undefined, name: OWN_LENS, description: ownNote, quantity: 1, price: Math.max(0, Number(e.lensPrice) || 0), unitCost: 0 }];
+        }
         if (e.lensCustom) {
           const price = Number(e.lensPrice) || 0;
           if (!e.lensName.trim() || price <= 0) return [];
-          return [{ key: `rx-lens-${e.key}`, productId: undefined as string | undefined, name: e.lensName.trim(), description, quantity: e.lensQty, price }];
+          return [{ key: `rx-lens-${e.key}`, productId: undefined as string | undefined, name: e.lensName.trim(), description, quantity: e.lensQty, price, unitCost: Math.max(0, Number(e.lensCost) || 0) }];
         }
         const p = e.lensProductId ? products.find((x) => x.id === e.lensProductId) : undefined;
         if (!p) return [];
-        return [{ key: `rx-lens-${e.key}`, productId: p.id as string | undefined, name: `${p.brand} ${p.name}`.trim(), description, quantity: e.lensQty, price: p.salePrice }];
+        return [{ key: `rx-lens-${e.key}`, productId: p.id as string | undefined, name: `${p.brand} ${p.name}`.trim(), description, quantity: e.lensQty, price: p.salePrice, unitCost: 0 }];
       })
     : [];
   const extraLensAmount = extraLensLines.reduce((sum, l) => sum + l.price * l.quantity, 0);
   const subtotal = cartSubtotal + customLensAmount + extraLensAmount;
   const total = subtotal - invoiceDiscount;
   // Cost and profit exactly as the sale records them: stock items at their cost
-  // price, a typed-in item at nothing (its cost isn't known), a typed-in job lens
-  // at its whole price, plus the lab and fitting charges.
+  // price, a typed-in item at the purchase price given (nothing when none was),
+  // a typed-in job lens at its purchase price (or its whole price without one),
+  // plus the lab and fitting charges.
   const costOf = (productId: string | null | undefined) => (productId ? products.find((p) => p.id === productId)?.costPrice ?? 0 : 0);
   const billCost =
-    cart.reduce((sum, i) => sum + costOf(i.productId) * i.quantity, 0) +
-    extraLensLines.reduce((sum, l) => sum + costOf(l.productId) * l.quantity, 0) +
+    cart.reduce((sum, i) => sum + (i.productId ? costOf(i.productId) : i.unitCost ?? 0) * i.quantity, 0) +
+    extraLensLines.reduce((sum, l) => sum + (l.productId ? costOf(l.productId) : l.unitCost) * l.quantity, 0) +
     (lensProductId && !cart.some((i) => i.productId === lensProductId) ? costOf(lensProductId) : 0) +
-    customLensAmount + labCharges + fittingCharges;
+    (useCustomLens && customLensCost > 0 ? customLensCost * customLensQty : customLensAmount) + labCharges + fittingCharges;
   const billProfit = Math.max(0, total) - billCost;
   const billMargin = total > 0 ? (billProfit / total) * 100 : 0;
-  const hasTypedItems = cart.some((i) => !i.productId);
+  const hasTypedItems = cart.some((i) => !i.productId && !(i.unitCost && i.unitCost > 0) && i.name !== OWN_LENS);
+  // The customer's own lens, as a line on the bill (at any fitting charge).
+  const ownLensLine = cart.find((i) => i.key === "own-lens");
+  const setOwnLens = (on: boolean) => setCart((prev) => (on
+    ? prev.some((i) => i.key === "own-lens")
+      ? prev
+      : [...prev, { key: "own-lens", productId: null, name: OWN_LENS, brand: "", description: "", price: 0, quantity: 1, discount: 0, unitCost: 0 }]
+    : prev.filter((i) => i.key !== "own-lens")));
   const customer = allCustomers.find((c) => c.id === selectedCustomer);
   // What to call them on screen: a customer saved with only a number goes by it.
   const customerLabel = customer ? customer.name || customer.phone || "this customer" : "";
@@ -835,12 +886,12 @@ export function POSClient({
   // is the lens chosen in the Lens box, the others carry their own.
   const rxLens = (entry: RxEntry) => {
     if (rxList[0]?.key === entry.key) {
-      const name = useCustomLens ? customLensName.trim() : lensProduct ? `${lensProduct.brand} ${lensProduct.name}`.trim() : "";
+      const name = ownLensLine ? OWN_LENS : useCustomLens ? customLensName.trim() : lensProduct ? `${lensProduct.brand} ${lensProduct.name}`.trim() : "";
       return { lensName: name, lensColor, lensDescription: lensDescription.trim() };
     }
     const p = entry.lensProductId ? products.find((x) => x.id === entry.lensProductId) : undefined;
     return {
-      lensName: entry.lensCustom ? entry.lensName.trim() : p ? `${p.brand} ${p.name}`.trim() : "",
+      lensName: entry.lensOwn ? OWN_LENS : entry.lensCustom ? entry.lensName.trim() : p ? `${p.brand} ${p.name}`.trim() : "",
       lensColor: rxLensColor(entry),
       lensDescription: entry.lensDescription.trim(),
     };
@@ -1043,6 +1094,7 @@ export function POSClient({
     setCustomLensName("");
     setCustomLensPrice(0);
     setCustomLensQty(1);
+    setCustomLensCost(0);
     setBillDate("");
     setDeductOldStock(false);
     clientRef.current = null;
@@ -1151,11 +1203,11 @@ export function POSClient({
       items: [
         ...cart.map((i) => (i.productId
           ? { productId: i.productId, description: i.description, quantity: i.quantity, unitPrice: i.price, discount: i.discount }
-          : { name: i.name, description: i.description, quantity: i.quantity, unitPrice: i.price, discount: i.discount })),
+          : { name: i.name, description: i.description, quantity: i.quantity, unitPrice: i.price, discount: i.discount, unitCost: i.unitCost })),
         // One line for the lens of each prescription after the first.
         ...extraLensLines.map((l) => (l.productId
           ? { productId: l.productId, description: l.description, quantity: l.quantity, unitPrice: l.price, discount: 0 }
-          : { name: l.name, description: l.description, quantity: l.quantity, unitPrice: l.price, discount: 0 })),
+          : { name: l.name, description: l.description, quantity: l.quantity, unitPrice: l.price, discount: 0, unitCost: l.unitCost })),
       ],
       customerId: customer && !customer.local ? customer.id : undefined,
       newCustomer: customer?.local ? { name: customer.name, phone: customer.phone, phone2: customer.phone2 } : undefined,
@@ -1170,6 +1222,7 @@ export function POSClient({
       customLensName: useCustomLens ? customLensName.trim() : undefined,
       customLensPrice: useCustomLens ? customLensPrice : undefined,
       customLensQty: useCustomLens ? customLensQty : undefined,
+      customLensCost: useCustomLens && customLensCost > 0 ? customLensCost : undefined,
       lensColor: lensColor || undefined,
       lensDescription: lensDescription.trim() || undefined,
       labCharges,
@@ -1565,15 +1618,22 @@ export function POSClient({
                   <input type="text" value={manualItem.name} autoFocus
                     onChange={(e) => setManualItem({ ...manualItem, name: e.target.value })}
                     onKeyDown={(e) => { if (e.key === "Enter") addManualItem(); }}
-                    placeholder="Item name *" className="col-span-2 sm:col-span-4 px-3 py-2 glass-input text-xs" />
+                    placeholder="Item name *" className={`col-span-2 ${canSeeCosts ? "sm:col-span-3" : "sm:col-span-4"} px-3 py-2 glass-input text-xs`} />
                   <input type="text" value={manualItem.description}
                     onChange={(e) => setManualItem({ ...manualItem, description: e.target.value })}
                     onKeyDown={(e) => { if (e.key === "Enter") addManualItem(); }}
-                    placeholder="Details, e.g. lens colour" className="col-span-2 sm:col-span-4 px-3 py-2 glass-input text-xs" />
+                    placeholder="Details, e.g. lens colour" className={`col-span-2 ${canSeeCosts ? "sm:col-span-3" : "sm:col-span-4"} px-3 py-2 glass-input text-xs`} />
                   <input type="number" min={0} value={manualItem.price}
                     onChange={(e) => setManualItem({ ...manualItem, price: e.target.value })}
                     onKeyDown={(e) => { if (e.key === "Enter") addManualItem(); }}
                     placeholder="Price *" className="sm:col-span-2 px-3 py-2 glass-input text-xs" />
+                  {canSeeCosts && (
+                    <input type="number" min={0} value={manualItem.cost}
+                      onChange={(e) => setManualItem({ ...manualItem, cost: e.target.value })}
+                      onKeyDown={(e) => { if (e.key === "Enter") addManualItem(); }}
+                      placeholder="Purchase price" title="What one cost the shop to buy — for the profit"
+                      className="sm:col-span-2 px-3 py-2 glass-input text-xs" />
+                  )}
                   <input type="number" min={1} value={manualItem.quantity}
                     onChange={(e) => setManualItem({ ...manualItem, quantity: e.target.value })}
                     onKeyDown={(e) => { if (e.key === "Enter") addManualItem(); }}
@@ -1783,24 +1843,47 @@ export function POSClient({
                 <div>
                   <div className="flex items-center justify-between mb-1">
                     <label className="text-[10px] font-medium text-muted-foreground block">Lens (adds to order)</label>
-                    {!lensProduct && !useCustomLens && (
-                      <button onClick={() => setUseCustomLens(true)} className="text-[10px] text-primary font-medium flex items-center gap-1">
-                        <Edit3 className="w-3 h-3" /> Enter manually
-                      </button>
+                    {!lensProduct && !useCustomLens && !ownLensLine && (
+                      <span className="flex items-center gap-2">
+                        <button onClick={() => setOwnLens(true)} className="text-[10px] text-primary font-medium cursor-pointer">
+                          Customer&apos;s own lens
+                        </button>
+                        <button onClick={() => setUseCustomLens(true)} className="text-[10px] text-primary font-medium flex items-center gap-1">
+                          <Edit3 className="w-3 h-3" /> Enter manually
+                        </button>
+                      </span>
                     )}
                     {useCustomLens && (
-                      <button onClick={() => { setUseCustomLens(false); setCustomLensName(""); setCustomLensPrice(0); setCustomLensQty(1); }} className="text-[10px] text-primary font-medium flex items-center gap-1">
+                      <button onClick={() => { setUseCustomLens(false); setCustomLensName(""); setCustomLensPrice(0); setCustomLensQty(1); setCustomLensCost(0); }} className="text-[10px] text-primary font-medium flex items-center gap-1">
                         <Search className="w-3 h-3" /> Search catalog
                       </button>
                     )}
                   </div>
-                  {useCustomLens ? (
+                  {ownLensLine ? (
+                    <div className="px-3 py-2 bg-primary/5 rounded-lg space-y-1.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-medium">{`${OWN_LENS} — on the bill`}</span>
+                        <button onClick={() => setOwnLens(false)} title="Choose a lens instead" className="cursor-pointer"><X className="w-3.5 h-3.5" /></button>
+                      </div>
+                      <input type="number" min={0} value={ownLensLine.price || ""} placeholder="Fitting charge (optional)"
+                        onChange={(e) => {
+                          const fee = Math.max(0, Number(e.target.value) || 0);
+                          setCart((prev) => prev.map((i) => (i.key === "own-lens" ? { ...i, price: fee } : i)));
+                        }}
+                        className="w-full px-3 py-2 glass-input text-xs" />
+                    </div>
+                  ) : useCustomLens ? (
                     <div className="space-y-1">
                       <input type="text" value={customLensName} onChange={(e) => setCustomLensName(e.target.value)}
                         placeholder="Lens name" className="w-full px-3 py-2 glass-input text-xs" />
-                      <div className="grid grid-cols-[1fr_auto] gap-2">
+                      <div className={`grid gap-2 ${canSeeCosts ? "grid-cols-[1fr_1fr_auto]" : "grid-cols-[1fr_auto]"}`}>
                         <input type="number" value={customLensPrice || ""} onChange={(e) => setCustomLensPrice(Number(e.target.value))}
                           placeholder="Price per lens" className="w-full px-3 py-2 glass-input text-xs" />
+                        {canSeeCosts && (
+                          <input type="number" min={0} value={customLensCost || ""} onChange={(e) => setCustomLensCost(Math.max(0, Number(e.target.value) || 0))}
+                            placeholder="Purchase price" title="What one lens cost the shop to buy — for the profit"
+                            className="w-full px-3 py-2 glass-input text-xs" />
+                        )}
                         <LensQty value={customLensQty} onChange={setCustomLensQty} />
                       </div>
                       {customLensPrice > 0 && customLensQty > 1 && (
@@ -1918,7 +2001,7 @@ export function POSClient({
                     {customer ? (
                       <p className="text-[10px] text-muted-foreground leading-relaxed">
                         {rxPrefilledFrom && !rxTouched
-                          ? `Filled in from ${customerLabel}'s reading of ${new Date(rxPrefilledFrom).toLocaleDateString("en-GB")} — change anything that's different, or pick another with "Use an earlier reading". `
+                          ? `Filled in from ${customerLabel}'s reading of ${new Date(rxPrefilledFrom).toLocaleDateString("en-GB")}. Change anything that's different and it's saved as a new prescription — that one stays on their record. `
                           : ""}
                         {`Saved to ${customerLabel}'s prescription record when you complete the sale.`}
                       </p>
@@ -1984,33 +2067,7 @@ export function POSClient({
                           Own Prescription — customer brought this from outside
                         </label>
 
-                        {(["Right Eye (OD)", "Left Eye (OS)"] as const).map((eye) => {
-                          const prefix = eye.includes("Right") ? "right" : "left";
-                          return (
-                            <div key={eye}>
-                              <p className="text-[10px] font-medium text-muted-foreground mb-1">{eye}</p>
-                              <div className="grid grid-cols-5 gap-1">
-                                {(["Sph", "Cyl", "Axis", "Pd", "Add"] as const).map((f) => {
-                                  const key = `${prefix}${f}` as keyof RxEntry;
-                                  return (
-                                    <div key={f}>
-                                      <label className="text-[9px] text-muted-foreground block text-center mb-0.5">{f.toUpperCase()}</label>
-                                      {isPowerField(f) ? (
-                                        <RxPowerInput compact placeholder="0" value={entry[key] as string}
-                                          onChange={(v) => editRx(entry.key, { [key]: v })} />
-                                      ) : (
-                                        <input type="number" step={f === "Axis" ? 1 : 0.5} min={0} placeholder="0"
-                                          value={entry[key] as string}
-                                          onChange={(e) => editRx(entry.key, { [key]: e.target.value })}
-                                          className="w-full px-1 py-1 glass-input text-[10px] text-center" />
-                                      )}
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          );
-                        })}
+                        <RxEntryTable compact values={entry} onChange={(key, value) => editRx(entry.key, { [key]: value })} />
 
                         <p className="text-[9px] text-muted-foreground leading-snug">
                           SPH, CYL and ADD take letters too — type them after the number (2.50 DS), or tap ± and pick ABC.
@@ -2023,7 +2080,7 @@ export function POSClient({
                             </p>
                           )
                         ) : (
-                          <RxLensPicker entry={entry} lenses={lensProducts} onChange={(patch) => editRx(entry.key, patch)} />
+                          <RxLensPicker entry={entry} lenses={lensProducts} canEnterCost={canSeeCosts} onChange={(patch) => editRx(entry.key, patch)} />
                         )}
 
                         <input type="text" value={entry.notes} onChange={(e) => editRx(entry.key, { notes: e.target.value })}
@@ -2074,9 +2131,9 @@ export function POSClient({
                       </p>
                       {costsOn && (
                         <p className="text-[10px] leading-snug">
-                          {item.productId
-                            ? <CostMargin cost={costOf(item.productId)} price={item.price} quantity={item.quantity} discount={item.discount} />
-                            : <span className="text-muted-foreground">Cost not known</span>}
+                          {item.productId || (item.unitCost ?? 0) > 0
+                            ? <CostMargin cost={item.productId ? costOf(item.productId) : item.unitCost ?? 0} price={item.price} quantity={item.quantity} discount={item.discount} />
+                            : <span className="text-muted-foreground">{item.name === OWN_LENS ? "No cost — customer's lens" : "No purchase price given"}</span>}
                         </p>
                       )}
                     </div>
@@ -2205,7 +2262,7 @@ export function POSClient({
                     </div>
                     {hasTypedItems && (
                       <p className="text-[10px] text-muted-foreground">
-                        Typed-in items have no cost on record, so their whole price counts as profit.
+                        Typed-in items with no purchase price have no cost on record, so their whole price counts as profit.
                       </p>
                     )}
                   </div>
@@ -2403,6 +2460,7 @@ export function POSClient({
             frameName={[frame.brand, frame.name].filter(Boolean).join(" ")}
             lenses={lensProducts}
             showCosts={costsOn}
+            canEnterCost={canSeeCosts}
             offerEveryTime={offerLens}
             onOfferChange={changeOfferLens}
             onPick={(lens) => addLensToFrame(lensFor, lens)}

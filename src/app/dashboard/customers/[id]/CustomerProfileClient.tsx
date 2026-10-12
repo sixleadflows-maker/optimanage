@@ -9,7 +9,8 @@ import { useApp } from "@/lib/context";
 import { deleteCustomer } from "@/lib/actions/customers";
 import { setPrescriptionNotesHidden } from "@/lib/actions/prescriptions";
 import { paymentStatusChipClass } from "@/lib/constants";
-import { formatEyeValue, rxLensLabel } from "@/lib/utils/rx";
+import { rxLensLabel } from "@/lib/utils/rx";
+import { RxTable } from "@/components/ui/RxTable";
 import { shareNumber, allNumbers } from "@/lib/utils/phone";
 import { CollectPaymentModal, EditInvoiceModal, EditPaymentModal, type EditorCustomer, type EditorStaff } from "@/app/dashboard/sales/InvoiceEditor";
 import { InvoiceDetails } from "@/components/invoice/InvoiceDetails";
@@ -214,7 +215,10 @@ export function CustomerProfileClient({
 
         <div className="lg:col-span-2 space-y-4">
           <div className="glass-card p-5">
-            <h3 className="text-sm font-semibold mb-4">Prescription History</h3>
+            <h3 className="text-sm font-semibold">Prescription History</h3>
+            <p className="text-[11px] text-muted-foreground mt-0.5 mb-4">
+              Every prescription on file, newest first, each with the date it was taken. A new one never replaces an older one.
+            </p>
             {customer.prescriptions.length === 0 ? (
               <p className="text-sm text-muted-foreground text-center py-6">No prescriptions on file</p>
             ) : (
@@ -232,33 +236,10 @@ export function CustomerProfileClient({
                         </Link>
                       </div>
                     </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <p className="text-[10px] font-medium text-muted-foreground mb-2">RIGHT EYE (OD)</p>
-                        <div className="grid grid-cols-5 gap-1 text-xs">
-                          {(["Sph", "Cyl", "Axis", "Pd", "Add"] as const).map((f) => (
-                            <div key={f} className="text-center">
-                              <p className="text-[9px] text-muted-foreground">{f.toUpperCase()}</p>
-                              <p className="font-medium">{formatEyeValue(f, rx.rightEye)}</p>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                      <div>
-                        <p className="text-[10px] font-medium text-muted-foreground mb-2">LEFT EYE (OS)</p>
-                        <div className="grid grid-cols-5 gap-1 text-xs">
-                          {(["Sph", "Cyl", "Axis", "Pd", "Add"] as const).map((f) => (
-                            <div key={f} className="text-center">
-                              <p className="text-[9px] text-muted-foreground">{f.toUpperCase()}</p>
-                              <p className="font-medium">{formatEyeValue(f, rx.leftEye)}</p>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
                     {rx.label && (
-                      <p className="text-[11px] font-medium text-primary mb-1">For {rx.label}</p>
+                      <p className="text-[11px] font-medium text-primary mb-1.5">For {rx.label}</p>
                     )}
+                    <RxTable right={rx.rightEye} left={rx.leftEye} />
                     {rxLensLabel(rx) && (
                       <p className="text-xs mt-2"><span className="text-muted-foreground">Lens: </span>{rxLensLabel(rx)}</p>
                     )}

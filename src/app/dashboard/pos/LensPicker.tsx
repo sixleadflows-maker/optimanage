@@ -14,7 +14,13 @@ export interface PickedLens {
   brand: string;
   price: number;
   quantity: number;
+  // A typed-in lens's purchase price, per lens.
+  unitCost?: number;
+  // The customer brought their own lens: price is any fitting charge.
+  own?: boolean;
 }
+
+const OWN_LENS = "Customer's own lens";
 
 /**
  * "Which lens for this frame?" -- comes up when a frame is scanned or added.
@@ -22,12 +28,14 @@ export interface PickedLens {
  * A lens barcode scanned here is picked straight away.
  */
 export function LensPicker({
-  frameName, lenses, showCosts, offerEveryTime, onOfferChange, onPick, onClose,
+  frameName, lenses, showCosts, canEnterCost, offerEveryTime, onOfferChange, onPick, onClose,
 }: {
   frameName: string;
   lenses: Product[];
   // Cost and profit under each lens (owners and managers, when switched on).
   showCosts: boolean;
+  // Owners and managers can put in a typed-in lens's purchase price.
+  canEnterCost: boolean;
   offerEveryTime: boolean;
   onOfferChange: (offer: boolean) => void;
   onPick: (lens: PickedLens) => void;
@@ -35,8 +43,10 @@ export function LensPicker({
 }) {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("all");
-  const [typing, setTyping] = useState(false);
-  const [manual, setManual] = useState({ name: "", price: "", quantity: "1" });
+  // Below the list: typing a lens in, or the customer's own lens.
+  const [typing, setTyping] = useState<"lens" | "own" | null>(null);
+  const [manual, setManual] = useState({ name: "", price: "", cost: "", quantity: "1" });
+  const [fittingCharge, setFittingCharge] = useState("");
   const [problem, setProblem] = useState("");
 
   useEffect(() => {
@@ -77,7 +87,11 @@ export function LensPicker({
     const quantity = Math.max(1, Math.floor(Number(manual.quantity) || 1));
     if (!name) { setProblem("Enter the lens name"); return; }
     if (!(price > 0)) { setProblem("Enter the lens price"); return; }
-    onPick({ productId: null, name, brand: "", price, quantity });
+    onPick({ productId: null, name, brand: "", price, quantity, unitCost: Math.max(0, Number(manual.cost) || 0) });
+  };
+
+  const addOwn = () => {
+    onPick({ productId: null, name: OWN_LENS, brand: "", price: Math.max(0, Number(fittingCharge) || 0), quantity: 1, unitCost: 0, own: true });
   };
 
   return (
@@ -144,16 +158,22 @@ export function LensPicker({
           })}
         </div>
 
-        {typing ? (
+        {typing === "lens" ? (
           <div className="mt-3 p-3 rounded-xl border border-primary/30 bg-primary/5 space-y-2">
             <p className="text-xs font-semibold flex items-center gap-1.5"><PenLine className="w-3.5 h-3.5 text-primary" /> Type a lens in</p>
-            <div className="grid grid-cols-[1fr_5.5rem_3.5rem] gap-2">
-              <input type="text" value={manual.name} onChange={(e) => { setManual({ ...manual, name: e.target.value }); setProblem(""); }}
-                onKeyDown={(e) => { if (e.key === "Enter") addTyped(); }}
-                placeholder="Lens name *" className="px-3 py-2 glass-input text-xs" />
+            <input type="text" value={manual.name} onChange={(e) => { setManual({ ...manual, name: e.target.value }); setProblem(""); }}
+              onKeyDown={(e) => { if (e.key === "Enter") addTyped(); }} autoFocus
+              placeholder="Lens name *" className="w-full px-3 py-2 glass-input text-xs" />
+            <div className={`grid gap-2 ${canEnterCost ? "grid-cols-[1fr_1fr_3.5rem]" : "grid-cols-[1fr_3.5rem]"}`}>
               <input type="number" min={0} value={manual.price} onChange={(e) => { setManual({ ...manual, price: e.target.value }); setProblem(""); }}
                 onKeyDown={(e) => { if (e.key === "Enter") addTyped(); }}
-                placeholder="Price *" className="px-3 py-2 glass-input text-xs" />
+                placeholder="Selling price *" className="px-3 py-2 glass-input text-xs" />
+              {canEnterCost && (
+                <input type="number" min={0} value={manual.cost} onChange={(e) => setManual({ ...manual, cost: e.target.value })}
+                  onKeyDown={(e) => { if (e.key === "Enter") addTyped(); }}
+                  placeholder="Purchase price" title="What one lens cost the shop to buy — for the profit"
+                  className="px-3 py-2 glass-input text-xs" />
+              )}
               <input type="number" min={1} value={manual.quantity} onChange={(e) => setManual({ ...manual, quantity: e.target.value })}
                 onKeyDown={(e) => { if (e.key === "Enter") addTyped(); }}
                 placeholder="Qty" title="Number of lenses: a pair is 2" className="px-2 py-2 glass-input text-xs text-center" />
@@ -164,16 +184,41 @@ export function LensPicker({
                 className="flex items-center gap-1.5 px-4 py-2 bg-primary text-white rounded-lg text-xs font-semibold hover:bg-primary-hover transition-colors cursor-pointer">
                 <Plus className="w-3.5 h-3.5" /> Add this lens
               </button>
-              <button onClick={() => { setTyping(false); setProblem(""); }} className="px-3 py-2 text-xs text-muted-foreground hover:text-foreground cursor-pointer">
+              <button onClick={() => { setTyping(null); setProblem(""); }} className="px-3 py-2 text-xs text-muted-foreground hover:text-foreground cursor-pointer">
+                Back to the list
+              </button>
+            </div>
+          </div>
+        ) : typing === "own" ? (
+          <div className="mt-3 p-3 rounded-xl border border-primary/30 bg-primary/5 space-y-2">
+            <p className="text-xs font-semibold">{OWN_LENS}</p>
+            <p className="text-[11px] text-muted-foreground">
+              It goes on the bill under the frame so the record shows the lens was theirs. Charging for fitting it? Put that here.
+            </p>
+            <input type="number" min={0} value={fittingCharge} onChange={(e) => setFittingCharge(e.target.value)} autoFocus
+              onKeyDown={(e) => { if (e.key === "Enter") addOwn(); }}
+              placeholder="Fitting charge (optional)" className="w-full px-3 py-2 glass-input text-xs" />
+            <div className="flex gap-2">
+              <button onClick={addOwn}
+                className="flex items-center gap-1.5 px-4 py-2 bg-primary text-white rounded-lg text-xs font-semibold hover:bg-primary-hover transition-colors cursor-pointer">
+                <Plus className="w-3.5 h-3.5" /> Add their own lens
+              </button>
+              <button onClick={() => setTyping(null)} className="px-3 py-2 text-xs text-muted-foreground hover:text-foreground cursor-pointer">
                 Back to the list
               </button>
             </div>
           </div>
         ) : (
-          <button onClick={() => setTyping(true)}
-            className="mt-3 flex items-center gap-1.5 text-xs text-primary font-semibold cursor-pointer self-start">
-            <PenLine className="w-3.5 h-3.5" /> Lens not in the list? Type it in with its price
-          </button>
+          <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5">
+            <button onClick={() => setTyping("lens")}
+              className="flex items-center gap-1.5 text-xs text-primary font-semibold cursor-pointer">
+              <PenLine className="w-3.5 h-3.5" /> Lens not in the list? Type it in with its price
+            </button>
+            <button onClick={() => setTyping("own")}
+              className="text-xs text-primary font-semibold cursor-pointer">
+              Customer has their own lens
+            </button>
+          </div>
         )}
 
         <div className="mt-4 flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-3">

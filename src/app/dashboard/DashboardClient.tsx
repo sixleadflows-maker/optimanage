@@ -98,9 +98,9 @@ function HBarChart({ data }: { data: { label: string; value: number }[] }) {
 export function DashboardClient({ data }: { data: DashboardData }) {
   const kpis = [
     {
-      label: "Today's Sales", raw: data.todayRevenue, format: formatCurrency, change: "today", up: true, icon: DollarSign, color: "text-success",
-      // Money in today, which also takes in balances paid off on older invoices.
-      note: `${formatCurrency(data.todayReceived)} received today${data.todayFromEarlier > 0 ? ` · ${formatCurrency(data.todayFromEarlier)} of it from earlier invoices` : ""}`,
+      label: "Today's Sales", raw: data.todaySales, format: formatCurrency, change: "today", up: true, icon: DollarSign, color: "text-success",
+      // Every payment made today counts, including balances paid off on older invoices.
+      note: `${data.todayFromEarlier > 0 ? `${formatCurrency(data.todayFromEarlier)} of it paid on earlier invoices · ` : ""}New invoices today: ${formatCurrency(data.todayInvoiced)}`,
     },
     { label: "Total Invoices", raw: data.totalInvoices, format: (n: number) => n.toString(), change: "all-time", up: true, icon: FileText, color: "text-primary", note: "" },
     { label: "Outstanding", raw: data.outstanding, format: formatCurrency, change: "due", up: false, icon: TrendingUp, color: "text-warning", note: "" },

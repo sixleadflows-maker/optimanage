@@ -26,9 +26,9 @@ export function MonitorClient({
 
   const kpis = [
     {
-      label: "Today's Sales", value: formatCurrency(dashboard.todayRevenue), icon: DollarSign, color: "text-success",
-      // Money in today, which also takes in balances paid off on older invoices.
-      note: `${formatCurrency(dashboard.todayReceived)} received today${dashboard.todayFromEarlier > 0 ? ` · ${formatCurrency(dashboard.todayFromEarlier)} of it from earlier invoices` : ""}`,
+      label: "Today's Sales", value: formatCurrency(dashboard.todaySales), icon: DollarSign, color: "text-success",
+      // Every payment made today counts, including balances paid off on older invoices.
+      note: `${dashboard.todayFromEarlier > 0 ? `${formatCurrency(dashboard.todayFromEarlier)} of it paid on earlier invoices · ` : ""}New invoices today: ${formatCurrency(dashboard.todayInvoiced)}`,
     },
     { label: "Total Invoices", value: dashboard.totalInvoices.toString(), icon: FileText, color: "text-primary", note: "" },
     { label: "Outstanding Balance", value: formatCurrency(dashboard.outstanding), icon: TrendingUp, color: "text-warning", note: "" },

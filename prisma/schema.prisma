@@ -249,6 +249,9 @@ model Sale {
   // Per lens: a pair of lenses is customLensPrice x customLensQty on the bill.
   customLensPrice Float         @default(0)
   customLensQty   Int           @default(1)
+  // What one typed-in lens cost the shop to buy. 0 when it wasn't given, and then
+  // the lens's whole price counts as cost, as it always has.
+  customLensCost  Float         @default(0)
   lensColor       String        @default("")
   lensDescription String        @default("")
   labCharges      Float         @default(0)
@@ -325,6 +328,10 @@ model SaleItem {
   description      String       @default("")
   quantity         Int          @default(1)
   unitPrice        Float        @default(0)
+  // What one of it cost the shop. A typed-in item keeps the purchase price
+  // staff entered for it (0 when none was given); a stock item records its cost
+  // price at the time.
+  unitCost         Float        @default(0)
   discount         Float        @default(0)
   total            Float        @default(0)
   returnedQuantity Int          @default(0)

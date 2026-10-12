@@ -5,6 +5,7 @@ import type {
 } from "@/lib/mock/types";
 import { readSplit, tillParts, type PaymentPart } from "@/lib/sales/paymentSplit";
 import { creditHeld, creditHeldByCustomer } from "@/lib/sales/credit";
+import { paymentsOnDays } from "@/lib/sales/received";
 import { CREDIT_METHOD } from "@/lib/constants";
 
 // ─── Enum mappers (DB enum → UI title-case) ─────────────────
@@ -196,6 +197,8 @@ export type SaleView = Sale & {
   customLensName: string;
   customLensPrice: number;
   customLensQty: number;
+  // What one typed-in lens cost to buy (0 when it wasn't given).
+  customLensCost: number;
   // Temporary number printed on a bill made offline; searchable.
   offlineRef: string;
   // False for an old invoice entered without taking items out of stock.
@@ -271,6 +274,7 @@ function mapSale(s: SaleRow): SaleView {
       description: it.description,
       quantity: it.quantity,
       unitPrice: it.unitPrice,
+      unitCost: it.unitCost,
       discount: it.discount,
       total: it.total,
       returnedQuantity: it.returnedQuantity,
@@ -278,6 +282,7 @@ function mapSale(s: SaleRow): SaleView {
     customLensName: s.customLensName,
     customLensPrice: s.customLensPrice,
     customLensQty: s.customLensQty,
+    customLensCost: s.customLensCost,
     offlineRef: s.offlineRef,
     stockDeducted: s.stockDeducted,
     enteredAt: s.createdAt.toISOString(),
@@ -822,7 +827,7 @@ export interface AnalyticsData {
 export async function getAnalyticsData(): Promise<AnalyticsData> {
   const [products, sales, expenses, settings] = await Promise.all([
     db.product.findMany({ where: { active: true } }),
-    db.sale.findMany({ include: { items: true } }),
+    db.sale.findMany({ include: { items: true, payments: { select: { amount: true, date: true } } } }),
     db.expense.findMany(),
     db.shopSettings.findUnique({ where: { id: "default" } }),
   ]);
@@ -833,27 +838,34 @@ export async function getAnalyticsData(): Promise<AnalyticsData> {
   const cats: Record<string, number> = {};
   const itemSales: Record<string, number> = {};
   const days: Record<string, number> = {};
-  let totalCost = 0;
+  // Revenue is the money paid in, each payment on its own day, and profit
+  // follows it (lib/sales/received) -- so a bill still owed counts as it's paid.
+  let totalRevenue = 0;
+  let grossProfit = 0;
 
   sales.forEach((s) => {
-    const day = iso(s.date);
-    days[day] = (days[day] || 0) + s.total;
+    for (const p of paymentsOnDays({ dateTime: s.date, total: s.total, profit: s.profit, paid: s.paid, payments: s.payments })) {
+      const day = iso(p.date);
+      days[day] = (days[day] || 0) + p.amount;
+      totalRevenue += p.amount;
+      grossProfit += p.profit;
+    }
     s.items.forEach((it) => {
-      // Typed-in items (no productId) have no brand, category or cost to attribute.
+      // Typed-in items (no productId) have no brand or category to attribute.
       if (!it.productId) return;
       const p = productById.get(it.productId);
       if (p) {
         brands[p.brand] = (brands[p.brand] || 0) + it.total;
         cats[p.category] = (cats[p.category] || 0) + it.total;
-        totalCost += p.costPrice * it.quantity;
       }
       itemSales[it.productId] = (itemSales[it.productId] || 0) + it.quantity;
     });
   });
 
-  const totalRevenue = sales.reduce((sum, s) => sum + s.total, 0);
   const totalExpenses = expenses.reduce((sum, e) => sum + e.amount, 0);
-  const grossProfit = totalRevenue - totalCost;
+  // What the goods sold cost: everything the invoices recorded as cost (stock at
+  // cost price, typed-in items at their purchase price, lab and fitting).
+  const totalCost = totalRevenue - grossProfit;
 
   const dailySales = Object.entries(days).sort(([a], [b]) => a.localeCompare(b)).map(([date, total]) => ({
     label: new Date(date).toLocaleDateString("en-PK", { day: "2-digit", month: "short" }),
@@ -1059,15 +1071,15 @@ async function openingCashFor(start: Date, branchId?: string) {
 
 // ─── Dashboard aggregates ───────────────────────────────────
 export interface DashboardData {
-  // Invoices made today, at their full value.
-  todayRevenue: number;
-  // Money actually received today: what was taken on today's invoices, plus every
-  // payment received today on any invoice -- a balance paid off days later counts
-  // on the day it's paid. Advances paid in aren't sales, and a bill paid from an
-  // advance brings in nothing new.
-  todayReceived: number;
-  // The part of todayReceived that was paid on invoices made before today.
+  // Today's sales: every payment made today towards an invoice of any date
+  // (lib/sales/received) -- a balance paid off today counts today, and the part
+  // of a bill paid on an earlier day counted on that day.
+  todaySales: number;
+  // The part of todaySales paid on invoices made before today.
   todayFromEarlier: number;
+  // Invoices made today at their full value, paid or not.
+  todayInvoiced: number;
+  todayInvoiceCount: number;
   totalInvoices: number;
   outstanding: number;
   lowStockCount: number;
@@ -1081,41 +1093,33 @@ export interface DashboardData {
 export async function getDashboardData(branchId?: string): Promise<DashboardData> {
   const saleWhere = branchId ? { branchId } : {};
   const today = new Date().toISOString().slice(0, 10);
-  const { start, end } = dayRange(today);
-  const [products, sales, paymentsToday] = await Promise.all([
+  const [products, sales] = await Promise.all([
     db.product.findMany({ where: { active: true } }),
     db.sale.findMany({
       where: saleWhere,
       orderBy: { date: "desc" },
-      include: { customer: true, items: true, payments: { select: { amount: true } } },
-    }),
-    // Every payment received today, on an invoice of any date.
-    db.salePayment.findMany({
-      where: { date: { gte: start, lt: end }, ...(branchId ? { sale: { branchId } } : {}) },
-      select: { amount: true, method: true, sale: { select: { date: true } } },
+      include: { customer: true, items: true, payments: { select: { amount: true, date: true } } },
     }),
   ]);
 
   const productBrand = new Map(products.map((p) => [p.id, p.brand]));
 
-  const todaySales = sales.filter((s) => iso(s.date) === today);
-  const todayRevenue = todaySales.reduce((sum, s) => sum + s.total, 0);
-  // What was taken at the till on today's invoices (a sale's `paid` includes
-  // anything collected later, so those are taken back out and counted on their own day).
-  const atTillToday = todaySales
-    .flatMap((s) => tillParts(s, s.paid - s.payments.reduce((sum, p) => sum + p.amount, 0)))
-    .filter((c) => c.method !== CREDIT_METHOD)
-    .reduce((sum, c) => sum + c.amount, 0);
-  const receivedToday = paymentsToday.filter((p) => p.method !== CREDIT_METHOD);
-  const todayReceived = atTillToday + receivedToday.reduce((sum, p) => sum + p.amount, 0);
-  const todayFromEarlier = receivedToday.filter((p) => p.sale.date < start).reduce((sum, p) => sum + p.amount, 0);
+  // Every payment, on the day it was made, with the day its invoice was made.
+  const paymentDays = sales.flatMap((s) =>
+    paymentsOnDays({ dateTime: s.date, total: s.total, profit: s.profit, paid: s.paid, payments: s.payments })
+      .map((p) => ({ day: iso(p.date), amount: p.amount, invoiceDay: iso(s.date) })));
+  const paidToday = paymentDays.filter((p) => p.day === today);
+  const todaySales = paidToday.reduce((sum, p) => sum + p.amount, 0);
+  const todayFromEarlier = paidToday.filter((p) => p.invoiceDay < today).reduce((sum, p) => sum + p.amount, 0);
+  const madeToday = sales.filter((s) => iso(s.date) === today);
+  const todayInvoiced = madeToday.reduce((sum, s) => sum + s.total, 0);
   const outstanding = sales.filter((s) => s.paymentStatus !== "PAID").reduce((sum, s) => sum + s.balance, 0);
   const totalProfit = sales.reduce((sum, s) => sum + s.profit, 0);
   const lowStock = products.filter((p) => p.stock <= p.lowStockThreshold);
 
-  // Daily trend (last 14 days that have sales)
+  // Daily trend (last 14 days that have sales), each payment on its own day.
   const days: Record<string, number> = {};
-  sales.forEach((s) => { const d = iso(s.date); days[d] = (days[d] || 0) + s.total; });
+  paymentDays.forEach((p) => { days[p.day] = (days[p.day] || 0) + p.amount; });
   const dailyTrend = Object.entries(days)
     .sort(([a], [b]) => a.localeCompare(b))
     .slice(-14)
@@ -1145,9 +1149,10 @@ export async function getDashboardData(branchId?: string): Promise<DashboardData
   });
 
   return {
-    todayRevenue,
-    todayReceived,
+    todaySales,
     todayFromEarlier,
+    todayInvoiced,
+    todayInvoiceCount: madeToday.length,
     totalInvoices: sales.length,
     outstanding,
     lowStockCount: lowStock.length,

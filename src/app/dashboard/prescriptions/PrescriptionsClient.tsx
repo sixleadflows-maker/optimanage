@@ -7,8 +7,9 @@ import { formatDate } from "@/lib/utils/format";
 import { useApp } from "@/lib/context";
 import { createPrescription, deletePrescription, updatePrescription, setPrescriptionNotesHidden } from "@/lib/actions/prescriptions";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
-import { RxPowerInput } from "@/components/ui/RxPowerInput";
-import { formatEyeValue, isPowerField, parseRxText, rxFieldText, rxFormTexts } from "@/lib/utils/rx";
+import { RxTable } from "@/components/ui/RxTable";
+import { RxEntryTable } from "@/components/ui/RxEntryTable";
+import { formatEyeValue, parseRxText, rxFieldText, rxFormTexts } from "@/lib/utils/rx";
 import { Eye, Save, Search, Loader2, Pencil, Trash2, X, EyeOff, UserPlus } from "lucide-react";
 import { CustomerFormModal, type SavedCustomer } from "@/app/dashboard/customers/CustomerFormModal";
 import { matchesSearch } from "@/lib/utils/search";
@@ -161,14 +162,26 @@ export function PrescriptionsClient({
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  const handleSave = async () => {
+  // A prescription from an earlier day is history. Opening it to type in a new
+  // eye test saves a new prescription by default, so the old one stays on file
+  // with its own date; "Correct this one" is for fixing a typing mistake.
+  const editingOlder = !!editing && editing.date < new Date().toISOString().slice(0, 10);
+
+  const handleSave = async (asNew = false) => {
     if (!selectedCustomer) {
       showToast("Select a customer first", "error");
       return;
     }
     setSaving(true);
     try {
-      if (editing) {
+      if (editing && asNew) {
+        const res = await createPrescription({ customerId: editing.customerId, ...values() });
+        if (!res.ok) {
+          showToast(res.error, "error");
+          return;
+        }
+        showToast(`New prescription saved for ${editing.customerName} — the one from ${formatDate(editing.date)} is kept`, "success");
+      } else if (editing) {
         const res = await updatePrescription(editing.id, values());
         if (!res.ok) {
           showToast(res.error, "error");
@@ -306,32 +319,9 @@ export function PrescriptionsClient({
             </div>
           )}
 
-          {(["Right Eye (OD)", "Left Eye (OS)"] as const).map((eye) => {
-            const prefix = eye.includes("Right") ? "right" : "left";
-            return (
-              <div key={eye} className="mb-4">
-                <p className="text-xs font-medium text-muted-foreground mb-2">{eye}</p>
-                <div className="grid grid-cols-5 gap-2">
-                  {(["Sph", "Cyl", "Axis", "Pd", "Add"] as const).map((field) => {
-                    const key = `${prefix}${field}` as keyof typeof form;
-                    return (
-                      <div key={field}>
-                        <label className="text-[10px] text-muted-foreground block text-center mb-1">{field.toUpperCase()}</label>
-                        {isPowerField(field) ? (
-                          <RxPowerInput value={form[key]} onChange={(v) => setForm((p) => ({ ...p, [key]: v }))} />
-                        ) : (
-                          <input type="number" step={field === "Axis" ? 1 : 0.5} min={0} placeholder="0"
-                            value={form[key]}
-                            onChange={(e) => setForm((p) => ({ ...p, [key]: e.target.value }))}
-                            className="w-full px-2 py-2 glass-input text-xs text-center" />
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })}
+          <div className="mb-4 -mx-1.5">
+            <RxEntryTable values={form} onChange={(key, value) => setForm((p) => ({ ...p, [key]: value }))} />
+          </div>
 
           <p className="text-[11px] text-muted-foreground -mt-2 mb-4">
             SPH, CYL and ADD take letters as well as digits: type them after the number (2.50 DS), or tap the ± button
@@ -355,11 +345,28 @@ export function PrescriptionsClient({
             Own Prescription — customer brought this from outside
           </label>
 
-          <button onClick={handleSave} disabled={saving}
-            className="w-full flex items-center justify-center gap-2 py-2.5 bg-primary text-white rounded-xl text-sm font-medium hover:bg-primary-hover transition-colors disabled:opacity-60">
-            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-            {editing ? "Save Changes" : "Save Prescription"}
-          </button>
+          {editingOlder ? (
+            <div className="space-y-2">
+              <button onClick={() => handleSave(true)} disabled={saving}
+                className="w-full flex items-center justify-center gap-2 py-2.5 bg-primary text-white rounded-xl text-sm font-medium hover:bg-primary-hover transition-colors disabled:opacity-60">
+                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                Save as a new prescription
+              </button>
+              <p className="text-[11px] text-muted-foreground text-center">
+                {`The one from ${formatDate(editing!.date)} stays on their record with its date.`}
+              </p>
+              <button onClick={() => handleSave(false)} disabled={saving}
+                className="w-full py-2 rounded-xl text-xs font-medium bg-surface hover:bg-surface-hover transition-colors disabled:opacity-60 cursor-pointer">
+                {`Correct the one from ${formatDate(editing!.date)} instead (a typing mistake)`}
+              </button>
+            </div>
+          ) : (
+            <button onClick={() => handleSave()} disabled={saving}
+              className="w-full flex items-center justify-center gap-2 py-2.5 bg-primary text-white rounded-xl text-sm font-medium hover:bg-primary-hover transition-colors disabled:opacity-60">
+              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+              {editing ? "Save Changes" : "Save Prescription"}
+            </button>
+          )}
         </div>
 
         <div className="glass-card p-5">
@@ -413,24 +420,7 @@ export function PrescriptionsClient({
                     )}
                   </div>
                 </div>
-                <table className="w-full text-[10px] text-center">
-                  <thead>
-                    <tr className="text-muted-foreground">
-                      <th className="text-left font-medium py-0.5"></th>
-                      <th className="font-medium">SPH</th><th className="font-medium">CYL</th><th className="font-medium">AXIS</th>
-                      <th className="font-medium">PD</th><th className="font-medium">ADD</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {([["OD (R)", rx.rightEye], ["OS (L)", rx.leftEye]] as const).map(([label, eye]) => (
-                      <tr key={label}>
-                        <td className="text-left font-medium text-muted-foreground py-0.5">{label}</td>
-                        <td>{formatEyeValue("Sph", eye)}</td><td>{formatEyeValue("Cyl", eye)}</td>
-                        <td>{eye.axis}</td><td>{eye.pd}</td><td>{formatEyeValue("Add", eye)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <RxTable right={rx.rightEye} left={rx.leftEye} />
                 {rx.notes && (
                   <div className="flex items-start gap-2 mt-2 pt-1 border-t border-border">
                     <p className={`text-[10px] flex-1 min-w-0 ${rx.notesHidden ? "italic text-muted-foreground/70" : "text-muted-foreground"}`}>

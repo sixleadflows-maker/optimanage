@@ -12,8 +12,9 @@ import { PrintPortal } from "@/components/ui/PrintPortal";
 import { createReturn, deleteReturn, updateReturn } from "@/lib/actions/returns";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { updateOnlineOrderStatus, deleteSale, type OnlineOrderStatusValue } from "@/lib/actions/sales";
-import { CREDIT_METHOD, PAYMENT_STATUS, paymentStatusChipClass } from "@/lib/constants";
+import { PAYMENT_STATUS, paymentStatusChipClass } from "@/lib/constants";
 import { primaryMethod } from "@/lib/sales/paymentSplit";
+import { paymentsOnDays, type PaymentOnDay } from "@/lib/sales/received";
 import { ThermalReceipt, A4Invoice, invoiceFromSale, type ShopDetails } from "@/components/invoice/InvoiceDocuments";
 import { InvoiceDetails } from "@/components/invoice/InvoiceDetails";
 import { CollectPaymentModal, EditInvoiceModal, EditPaymentModal, type EditorCustomer, type EditorStaff } from "./InvoiceEditor";
@@ -157,6 +158,14 @@ export function SalesClient({
     }
   };
 
+  // Every payment on every invoice, on the day it was made: what was taken at
+  // the till on the invoice's date, and each later payment on its own date.
+  const paidOn = useMemo(() => new Map<string, PaymentOnDay[]>(sales.map((s) => [s.id, paymentsOnDays(s)])), [sales]);
+  const hasDates = !!(fromDate || toDate);
+  const inDates = (day: string) => (!fromDate || day >= fromDate) && (!toDate || day <= toDate);
+  // The payments an invoice received inside the chosen dates.
+  const paidInDates = (s: SaleView) => (paidOn.get(s.id) ?? []).filter((p) => inDates(localDay(p.date.toISOString())));
+
   const filtered = useMemo(() => {
     let result = sales.filter((s) => {
       const found = matchesSearch(search, [
@@ -165,8 +174,9 @@ export function SalesClient({
       ]);
       const matchesStatus = statusFilter === "All" || s.paymentStatus === statusFilter;
       const matchesSource = sourceFilter === "All" || s.source === sourceFilter;
-      const day = localDay(s.dateTime);
-      const matchesDates = (!fromDate || day >= fromDate) && (!toDate || day <= toDate);
+      // In the chosen dates if it was made then -- or paid on then: a balance
+      // paid off today brings an older invoice into today's list.
+      const matchesDates = !hasDates || inDates(localDay(s.dateTime)) || paidInDates(s).length > 0;
       return found && matchesStatus && matchesSource && matchesDates;
     });
 
@@ -184,7 +194,8 @@ export function SalesClient({
     });
 
     return result;
-  }, [sales, search, statusFilter, sourceFilter, fromDate, toDate, sortBy]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sales, search, statusFilter, sourceFilter, fromDate, toDate, sortBy, paidOn]);
 
   const setRange = (range: "today" | "month" | "all") => {
     const today = localDay(new Date().toISOString());
@@ -204,23 +215,12 @@ export function SalesClient({
     }
   };
 
-  // Money received inside the chosen dates on invoices made before them -- a
-  // balance paid off days later. Those invoices aren't in the list for these
-  // dates, so without this the payment would be nowhere to be seen.
-  const earlierPayments = useMemo(() => {
-    if (!fromDate && !toDate) return [];
-    const inRange = (day: string) => (!fromDate || day >= fromDate) && (!toDate || day <= toDate);
-    return sales
-      .filter((s) => !inRange(localDay(s.dateTime)))
-      .flatMap((s) => s.payments
-        .filter((p) => p.method !== CREDIT_METHOD && inRange(localDay(p.date)))
-        .map((p) => ({ sale: s, payment: p })))
-      .sort((a, b) => b.payment.date.localeCompare(a.payment.date));
-  }, [sales, fromDate, toDate]);
-  const earlierTotal = earlierPayments.reduce((sum, e) => sum + e.payment.amount, 0);
-
-  const totalRevenue = filtered.reduce((sum, s) => sum + s.total, 0);
-  const totalPaid = filtered.reduce((sum, s) => sum + s.paid, 0);
+  // Sales are the payments made in the chosen dates (all payments when no dates
+  // are chosen); invoiced is the bills made in them, paid or not.
+  const totalSales = hasDates
+    ? filtered.reduce((sum, s) => sum + paidInDates(s).reduce((t, p) => t + p.amount, 0), 0)
+    : filtered.reduce((sum, s) => sum + s.paid, 0);
+  const totalInvoiced = filtered.filter((s) => !hasDates || inDates(localDay(s.dateTime))).reduce((sum, s) => sum + s.total, 0);
   const totalBalance = filtered.reduce((sum, s) => sum + s.balance, 0);
 
   const exportCsv = () => {
@@ -258,12 +258,13 @@ export function SalesClient({
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="glass-card p-4">
-          <p className="text-xs text-muted-foreground">Total Revenue</p>
-          <p className="text-xl font-bold mt-1">{formatCurrency(totalRevenue)}</p>
+          <p className="text-xs text-muted-foreground">{hasDates ? "Sales — paid in these dates" : "Sales — all payments"}</p>
+          <p className="text-xl font-bold mt-1 text-success">{formatCurrency(totalSales)}</p>
+          <p className="text-[10px] text-muted-foreground mt-0.5">Each payment counts on the day it was made</p>
         </div>
         <div className="glass-card p-4">
-          <p className="text-xs text-muted-foreground">Total Collected</p>
-          <p className="text-xl font-bold mt-1 text-success">{formatCurrency(totalPaid)}</p>
+          <p className="text-xs text-muted-foreground">{hasDates ? "Invoiced — bills made in these dates" : "Invoiced — all bills"}</p>
+          <p className="text-xl font-bold mt-1">{formatCurrency(totalInvoiced)}</p>
         </div>
         <div className="glass-card p-4">
           <p className="text-xs text-muted-foreground">Outstanding</p>
@@ -271,33 +272,6 @@ export function SalesClient({
         </div>
       </div>
 
-      {earlierPayments.length > 0 && (
-        <div className="glass-card p-4">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="text-sm font-semibold">Also received in these dates, on earlier invoices</p>
-              <p className="text-[11px] text-muted-foreground mt-0.5">
-                Balances paid off after the invoice was made. They aren&apos;t in the list below because those invoices are older.
-              </p>
-            </div>
-            <p className="text-lg font-bold text-success whitespace-nowrap">{formatCurrency(earlierTotal)}</p>
-          </div>
-          <div className="mt-3 divide-y divide-border">
-            {earlierPayments.slice(0, 8).map(({ sale, payment }) => (
-              <div key={payment.id} className="py-2 flex items-center justify-between gap-3 text-xs">
-                <span className="min-w-0 truncate">
-                  <button onClick={() => setViewingSale(sale)} className="font-semibold text-primary hover:underline cursor-pointer">{sale.invoiceNo}</button>
-                  <span className="text-muted-foreground">{` · ${sale.customerName} · invoice of ${formatDate(sale.dateTime)} · received ${formatDate(payment.date)} · ${payment.method}`}</span>
-                </span>
-                <span className="font-semibold flex-shrink-0">{formatCurrency(payment.amount)}</span>
-              </div>
-            ))}
-            {earlierPayments.length > 8 && (
-              <p className="pt-2 text-[11px] text-muted-foreground">{`…and ${earlierPayments.length - 8} more`}</p>
-            )}
-          </div>
-        </div>
-      )}
 
       <div className="glass-card p-4">
         <div className="flex flex-col sm:flex-row gap-3 mb-3">
@@ -407,6 +381,11 @@ export function SalesClient({
                       {sale.invoiceNo}
                     </button>
                     {sale.offlineRef && <p className="text-[10px] text-muted-foreground">{sale.offlineRef}</p>}
+                    {hasDates && !inDates(localDay(sale.dateTime)) && paidInDates(sale).map((p, i) => (
+                      <p key={i} className="text-[10px] font-medium text-success whitespace-nowrap">
+                        {`${formatCurrency(p.amount)} paid ${formatDate(p.date.toISOString())}`}
+                      </p>
+                    ))}
                   </td>
                   <td className="py-3 px-3 text-muted-foreground whitespace-nowrap">{formatDate(sale.dateTime)}</td>
                   <td className="py-3 px-3">{sale.customerName}</td>

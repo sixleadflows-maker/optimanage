@@ -7,14 +7,13 @@ import { useApp } from "@/lib/context";
 import { undoCancelBalance } from "@/lib/actions/sales";
 import type { SaleView } from "@/lib/data";
 import { formatCurrency, formatDate } from "@/lib/utils/format";
-import { formatEyeValue, rxLensLabel } from "@/lib/utils/rx";
+import { rxLensLabel } from "@/lib/utils/rx";
+import { RxTable } from "@/components/ui/RxTable";
 import { paymentStatusChipClass } from "@/lib/constants";
 import { Glasses, History, Pencil, Plus, Undo2, WifiOff } from "lucide-react";
 
 const when = (iso: string) =>
   new Date(iso).toLocaleString("en-PK", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
-
-const RX_FIELDS = ["Sph", "Cyl", "Axis", "Add", "Pd"] as const;
 
 type Rx = SaleView["prescriptions"][number];
 
@@ -35,22 +34,7 @@ function RxCard({ rx }: { rx: Rx }) {
           <Pencil className="w-3 h-3" /> Edit
         </Link>
       </div>
-      <table className="w-full text-center tabular-nums">
-        <thead>
-          <tr className="text-[9px] text-muted-foreground">
-            <th className="text-left font-medium py-0.5">Eye</th>
-            {RX_FIELDS.map((f) => <th key={f} className="font-medium py-0.5">{f.toUpperCase()}</th>)}
-          </tr>
-        </thead>
-        <tbody>
-          {([["Right (OD)", rx.rightEye], ["Left (OS)", rx.leftEye]] as const).map(([eye, values]) => (
-            <tr key={eye} className="border-t border-border/60">
-              <td className="text-left py-1 text-muted-foreground whitespace-nowrap">{eye}</td>
-              {RX_FIELDS.map((f) => <td key={f} className="py-1 font-medium">{formatEyeValue(f, values)}</td>)}
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <RxTable right={rx.rightEye} left={rx.leftEye} />
       {rxLensLabel(rx) && (
         <p className="mt-1.5 pt-1.5 border-t border-border/60">
           <span className="text-muted-foreground">Lens: </span>{rxLensLabel(rx)}

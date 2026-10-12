@@ -28,6 +28,15 @@ export function formatRxPower(n: number, text = ""): string {
   return `${n > 0 ? "+" : "-"}${Math.abs(n).toFixed(2)}`;
 }
 
+/**
+ * The reading (near) power: the distance SPH with the ADD put on it, as "+0.50".
+ * "" when there's no ADD, or when the ADD was written in words and can't be added.
+ */
+export function readingSph(sph: number, add: number, addText = ""): string {
+  if (addText.trim() || !add) return "";
+  return formatRxPower(Math.round((sph + add) * 100) / 100);
+}
+
 /** Any prescription figure, for showing in a table. */
 export function formatRxValue(field: RxField, n: number, text = ""): string {
   return isPowerField(field) ? formatRxPower(n, text) : String(n);
