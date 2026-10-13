@@ -946,10 +946,32 @@ export interface CashCollectionData {
   advancesIn: number;
   advancesRefunded: number;
   invoiceCount: number;
+  // Every bit of money that came in (or went back out as an advance refund) that
+  // day, oldest first: what the method totals above are made of.
+  entries: CashEntry[];
   saved: { openingCash: number; closingCash: number; notes: string; closedBy: string } | null;
   // What the drawer should open with: the last close, plus the cash taken (less
   // cash spent and banked) on any day since that hasn't been closed off.
   opening: { amount: number; closedOn: string; sinceLastClose: number } | null;
+}
+
+/** One payment towards the day's takings. */
+export interface CashEntry {
+  id: string;
+  time: string;
+  method: string;
+  // Below zero for an advance handed back.
+  amount: number;
+  // "sale": taken when the bill was made; "payment": paid on the bill afterwards
+  // (on this day); "advance": money paid in ahead, or handed back.
+  kind: "sale" | "payment" | "advance";
+  invoiceNo: string;
+  // When the bill itself was made, so a balance paid on an older bill shows as one.
+  invoiceDate: string;
+  customerId: string;
+  customer: string;
+  by: string;
+  note: string;
 }
 
 export interface BankDepositView {
@@ -971,19 +993,29 @@ function dayRange(dateStr: string) {
 export async function getCashCollection(dateStr: string, branchId?: string): Promise<CashCollectionData> {
   const { start, end } = dayRange(dateStr);
   const saleWhere = { date: { gte: start, lt: end }, ...(branchId ? { branchId } : {}) };
+  const customerName = { select: { id: true, name: true, phone: true } } as const;
   const [sales, laterPayments, expenses, deposits, saved, credits] = await Promise.all([
-    db.sale.findMany({ where: saleWhere, include: { payments: { select: { amount: true } } } }),
+    db.sale.findMany({
+      where: saleWhere,
+      include: { payments: { select: { amount: true } }, customer: customerName, receivedBy: { select: { name: true } } },
+    }),
     // An advance settled today belongs to today's drawer, whatever day the
     // glasses were ordered on.
     db.salePayment.findMany({
       where: { date: { gte: start, lt: end }, ...(branchId ? { sale: { branchId } } : {}) },
-      select: { amount: true, method: true },
+      select: {
+        id: true, amount: true, method: true, date: true, note: true, receivedBy: { select: { name: true } },
+        sale: { select: { invoiceNo: true, date: true, customer: customerName } },
+      },
     }),
     db.expense.findMany({ where: { date: { gte: start, lt: end } } }),
     db.bankDeposit.findMany({ where: { date: { gte: start, lt: end } }, orderBy: { createdAt: "asc" } }),
     db.cashCollection.findFirst({ where: { date: { gte: start, lt: end }, ...(branchId ? { branchId } : {}) } }),
     // Advances customers paid in (or were handed back) today.
-    db.customerCredit.findMany({ where: { date: { gte: start, lt: end } }, select: { amount: true, method: true } }),
+    db.customerCredit.findMany({
+      where: { date: { gte: start, lt: end } },
+      select: { id: true, amount: true, method: true, date: true, note: true, recordedBy: true, customer: customerName },
+    }),
   ]);
 
   // A sale's own `paid` is the running total including anything collected
@@ -996,6 +1028,29 @@ export async function getCashCollection(dateStr: string, branchId?: string): Pro
   const collected = [...takenAtTill, ...laterPayments, ...credits].filter((c) => c.method !== CREDIT_METHOD);
 
   const byMethod = (m: string) => collected.filter((c) => c.method === m).reduce((sum, c) => sum + c.amount, 0);
+
+  // The same money, one line per payment, so the totals can be checked against
+  // the invoices: who paid, for which bill, how, and who took it.
+  const who = (c: { name: string; phone: string | null } | null) => (c ? customerLabel(c) : "Walk-in");
+  const entries: CashEntry[] = [
+    ...sales.flatMap((s) =>
+      tillParts(s, s.paid - s.payments.reduce((sum, p) => sum + p.amount, 0))
+        .filter((part) => Math.abs(part.amount) > 0.009)
+        .map((part, i) => ({
+          id: `${s.id}-${i}`, time: s.date.toISOString(), method: part.method, amount: part.amount, kind: "sale" as const,
+          invoiceNo: s.invoiceNo, invoiceDate: s.date.toISOString(), customerId: s.customer?.id ?? "", customer: who(s.customer),
+          by: s.receivedBy?.name ?? "", note: "",
+        }))),
+    ...laterPayments.map((p) => ({
+      id: p.id, time: p.date.toISOString(), method: p.method, amount: p.amount, kind: "payment" as const,
+      invoiceNo: p.sale.invoiceNo, invoiceDate: p.sale.date.toISOString(), customerId: p.sale.customer?.id ?? "", customer: who(p.sale.customer),
+      by: p.receivedBy?.name ?? "", note: p.note,
+    })),
+    ...credits.map((c) => ({
+      id: c.id, time: c.date.toISOString(), method: c.method, amount: c.amount, kind: "advance" as const,
+      invoiceNo: "", invoiceDate: "", customerId: c.customer.id, customer: who(c.customer), by: c.recordedBy, note: c.note,
+    })),
+  ].sort((a, b) => a.time.localeCompare(b.time));
   const totalCollection = collected.reduce((sum, c) => sum + c.amount, 0);
   const cashExpenses = expenses.filter((e) => (e.paymentMethod || "Cash") === "Cash");
 
@@ -1021,6 +1076,7 @@ export async function getCashCollection(dateStr: string, branchId?: string): Pro
       depositedBy: d.depositedBy,
     })),
     invoiceCount: sales.length,
+    entries,
     saved: saved ? { openingCash: saved.openingCash, closingCash: saved.closingCash, notes: saved.notes, closedBy: saved.closedBy } : null,
     opening: await openingCashFor(start, branchId),
   };

@@ -8,6 +8,7 @@ import { useApp } from "@/lib/context";
 import { saveCashCollection } from "@/lib/actions/cash";
 import { Banknote, CreditCard, Building2, Smartphone, Save, Loader2, CheckCircle } from "lucide-react";
 import { BankDeposits } from "./BankDeposits";
+import { CashEntries } from "./CashEntries";
 
 export function CashClient({ data, date, canManage }: { data: CashCollectionData; date: string; canManage: boolean }) {
   const { showToast } = useApp();
@@ -70,6 +71,8 @@ export function CashClient({ data, date, canManage }: { data: CashCollectionData
           </div>
         ))}
       </div>
+
+      <CashEntries entries={data.entries} date={date} />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 glass-card p-5 space-y-4">
