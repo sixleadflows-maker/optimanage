@@ -124,6 +124,30 @@ export const DAMAGE_TYPES = [
 
 export const LAB_ORDER_STATUSES = ["Ordered", "In Progress", "Received", "Fitted"] as const;
 
+// Where an order is, for shop and online orders alike (Sale.onlineOrderStatus).
+// A shop order with none was handed over at the counter.
+export const ORDER_STATUSES = [
+  { value: "PROCESSING", label: "In process" },
+  { value: "READY_FOR_PICKUP", label: "Ready to pick up" },
+  { value: "OUT_FOR_DELIVERY", label: "Ready to deliver" },
+  { value: "COMPLETED", label: "Delivered" },
+  { value: "CANCELLED", label: "Cancelled" },
+] as const;
+export type OrderStatusValue = (typeof ORDER_STATUSES)[number]["value"];
+export type OrderStatusLabel = (typeof ORDER_STATUSES)[number]["label"];
+export const isReadyStatus = (label: string | undefined) => label === "Ready to pick up" || label === "Ready to deliver";
+
+export function orderStatusChipClass(label: string | undefined) {
+  switch (label) {
+    case "In process": return "bg-warning/10 text-warning";
+    case "Ready to pick up":
+    case "Ready to deliver": return "bg-success/10 text-success";
+    case "Delivered": return "bg-primary/10 text-primary";
+    case "Cancelled": return "bg-destructive/10 text-destructive";
+    default: return "bg-surface text-muted-foreground";
+  }
+}
+
 // Offered in the till's discount dropdown. Picking one works out the rupee
 // amount off the bill so staff don't have to calculate it.
 export const DISCOUNT_PERCENTAGES = [5, 10, 15, 20, 25, 30, 40, 50, 60, 70, 80, 90] as const;
@@ -141,8 +165,10 @@ export const TRASH_PURGED_AT = new Date(0);
 // Records that are hidden when deleted and simply un-hidden on restore.
 export type SoftTrashKind = "product" | "customer" | "location" | "staff" | "supplier" | "lab";
 // Records copied into TrashEntry and really removed; restore rebuilds them.
-export type SnapshotTrashKind = "invoice" | "return" | "expense" | "prescription" | "labOrder" | "purchaseOrder" | "stockAdjustment" | "payment" | "bankDeposit" | "customerCredit";
+export type SnapshotTrashKind = "invoice" | "return" | "expense" | "prescription" | "labOrder" | "purchaseOrder" | "stockAdjustment" | "payment" | "bankDeposit" | "customerCredit" | "salaryEntry";
 export type TrashKind = SoftTrashKind | SnapshotTrashKind;
 export const SNAPSHOT_TRASH_KINDS: readonly SnapshotTrashKind[] = [
-  "invoice", "return", "expense", "prescription", "labOrder", "purchaseOrder", "stockAdjustment", "payment", "bankDeposit", "customerCredit",
+  "invoice", "return", "expense", "prescription", "labOrder", "purchaseOrder", "stockAdjustment", "payment", "bankDeposit", "customerCredit", "salaryEntry",
 ];
+// Salaries are the owner's: their trash entries aren't shown to anyone else.
+export const OWNER_ONLY_TRASH: readonly TrashKind[] = ["salaryEntry"];

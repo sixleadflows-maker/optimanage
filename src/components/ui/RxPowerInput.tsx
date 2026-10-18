@@ -166,7 +166,7 @@ export function RxPowerInput({
             onChange(JUST_A_NUMBER.test(written) ? formatRxPower(Number(written)) : asText(written));
           }}
           className={`w-full glass-input text-center pl-5 pr-1 ${
-            compact ? "py-1 text-[10px]" : "py-2 text-[11px] @min-[76px]:pl-8 @min-[76px]:pr-2 @min-[76px]:text-xs"
+            compact ? "py-1.5 text-[11px]" : "py-2 text-[11px] @min-[76px]:pl-8 @min-[76px]:pr-2 @min-[76px]:text-xs"
           }`}
         />
       ) : (
@@ -188,7 +188,7 @@ export function RxPowerInput({
             if (digits.trim() && digits !== ".") onChange(formatRxPower(parseRxText(value)));
           }}
           className={`w-full glass-input text-center pl-5 pr-1 ${
-            compact ? "py-1 text-[10px]" : "py-2 text-[11px] @min-[76px]:pl-8 @min-[76px]:pr-2 @min-[76px]:text-xs"
+            compact ? "py-1.5 text-[11px]" : "py-2 text-[11px] @min-[76px]:pl-8 @min-[76px]:pr-2 @min-[76px]:text-xs"
           }`}
         />
       )}

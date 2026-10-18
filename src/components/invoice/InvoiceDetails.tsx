@@ -11,6 +11,7 @@ import { rxLensLabel } from "@/lib/utils/rx";
 import { RxTable } from "@/components/ui/RxTable";
 import { paymentStatusChipClass } from "@/lib/constants";
 import { Glasses, History, Pencil, Plus, Undo2, WifiOff } from "lucide-react";
+import { OrderStatusControl } from "@/components/invoice/OrderStatusControl";
 
 const when = (iso: string) =>
   new Date(iso).toLocaleString("en-PK", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -320,11 +321,15 @@ export function InvoiceDetails({
         </div>
       )}
 
-      {sale.source === "Online" && (
-        <p className="text-muted-foreground">
-          {`Online order · ${sale.fulfillmentType ?? "Pickup"}${sale.deliveryAddress ? ` to ${sale.deliveryAddress}` : ""}${sale.onlineOrderStatus ? ` · ${sale.onlineOrderStatus}` : ""}`}
-        </p>
-      )}
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-muted-foreground">Order status</span>
+        <OrderStatusControl sale={sale} />
+        {sale.source === "Online" && (
+          <span className="text-muted-foreground">
+            {`Online order · ${sale.fulfillmentType ?? "Pickup"}${sale.deliveryAddress ? ` to ${sale.deliveryAddress}` : ""}`}
+          </span>
+        )}
+      </div>
       {sale.offlineRef && (
         <p className="flex items-start gap-1.5 text-muted-foreground">
           <WifiOff className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />

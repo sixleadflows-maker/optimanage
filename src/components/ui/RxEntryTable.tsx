@@ -13,6 +13,12 @@ const FIELDS: { field: RxField; label: string }[] = [
   { field: "Add", label: "Add" },
   { field: "Pd", label: "PD" },
 ];
+const byField = (f: RxField) => FIELDS.find((x) => x.field === f)!;
+// The till's cart column is narrow: five boxes in a row left each one about a
+// character wide, so -3.25 was cut off and the text jumped about while typing.
+// There the distance powers get a row of their own, and ADD and PD the next.
+const ROWS_FULL = [FIELDS];
+const ROWS_COMPACT = [["Sph", "Cyl", "Axis"], ["Add", "Pd"]].map((row) => row.map((f) => byField(f as RxField)));
 
 /**
  * Typing in a prescription as one table: a row per eye, the distance powers,
@@ -35,39 +41,49 @@ export function RxEntryTable({
     return [near, cyl || cylText ? `/ ${formatRxPower(cyl, cylText)}` : "", axis ? `× ${axis}` : ""].filter(Boolean).join(" ");
   };
   const near = { right: reading("right"), left: reading("left") };
+  const rows = compact ? ROWS_COMPACT : ROWS_FULL;
 
   return (
-    <div>
-      <table className="w-full border-separate table-fixed" style={{ borderSpacing: compact ? "3px" : "6px" }}>
-        <thead>
-          <tr className={`${compact ? "text-[9px]" : "text-[10px]"} text-muted-foreground uppercase tracking-wide`}>
-            <th className={`text-left font-medium ${compact ? "w-9" : "w-12"}`}>Eye</th>
-            {FIELDS.map((f) => <th key={f.field} className="font-medium">{f.label}</th>)}
-          </tr>
-        </thead>
-        <tbody>
-          {(["right", "left"] as const).map((eye) => (
-            <tr key={eye}>
-              <td className={`${compact ? "text-[10px]" : "text-xs"} font-semibold`}>{eye === "right" ? "Right" : "Left"}</td>
-              {FIELDS.map(({ field }) => {
-                const key = `${eye}${field}` as const;
-                return (
-                  <td key={field}>
-                    {field === "Sph" || field === "Cyl" || field === "Add" ? (
-                      <RxPowerInput compact={compact} placeholder="0" value={values[key]} onChange={(v) => onChange(key, v)} />
-                    ) : (
-                      <input type="number" step={field === "Axis" ? 1 : 0.5} min={0} placeholder="0"
-                        aria-label={`${eye === "right" ? "Right" : "Left"} ${field.toUpperCase()}`}
-                        value={values[key]} onChange={(e) => onChange(key, e.target.value)}
-                        className={`w-full glass-input text-center ${compact ? "px-1 py-1 text-[10px]" : "px-2 py-2 text-xs"}`} />
-                    )}
-                  </td>
-                );
-              })}
+    <div className={compact ? "space-y-1" : ""}>
+      {rows.map((fields, r) => (
+        <table key={r} className="w-full border-separate table-fixed" style={{ borderSpacing: compact ? "3px" : "6px" }}>
+          <thead>
+            <tr className={`${compact ? "text-[9px]" : "text-[10px]"} text-muted-foreground uppercase tracking-wide`}>
+              <th className={`text-left font-medium ${compact ? "w-9" : "w-12"}`}>Eye</th>
+              {fields.map((f) => <th key={f.field} className="font-medium">{f.label}</th>)}
+              {/* Keeps ADD and PD the width of the boxes above them. */}
+              {fields.length < rows[0].length && <th aria-hidden />}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {(["right", "left"] as const).map((eye) => (
+              <tr key={eye}>
+                <td className={`${compact ? "text-[10px]" : "text-xs"} font-semibold`}>{eye === "right" ? "Right" : "Left"}</td>
+                {fields.map(({ field }) => {
+                  const key = `${eye}${field}` as const;
+                  return (
+                    <td key={field}>
+                      {field === "Sph" || field === "Cyl" || field === "Add" ? (
+                        <RxPowerInput compact={compact} placeholder="0" value={values[key]} onChange={(v) => onChange(key, v)} />
+                      ) : (
+                        <input type="number" step={field === "Axis" ? 1 : 0.5} min={0} placeholder="0"
+                          aria-label={`${eye === "right" ? "Right" : "Left"} ${field.toUpperCase()}`}
+                          value={values[key]} onChange={(e) => onChange(key, e.target.value)}
+                          className={`w-full glass-input text-center ${compact ? "px-1 py-1.5 text-[11px]" : "px-2 py-2 text-xs"}`} />
+                      )}
+                    </td>
+                  );
+                })}
+                {fields.length < rows[0].length && (
+                  <td className="text-[10px] text-muted-foreground tabular-nums text-center truncate" title="Reading (near) power">
+                    {near[eye] ? `Near ${near[eye].split(" ")[0]}` : ""}
+                  </td>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ))}
       {(near.right || near.left) && (
         <p className={`${compact ? "text-[10px]" : "text-[11px]"} mt-1 px-1 tabular-nums`}>
           <span className="font-semibold">Reading (near): </span>

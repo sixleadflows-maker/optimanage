@@ -10,6 +10,15 @@ export function phoneKey(phone: string | null | undefined): string {
   return digits.length >= 7 ? digits : "";
 }
 
+/**
+ * A number the way WhatsApp links want it: country code first, digits only.
+ * "0300-1234567" and "+92 300 1234567" both give "923001234567"; "" when there's no number.
+ */
+export function waNumber(phone: string | null | undefined): string {
+  const key = phoneKey(phone);
+  return key.startsWith("0") ? `92${key.slice(1)}` : key;
+}
+
 /** True when both are real numbers and they're the same one. */
 export function samePhone(a: string | null | undefined, b: string | null | undefined) {
   const key = phoneKey(a);

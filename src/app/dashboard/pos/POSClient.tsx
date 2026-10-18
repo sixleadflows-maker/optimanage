@@ -388,6 +388,10 @@ export function POSClient({
   const [fittingCharges, setFittingCharges] = useState(0);
 
   const [recordRx, setRecordRx] = useState(false);
+  // Handed over at the counter, or still to be made up ("In process" until
+  // it's ready to pick up or deliver). Follows the bill -- a lens or a
+  // prescription on it means glasses are being made -- until staff choose.
+  const [orderPick, setOrderPick] = useState<"auto" | "now" | "process">("auto");
   // One order can carry several prescriptions under the same customer — a
   // family sharing a serial number, or distance and reading on one slip.
   const [rxList, setRxList] = useState<RxEntry[]>([]);
@@ -777,6 +781,10 @@ export function POSClient({
   // The lens of each prescription after the first, as a line on the bill. (The
   // first prescription's lens is the one chosen in the Lens box, already a
   // line of its own.)
+  // A lens on the bill (the job's own, one per prescription, or one picked with
+  // a frame) or a prescription being recorded: glasses are being made up.
+  const isJob = recordRx || !!lensProductId || useCustomLens || cart.some((i) => !!i.forKey);
+  const inProcess = orderPick === "auto" ? isJob : orderPick === "process";
   const extraLensLines = recordRx
     ? rxList.slice(1).flatMap((e, i) => {
         const description = [`Lens for ${e.label.trim() || `prescription ${i + 2}`}`, lensNote(rxLensColor(e), e.lensDescription)].filter(Boolean).join(" · ");
@@ -1106,6 +1114,7 @@ export function POSClient({
     setLabCharges(0);
     setFittingCharges(0);
     setRecordRx(false);
+    setOrderPick("auto");
     setRxList([]);
     setReadingsOpen(false);
     setOrderTakenBy(lastStaff.orderTakenBy);
@@ -1239,6 +1248,7 @@ export function POSClient({
       date: billDateValue ? billDateValue.toISOString() : undefined,
       deductStock: isOldBill ? deductOldStock : undefined,
       clientRef: clientRef.current,
+      inProcess,
     };
     const billTime = billDateValue ?? new Date();
     const staffName = (id: string) => staff.find((m) => m.id === id)?.name ?? "";
@@ -2389,6 +2399,31 @@ export function POSClient({
                       )}
                     </div>
                   )
+                )}
+
+                {!(editingBill && saleResult) && (
+                  <div>
+                    <p className="text-[10px] font-medium text-muted-foreground mb-1">Order</p>
+                    <div className="grid grid-cols-2 gap-1.5" role="radiogroup" aria-label="Order status">
+                      {([
+                        [false, "Handed over now"],
+                        [true, "In process — being made"],
+                      ] as const).map(([process, text]) => (
+                        <button key={text} type="button" role="radio" aria-checked={inProcess === process}
+                          onClick={() => setOrderPick(process ? "process" : "now")}
+                          className={`px-2 py-1.5 rounded-lg text-[11px] font-medium cursor-pointer transition-colors ${
+                            inProcess === process ? "bg-primary text-white" : "bg-surface hover:bg-surface-hover"
+                          }`}>
+                          {text}
+                        </button>
+                      ))}
+                    </div>
+                    {inProcess && (
+                      <p className="text-[10px] text-muted-foreground mt-1">
+                        Mark it ready to pick up or deliver from Sales &amp; Invoices when it&apos;s done.
+                      </p>
+                    )}
+                  </div>
                 )}
 
                 {canBackdate && (

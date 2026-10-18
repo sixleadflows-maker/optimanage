@@ -116,6 +116,11 @@ export function CashClient({ data, date, canManage }: { data: CashCollectionData
               </p>
             )}
             <div className="flex justify-between"><span className="text-muted-foreground">− Cash expenses</span><span className="text-destructive">{formatCurrency(data.expenses)}</span></div>
+            {data.salariesPaid && (
+              <p className="text-[10px] text-muted-foreground -mt-1">
+                {data.salaries > 0 ? `Includes ${formatCurrency(data.salaries)} of salary paid in cash` : "Includes salary paid in cash"}
+              </p>
+            )}
             {data.bankDeposits > 0 && (
               <div className="flex justify-between"><span className="text-muted-foreground">− Deposited in the bank</span><span>{formatCurrency(data.bankDeposits)}</span></div>
             )}

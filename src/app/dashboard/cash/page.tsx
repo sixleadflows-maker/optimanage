@@ -10,5 +10,7 @@ export default async function CashPage({ searchParams }: { searchParams: Promise
   const [data, session] = await Promise.all([getCashCollection(day), auth()]);
   // Correcting or removing a deposit changes a day's cash, so it's a manager's job.
   const canManage = !!session?.user && session.user.role !== "CASHIER";
-  return <CashClient key={day} data={data} date={day} canManage={canManage} />;
+  // How much went on salaries is the owner's to see; others just learn that some did.
+  const isOwner = session?.user?.role === "OWNER";
+  return <CashClient key={day} data={isOwner ? data : { ...data, salaries: 0 }} date={day} canManage={canManage} />;
 }

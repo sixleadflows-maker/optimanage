@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useState, useEffect, useCallback } from "react";
-import type { AnalyticsData } from "@/lib/data";
+import type { AnalyticsData, LedgerBill } from "@/lib/data";
 import { formatCurrency } from "@/lib/utils/format";
 import { verifyAnalyticsPin, getMonthlyAnalytics, type MonthlyAnalyticsData, type MonthDay } from "@/lib/actions/analytics";
 import { changeAnalyticsPin, resetAnalyticsPinWithPassword } from "@/lib/actions/settings";
@@ -170,6 +170,116 @@ function DayByDay({ days }: { days: MonthDay[] }) {
           })}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+// The shop's day, as everywhere else in the app (days turn over at UTC midnight).
+const utcDay = (d: Date) => d.toISOString().slice(0, 10);
+const RANGES = [
+  { key: "today", label: "Today" },
+  { key: "yesterday", label: "Yesterday" },
+  { key: "month", label: "This month" },
+  { key: "lastMonth", label: "Last month" },
+  { key: "all", label: "All time" },
+] as const;
+type RangeKey = (typeof RANGES)[number]["key"] | "custom";
+
+function rangeFor(key: RangeKey): { from: string; to: string } {
+  const now = new Date();
+  const today = utcDay(now);
+  switch (key) {
+    case "today": return { from: today, to: today };
+    case "yesterday": { const y = utcDay(new Date(now.getTime() - 86_400_000)); return { from: y, to: y }; }
+    case "month": return { from: `${today.slice(0, 8)}01`, to: today };
+    case "lastMonth": {
+      const first = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
+      const last = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 0));
+      return { from: utcDay(first), to: utcDay(last) };
+    }
+    default: return { from: "", to: "" };
+  }
+}
+
+/**
+ * Sales, invoiced and outstanding over any dates -- moved here from the
+ * dashboard and the invoices list so only the owner sees them. Sales are the
+ * payments made in the dates (a balance paid today counts today); invoiced is
+ * the bills made in them at full value; outstanding is what's still owed on
+ * those bills (on every bill, for all time).
+ */
+function SalesSummary({ ledger }: { ledger: LedgerBill[] }) {
+  const [range, setRange] = useState<RangeKey>("today");
+  const [custom, setCustom] = useState(() => rangeFor("month"));
+  const { from, to } = range === "custom" ? custom : rangeFor(range);
+  const inRange = (day: string) => (!from || day >= from) && (!to || day <= to);
+
+  let sales = 0;
+  let fromEarlier = 0;
+  let invoiced = 0;
+  let bills = 0;
+  let owed = 0;
+  let owing = 0;
+  for (const b of ledger) {
+    for (const p of b.paid) {
+      if (!inRange(p.day)) continue;
+      sales += p.amount;
+      if (from && b.day < from) fromEarlier += p.amount;
+    }
+    if (inRange(b.day)) {
+      invoiced += b.total;
+      bills++;
+      if (b.balance > 0.009) { owed += b.balance; owing++; }
+    }
+  }
+  const label = range === "all" ? "all time" : from === to ? new Date(`${from}T12:00:00Z`).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : "these dates";
+
+  return (
+    <div className="glass-card p-5">
+      <div className="flex items-start justify-between gap-3 flex-wrap mb-4">
+        <div>
+          <h3 className="text-sm font-semibold">Sales, invoices &amp; outstanding</h3>
+          <p className="text-[11px] text-muted-foreground mt-0.5">Only you see these — they used to be on the Dashboard and the invoices list.</p>
+        </div>
+        <div className="flex gap-1.5 flex-wrap">
+          {RANGES.map((r) => (
+            <button key={r.key} onClick={() => setRange(r.key)}
+              className={`px-3 py-1.5 rounded-lg text-[11px] font-semibold cursor-pointer ${range === r.key ? "bg-primary text-white" : "bg-surface hover:bg-surface-hover"}`}>
+              {r.label}
+            </button>
+          ))}
+          <button onClick={() => setRange("custom")}
+            className={`px-3 py-1.5 rounded-lg text-[11px] font-semibold cursor-pointer ${range === "custom" ? "bg-primary text-white" : "bg-surface hover:bg-surface-hover"}`}>
+            Pick dates
+          </button>
+        </div>
+      </div>
+      {range === "custom" && (
+        <div className="flex items-center gap-2 mb-4 text-xs flex-wrap">
+          <input type="date" value={custom.from} max={custom.to || undefined} onChange={(e) => setCustom((c) => ({ ...c, from: e.target.value }))} className="px-3 py-1.5 glass-input text-xs" />
+          <span className="text-muted-foreground">to</span>
+          <input type="date" value={custom.to} min={custom.from || undefined} onChange={(e) => setCustom((c) => ({ ...c, to: e.target.value }))} className="px-3 py-1.5 glass-input text-xs" />
+        </div>
+      )}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="rounded-xl bg-surface p-4">
+          <p className="text-xs text-muted-foreground">{`Sales — money paid in, ${label}`}</p>
+          <p className="text-xl font-bold mt-1 text-success">{formatCurrency(sales)}</p>
+          <p className="text-[10px] text-muted-foreground mt-0.5">
+            {fromEarlier > 0 ? `${formatCurrency(fromEarlier)} of it paid on bills from before · ` : ""}each payment counts on the day it was made
+          </p>
+        </div>
+        <div className="rounded-xl bg-surface p-4">
+          <p className="text-xs text-muted-foreground">{`Invoiced — bills made, ${label}`}</p>
+          <p className="text-xl font-bold mt-1">{formatCurrency(invoiced)}</p>
+          <p className="text-[10px] text-muted-foreground mt-0.5">{`${bills} invoice${bills === 1 ? "" : "s"}, at full value, paid or not`}</p>
+        </div>
+        <div className="rounded-xl bg-surface p-4">
+          <p className="text-xs text-muted-foreground">{range === "all" ? "Outstanding — owed on all bills" : `Outstanding — still owed on those bills`}</p>
+          <p className="text-xl font-bold mt-1 text-destructive">{formatCurrency(owed)}</p>
+          <p className="text-[10px] text-muted-foreground mt-0.5">{`${owing} invoice${owing === 1 ? "" : "s"} with a balance`}</p>
+        </div>
+      </div>
     </div>
   );
 }
@@ -490,6 +600,8 @@ export function AnalyticsClient({ data }: { data: AnalyticsData }) {
         <h1 className="text-2xl font-bold">Analytics</h1>
         <p className="text-sm text-muted-foreground mt-0.5">Business intelligence and insights</p>
       </div>
+
+      <SalesSummary ledger={data.ledger} />
 
       <MonthlyPerformance />
 

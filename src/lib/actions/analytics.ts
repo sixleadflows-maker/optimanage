@@ -66,7 +66,7 @@ export async function getMonthlyAnalytics(year: number, month: number): Promise<
   const lastMonth = { gte: prevStart, lt: start };
 
   // Invoices made in the month, and older ones that were paid on in it.
-  const [products, sales, prevSales, expenses, prevExpenses] = await Promise.all([
+  const [products, sales, prevSales, expenses, prevExpenses, salaryPay, prevSalaryPay] = await Promise.all([
     db.product.findMany({ where: { active: true } }),
     db.sale.findMany({
       where: { OR: [{ date: thisMonth }, { payments: { some: { date: thisMonth } } }] },
@@ -82,6 +82,9 @@ export async function getMonthlyAnalytics(year: number, month: number): Promise<
     }),
     db.expense.findMany({ where: { date: thisMonth } }),
     db.expense.findMany({ where: { date: lastMonth } }),
+    // Salary handed over in the month is a cost too (a cut moves no money).
+    db.salaryEntry.aggregate({ where: { date: thisMonth, kind: { not: "DEDUCTION" } }, _sum: { amount: true } }),
+    db.salaryEntry.aggregate({ where: { date: lastMonth, kind: { not: "DEDUCTION" } }, _sum: { amount: true } }),
   ]);
 
   const productById = new Map(products.map((p) => [p.id, p]));
@@ -130,7 +133,7 @@ export async function getMonthlyAnalytics(year: number, month: number): Promise<
     }
   }
 
-  const totalExpenses = expenses.reduce((sum, e) => sum + e.amount, 0);
+  const totalExpenses = expenses.reduce((sum, e) => sum + e.amount, 0) + (salaryPay._sum.amount ?? 0);
   const netProfit = grossProfit - totalExpenses;
   const days = [...byDay.values()].sort((a, b) => b.date.localeCompare(a.date));
 
@@ -156,7 +159,7 @@ export async function getMonthlyAnalytics(year: number, month: number): Promise<
       prevMonthGrossProfit += p.profit;
     }
   }
-  const prevMonthExpenses = prevExpenses.reduce((sum, e) => sum + e.amount, 0);
+  const prevMonthExpenses = prevExpenses.reduce((sum, e) => sum + e.amount, 0) + (prevSalaryPay._sum.amount ?? 0);
 
   return {
     year, month,

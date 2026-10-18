@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { auth } from "@/lib/auth";
 import { trashPrescription, TrashError } from "@/lib/trash/snapshots";
-import { rxLensColumns, rxTextColumns, type RxLensFields, type RxTextColumns } from "@/lib/utils/rx";
+import { rxHistoryOrder, rxLensColumns, rxTextColumns, type RxLensFields, type RxTextColumns } from "@/lib/utils/rx";
 import { attachCustomerToSale } from "@/lib/sales/core";
 
 export interface PrescriptionInput extends Partial<RxTextColumns>, RxLensFields {
@@ -17,58 +17,116 @@ export interface PrescriptionInput extends Partial<RxTextColumns>, RxLensFields 
   leftSph: number; leftCyl: number; leftAxis: number; leftPd: number; leftAdd: number;
   notes: string;
   isOwnPrescription?: boolean;
+  // The day of the eye test ("2026-09-14") when it wasn't today -- an older
+  // slip typed in later. Left out, it's now.
+  date?: string;
 }
+
+/** One prescription among several saved together; they share the customer, invoice and date. */
+export type PrescriptionFields = Omit<PrescriptionInput, "customerId" | "saleId" | "date">;
 
 export type CreatePrescriptionResult =
   | { ok: true; id: string; date: string; attachedCustomer: boolean }
   | { ok: false; error: string };
 
+export type CreatePrescriptionsResult =
+  | { ok: true; ids: string[]; attachedCustomer: boolean }
+  | { ok: false; error: string };
+
+// Karachi is UTC+5 all year, so its calendar day is this simple.
+const karachiDay = (d: Date) => new Date(d.getTime() + 5 * 3600_000).toISOString().slice(0, 10);
+
 /**
- * Saves a prescription for a customer. With `saleId` it goes onto an invoice
+ * When the prescription is dated: now for today's eye test; for an earlier
+ * one, midday Karachi time on that day, well inside that day's records.
+ * Null for a date that isn't one, or is still to come.
+ */
+function testDate(day: string | undefined): Date | null {
+  const now = new Date();
+  if (!day || day === karachiDay(now)) return now;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || day > karachiDay(now)) return null;
+  const at = new Date(`${day}T07:00:00.000Z`);
+  return Number.isNaN(at.getTime()) ? null : at;
+}
+
+/**
+ * Saves prescriptions for one customer, in the order given -- distance and
+ * reading, or each person in a family. With `saleId` they go onto an invoice
  * that's already been rung up; if that invoice was a walk-in, the customer is
  * put on it too (the eye test is often when the name turns up).
  */
-export async function createPrescription(input: PrescriptionInput): Promise<CreatePrescriptionResult> {
+async function savePrescriptions(
+  customerId: string, saleId: string | undefined, day: string | undefined, list: PrescriptionFields[],
+): Promise<CreatePrescriptionsResult> {
   const session = await auth();
   if (!session?.user) return { ok: false, error: "You've been signed out — sign in again" };
-  if (!input.customerId) return { ok: false, error: "Select or add the customer first" };
+  if (!customerId) return { ok: false, error: "Select or add the customer first" };
+  if (list.length === 0) return { ok: false, error: "Type in the prescription first" };
+  const date = testDate(day);
+  if (!date) return { ok: false, error: "Check the date of the eye test — it can't be a day still to come" };
 
-  const sale = input.saleId
-    ? await db.sale.findUnique({ where: { id: input.saleId }, select: { id: true, total: true, date: true, customerId: true } })
+  const sale = saleId
+    ? await db.sale.findUnique({ where: { id: saleId }, select: { id: true, total: true, date: true, customerId: true } })
     : null;
-  if (input.saleId && !sale) return { ok: false, error: "That invoice no longer exists" };
+  if (saleId && !sale) return { ok: false, error: "That invoice no longer exists" };
   // An invoice already on someone else stays theirs -- moving it is done from
   // the invoice's own Edit, where the money side is handled too.
-  if (sale?.customerId && sale.customerId !== input.customerId) {
+  if (sale?.customerId && sale.customerId !== customerId) {
     return { ok: false, error: "That invoice belongs to a different customer — change the customer from the invoice's Edit first" };
   }
   const attachCustomer = !!sale && !sale.customerId;
 
-  const created = await db.$transaction(async (tx) => {
-    const rx = await tx.prescription.create({
-      data: {
-        customerId: input.customerId,
-        saleId: input.saleId || null,
-        rightSph: input.rightSph, rightCyl: input.rightCyl, rightAxis: input.rightAxis, rightPd: input.rightPd, rightAdd: input.rightAdd,
-        leftSph: input.leftSph, leftCyl: input.leftCyl, leftAxis: input.leftAxis, leftPd: input.leftPd, leftAdd: input.leftAdd,
-        ...rxTextColumns(input),
-        ...rxLensColumns(input),
-        label: (input.label ?? "").trim(),
-        notes: input.notes,
-        isOwnPrescription: input.isOwnPrescription ?? false,
-      },
-    });
-    if (attachCustomer) await attachCustomerToSale(tx, sale!, input.customerId);
-    return rx;
+  const ids = await db.$transaction(async (tx) => {
+    const made: string[] = [];
+    // One at a time, so they keep the order they were typed in.
+    for (const input of list) {
+      const rx = await tx.prescription.create({
+        data: {
+          customerId,
+          saleId: saleId || null,
+          date,
+          rightSph: input.rightSph, rightCyl: input.rightCyl, rightAxis: input.rightAxis, rightPd: input.rightPd, rightAdd: input.rightAdd,
+          leftSph: input.leftSph, leftCyl: input.leftCyl, leftAxis: input.leftAxis, leftPd: input.leftPd, leftAdd: input.leftAdd,
+          ...rxTextColumns(input),
+          ...rxLensColumns(input),
+          label: (input.label ?? "").trim(),
+          notes: input.notes,
+          isOwnPrescription: input.isOwnPrescription ?? false,
+        },
+      });
+      made.push(rx.id);
+    }
+    if (attachCustomer) await attachCustomerToSale(tx, sale!, customerId);
+    return made;
   });
 
   revalidatePath("/dashboard/prescriptions");
-  revalidatePath(`/dashboard/customers/${input.customerId}`);
-  if (input.saleId) {
+  revalidatePath(`/dashboard/customers/${customerId}`);
+  revalidatePath("/dashboard/lab-orders");
+  if (saleId) {
     revalidatePath("/dashboard/sales");
     if (attachCustomer) revalidatePath("/dashboard/customers");
   }
-  return { ok: true, id: created.id, date: created.date.toISOString(), attachedCustomer: attachCustomer };
+  return { ok: true, ids, attachedCustomer: attachCustomer };
+}
+
+/** Saves one prescription for a customer (see savePrescriptions). */
+export async function createPrescription(input: PrescriptionInput): Promise<CreatePrescriptionResult> {
+  const { customerId, saleId, date, ...fields } = input;
+  const res = await savePrescriptions(customerId, saleId, date, [fields]);
+  if (!res.ok) return res;
+  const rx = await db.prescription.findUnique({ where: { id: res.ids[0] }, select: { date: true } });
+  return { ok: true, id: res.ids[0], date: (rx?.date ?? new Date()).toISOString(), attachedCustomer: res.attachedCustomer };
+}
+
+/** Saves several prescriptions for one customer at once, in the order given. */
+export async function createPrescriptions(input: {
+  customerId: string;
+  saleId?: string;
+  date?: string;
+  prescriptions: PrescriptionFields[];
+}): Promise<CreatePrescriptionsResult> {
+  return savePrescriptions(input.customerId, input.saleId, input.date, input.prescriptions);
 }
 
 /** One reading already on a customer's record, ready to load into a bill. */
@@ -101,7 +159,7 @@ export async function getCustomerReadings(customerId: string): Promise<SavedRead
     take: 15,
     include: { sale: { select: { invoiceNo: true } } },
   });
-  return rows.map((r) => ({
+  return rxHistoryOrder(rows).map((r) => ({
     id: r.id,
     date: r.date.toISOString(),
     label: r.label,

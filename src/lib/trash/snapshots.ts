@@ -306,6 +306,20 @@ export async function trashLabOrder(id: string, deletedById: string | null) {
   });
 }
 
+/** Pay given to (or cut from) someone on the payroll, entered by mistake. */
+export async function trashSalaryEntry(id: string, deletedById: string | null) {
+  const e = await db.salaryEntry.findUnique({ where: { id }, include: { employee: { select: { name: true } } } });
+  if (!e) throw new TrashError("This has already been deleted");
+  const { employee, ...row } = e;
+  const what = { SALARY: "Salary", ADVANCE: "Advance", BONUS: "Bonus", DEDUCTION: "Cut from pay" }[e.kind];
+  await db.$transaction(async (tx) => {
+    await store(tx, "salaryEntry", e.id, `${what} — ${employee.name} — ${rs(e.amount)}`,
+      [`for ${e.month}`, e.date.toLocaleDateString("en-GB"), e.method, e.note].filter(Boolean).join(" · "),
+      { salaryEntry: row }, deletedById);
+    await tx.salaryEntry.delete({ where: { id } });
+  });
+}
+
 export async function trashPurchaseOrder(id: string, deletedById: string | null) {
   const po = await db.purchaseOrder.findUnique({ where: { id }, include: { items: true, supplier: { select: { name: true } } } });
   if (!po) throw new TrashError("This purchase order has already been deleted");
@@ -445,11 +459,21 @@ export async function restoreSnapshot(entryId: string) {
         await tx.stockAdjustment.create({ data: adjustment as Prisma.StockAdjustmentUncheckedCreateInput });
         break;
       }
-      case "labOrder":
-        await tx.labOrder.create({
-          data: revive(data.labOrder as Row, ["orderedDate", "expectedDate", "createdAt", "updatedAt"]) as Prisma.LabOrderUncheckedCreateInput,
-        });
+      case "labOrder": {
+        const o = revive(data.labOrder as Row, ["orderedDate", "expectedDate", "createdAt", "updatedAt"]);
+        // The prescription it was made from may have gone since; its words stay on the order.
+        const rxExists = o.rxId ? !!(await tx.prescription.findUnique({ where: { id: o.rxId as string }, select: { id: true } })) : false;
+        await tx.labOrder.create({ data: { ...(o as Prisma.LabOrderUncheckedCreateInput), rxId: rxExists ? (o.rxId as string) : null } });
         break;
+      }
+      case "salaryEntry": {
+        const e = revive(data.salaryEntry as Row, ["date", "createdAt"]);
+        if (!(await tx.employee.findUnique({ where: { id: e.employeeId as string }, select: { id: true } }))) {
+          throw new TrashError("Can't restore this: that person is no longer on the payroll");
+        }
+        await tx.salaryEntry.create({ data: e as Prisma.SalaryEntryUncheckedCreateInput });
+        break;
+      }
       case "purchaseOrder": {
         const po = revive(data.purchaseOrder as Row, ["date", "expectedDate", "paymentDate", "createdAt"]);
         await tx.purchaseOrder.create({

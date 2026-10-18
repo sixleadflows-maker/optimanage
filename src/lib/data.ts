@@ -6,7 +6,9 @@ import type {
 import { readSplit, tillParts, type PaymentPart } from "@/lib/sales/paymentSplit";
 import { creditHeld, creditHeldByCustomer } from "@/lib/sales/credit";
 import { paymentsOnDays } from "@/lib/sales/received";
-import { CREDIT_METHOD } from "@/lib/constants";
+import { CREDIT_METHOD, ORDER_STATUSES, OWNER_ONLY_TRASH } from "@/lib/constants";
+import { rxHistoryOrder } from "@/lib/utils/rx";
+import { readSalaryHistory, type SalaryKindValue, type SalaryStep } from "@/lib/salaries";
 
 // ─── Enum mappers (DB enum → UI title-case) ─────────────────
 const brandTagLabel = { ORIGINAL: "Original", COPY: "Copy", BRANDED: "Branded", UNBRANDED: "Unbranded" } as const;
@@ -14,10 +16,7 @@ const paymentStatusLabel = { PAID: "Full Payment", ADVANCE: "Advance", BALANCE: 
 const labStatusLabel = { ORDERED: "Ordered", IN_PROGRESS: "In Progress", RECEIVED: "Received", FITTED: "Fitted" } as const;
 const saleSourceLabel = { POS: "POS", ONLINE: "Online" } as const;
 const fulfillmentTypeLabel = { PICKUP: "Pickup", DELIVERY: "Delivery" } as const;
-const onlineOrderStatusLabel = {
-  PROCESSING: "Processing", READY_FOR_PICKUP: "Ready for Pickup", OUT_FOR_DELIVERY: "Out for Delivery",
-  COMPLETED: "Completed", CANCELLED: "Cancelled",
-} as const;
+
 
 const iso = (d: Date | null | undefined) => (d ? d.toISOString().slice(0, 10) : "");
 
@@ -158,7 +157,7 @@ export async function getCustomers(): Promise<CustomerView[]> {
     lastVisit: iso(c.lastVisit),
     totalSpend: c.totalSpend,
     visitCount: c.visitCount,
-    prescriptions: c.prescriptions.map(mapPrescription),
+    prescriptions: rxHistoryOrder(c.prescriptions).map(mapPrescription),
   }));
 }
 
@@ -180,7 +179,7 @@ export async function getCustomer(id: string): Promise<CustomerView | null> {
     lastVisit: iso(c.lastVisit),
     totalSpend: c.totalSpend,
     visitCount: c.visitCount,
-    prescriptions: c.prescriptions.map(mapPrescription),
+    prescriptions: rxHistoryOrder(c.prescriptions).map(mapPrescription),
   };
 }
 
@@ -244,7 +243,8 @@ const saleInclude = {
   lensProduct: { select: { brand: true, name: true, salePrice: true } },
   payments: { orderBy: { date: "asc" }, include: { receivedBy: { select: { name: true } } } },
   returns: { select: { id: true, returnNo: true, date: true, totalRefund: true, reason: true }, orderBy: { date: "asc" } },
-  prescriptions: { orderBy: { createdAt: "asc" } },
+  // In the order they were typed in at the till (one bill saves them all at once).
+  prescriptions: { orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
 } satisfies Prisma.SaleInclude;
 
 type SaleRow = Prisma.SaleGetPayload<{ include: typeof saleInclude }>;
@@ -325,7 +325,7 @@ function mapSale(s: SaleRow): SaleView {
     fulfillmentType: s.fulfillmentType ? fulfillmentTypeLabel[s.fulfillmentType] : undefined,
     deliveryAddress: s.deliveryAddress,
     deliveryFee: s.deliveryFee,
-    onlineOrderStatus: s.onlineOrderStatus ? onlineOrderStatusLabel[s.onlineOrderStatus] : undefined,
+    orderStatus: ORDER_STATUSES.find((o) => o.value === s.onlineOrderStatus)?.label,
   };
 }
 
@@ -435,7 +435,7 @@ export async function getExpenses(): Promise<Expense[]> {
 export async function getLabOrders(): Promise<LabOrder[]> {
   const rows = await db.labOrder.findMany({
     orderBy: { orderedDate: "desc" },
-    include: { customer: true, lab: true },
+    include: { customer: true, lab: true, rx: true },
   });
   return rows.map((l) => ({
     id: l.id,
@@ -446,6 +446,7 @@ export async function getLabOrders(): Promise<LabOrder[]> {
     lab: l.lab.name,
     lensType: l.lensType,
     prescription: l.prescription,
+    rx: l.rx ? mapPrescription(l.rx) : null,
     price: l.price,
     status: labStatusLabel[l.status],
     orderedDate: iso(l.orderedDate),
@@ -490,7 +491,7 @@ export async function getPrescriptions(): Promise<PrescriptionView[]> {
     orderBy: { date: "desc" },
     include: { customer: true },
   });
-  return rows.map((p) => ({
+  return rxHistoryOrder(rows).map((p) => ({
     ...mapPrescription(p),
     customerId: p.customerId,
     customerName: p.customer ? customerLabel(p.customer) : "",
@@ -701,7 +702,7 @@ function trashTiming(deletedAt: Date | null) {
   return { deletedAt: when.toISOString(), daysLeft: Math.max(0, daysLeft), expired: daysLeft <= 0 };
 }
 
-export async function getTrashItems(): Promise<TrashItemView[]> {
+export async function getTrashItems(viewerRole?: string): Promise<TrashItemView[]> {
   // Deleted for good (TRASH_PURGED_AT) is gone from the trash too.
   const inTrash = { active: false, OR: [{ deletedAt: null }, { deletedAt: { gt: TRASH_PURGED_AT } }] };
   const [products, customers, branches, users, suppliers, labs, entries] = await Promise.all([
@@ -711,7 +712,11 @@ export async function getTrashItems(): Promise<TrashItemView[]> {
     db.user.findMany({ where: inTrash, orderBy: { deletedAt: "desc" } }),
     db.supplier.findMany({ where: inTrash, orderBy: { deletedAt: "desc" } }),
     db.lab.findMany({ where: inTrash, orderBy: { deletedAt: "desc" } }),
-    db.trashEntry.findMany({ orderBy: { deletedAt: "desc" }, select: { id: true, kind: true, title: true, detail: true, deletedAt: true } }),
+    db.trashEntry.findMany({
+      // Salary entries say what someone is paid: only the owner sees them.
+      where: viewerRole === "OWNER" ? {} : { kind: { notIn: [...OWNER_ONLY_TRASH] } },
+      orderBy: { deletedAt: "desc" }, select: { id: true, kind: true, title: true, detail: true, deletedAt: true },
+    }),
   ]);
 
   const items: TrashItemView[] = [
@@ -822,14 +827,27 @@ export interface AnalyticsData {
     byCategory: { name: string; units: number; costValue: number; retailValue: number }[];
   };
   requiresPin: boolean;
+  // Every bill, for the sales / invoiced / outstanding figures over any dates:
+  // the day it was made, its total, what's still owed on it, and each payment
+  // on the day it was made.
+  ledger: LedgerBill[];
+}
+
+export interface LedgerBill {
+  day: string;
+  total: number;
+  balance: number;
+  paid: { day: string; amount: number }[];
 }
 
 export async function getAnalyticsData(): Promise<AnalyticsData> {
-  const [products, sales, expenses, settings] = await Promise.all([
+  const [products, sales, expenses, settings, salaryPay] = await Promise.all([
     db.product.findMany({ where: { active: true } }),
     db.sale.findMany({ include: { items: true, payments: { select: { amount: true, date: true } } } }),
     db.expense.findMany(),
     db.shopSettings.findUnique({ where: { id: "default" } }),
+    // Salary handed over is a cost like any expense (a cut moves no money).
+    db.salaryEntry.aggregate({ where: { kind: { not: "DEDUCTION" } }, _sum: { amount: true } }),
   ]);
 
   const productById = new Map(products.map((p) => [p.id, p]));
@@ -842,14 +860,18 @@ export async function getAnalyticsData(): Promise<AnalyticsData> {
   // follows it (lib/sales/received) -- so a bill still owed counts as it's paid.
   let totalRevenue = 0;
   let grossProfit = 0;
+  const ledger: LedgerBill[] = [];
 
   sales.forEach((s) => {
+    const paid: LedgerBill["paid"] = [];
     for (const p of paymentsOnDays({ dateTime: s.date, total: s.total, profit: s.profit, paid: s.paid, payments: s.payments })) {
       const day = iso(p.date);
       days[day] = (days[day] || 0) + p.amount;
       totalRevenue += p.amount;
       grossProfit += p.profit;
+      paid.push({ day, amount: p.amount });
     }
+    ledger.push({ day: iso(s.date), total: s.total, balance: s.balance, paid });
     s.items.forEach((it) => {
       // Typed-in items (no productId) have no brand or category to attribute.
       if (!it.productId) return;
@@ -862,7 +884,7 @@ export async function getAnalyticsData(): Promise<AnalyticsData> {
     });
   });
 
-  const totalExpenses = expenses.reduce((sum, e) => sum + e.amount, 0);
+  const totalExpenses = expenses.reduce((sum, e) => sum + e.amount, 0) + (salaryPay._sum.amount ?? 0);
   // What the goods sold cost: everything the invoices recorded as cost (stock at
   // cost price, typed-in items at their purchase price, lab and fitting).
   const totalCost = totalRevenue - grossProfit;
@@ -922,6 +944,7 @@ export async function getAnalyticsData(): Promise<AnalyticsData> {
       byCategory: [...stockByCategory.values()].sort((a, b) => b.retailValue - a.retailValue),
     },
     requiresPin: !!settings?.analyticsPin,
+    ledger,
   };
 }
 
@@ -937,6 +960,11 @@ export interface CashCollectionData {
   // cheque is counted separately and leaves the drawer alone.
   expenses: number;
   otherExpenses: number;
+  // Salary handed over in cash that day -- already in `expenses`, shown apart
+  // for the owner. The cash page zeroes it for anyone else (who earns what is
+  // the owner's business) and keeps only salariesPaid.
+  salaries: number;
+  salariesPaid: boolean;
   // Cash the owner took to the bank that day. It leaves the drawer but it isn't
   // an expense, so it has its own line and never reaches profit.
   bankDeposits: number;
@@ -994,7 +1022,7 @@ export async function getCashCollection(dateStr: string, branchId?: string): Pro
   const { start, end } = dayRange(dateStr);
   const saleWhere = { date: { gte: start, lt: end }, ...(branchId ? { branchId } : {}) };
   const customerName = { select: { id: true, name: true, phone: true } } as const;
-  const [sales, laterPayments, expenses, deposits, saved, credits] = await Promise.all([
+  const [sales, laterPayments, expenses, deposits, saved, credits, salaryPay] = await Promise.all([
     db.sale.findMany({
       where: saleWhere,
       include: { payments: { select: { amount: true } }, customer: customerName, receivedBy: { select: { name: true } } },
@@ -1016,6 +1044,8 @@ export async function getCashCollection(dateStr: string, branchId?: string): Pro
       where: { date: { gte: start, lt: end } },
       select: { id: true, amount: true, method: true, date: true, note: true, recordedBy: true, customer: customerName },
     }),
+    // Salary, advances and bonuses handed over that day (a cut moves no money).
+    db.salaryEntry.findMany({ where: { date: { gte: start, lt: end }, kind: { not: "DEDUCTION" } }, select: { amount: true, method: true } }),
   ]);
 
   // A sale's own `paid` is the running total including anything collected
@@ -1053,6 +1083,8 @@ export async function getCashCollection(dateStr: string, branchId?: string): Pro
   ].sort((a, b) => a.time.localeCompare(b.time));
   const totalCollection = collected.reduce((sum, c) => sum + c.amount, 0);
   const cashExpenses = expenses.filter((e) => (e.paymentMethod || "Cash") === "Cash");
+  const cashSalaries = salaryPay.filter((p) => p.method === "Cash").reduce((sum, p) => sum + p.amount, 0);
+  const otherSalaries = salaryPay.filter((p) => p.method !== "Cash").reduce((sum, p) => sum + p.amount, 0);
 
   return {
     date: dateStr,
@@ -1061,8 +1093,10 @@ export async function getCashCollection(dateStr: string, branchId?: string): Pro
     bankTransfer: byMethod("Bank Transfer"),
     jazzCash: byMethod("JazzCash"),
     totalCollection,
-    expenses: cashExpenses.reduce((sum, e) => sum + e.amount, 0),
-    otherExpenses: expenses.filter((e) => (e.paymentMethod || "Cash") !== "Cash").reduce((sum, e) => sum + e.amount, 0),
+    expenses: cashExpenses.reduce((sum, e) => sum + e.amount, 0) + cashSalaries,
+    otherExpenses: expenses.filter((e) => (e.paymentMethod || "Cash") !== "Cash").reduce((sum, e) => sum + e.amount, 0) + otherSalaries,
+    salaries: cashSalaries,
+    salariesPaid: cashSalaries > 0,
     advancesIn: credits.filter((c) => c.amount > 0).reduce((sum, c) => sum + c.amount, 0),
     advancesRefunded: -credits.filter((c) => c.amount < 0).reduce((sum, c) => sum + c.amount, 0),
     bankDeposits: deposits.reduce((sum, d) => sum + d.amount, 0),
@@ -1095,7 +1129,7 @@ async function openingCashFor(start: Date, branchId?: string) {
   if (!lastClose) return null;
 
   const gap = { gte: new Date(lastClose.date.getTime() + 24 * 60 * 60 * 1000), lt: start };
-  const [sales, laterPayments, expenses, deposits, credits] = await Promise.all([
+  const [sales, laterPayments, expenses, deposits, credits, salaryPay] = await Promise.all([
     db.sale.findMany({
       where: { date: gap, ...(branchId ? { branchId } : {}) },
       select: { paid: true, paymentMethod: true, paymentSplit: true, payments: { select: { amount: true } } },
@@ -1107,14 +1141,16 @@ async function openingCashFor(start: Date, branchId?: string) {
     db.expense.findMany({ where: { date: gap }, select: { amount: true, paymentMethod: true } }),
     db.bankDeposit.findMany({ where: { date: gap }, select: { amount: true } }),
     db.customerCredit.findMany({ where: { date: gap }, select: { amount: true, method: true } }),
+    db.salaryEntry.findMany({ where: { date: gap, kind: { not: "DEDUCTION" }, method: "Cash" }, select: { amount: true } }),
   ]);
 
   const takenAtTill = sales.flatMap((s) => tillParts(s, s.paid - s.payments.reduce((sum, p) => sum + p.amount, 0)));
   // Advances paid in cash add to it; ones handed back in cash come off (they're negative).
   const cashIn = [...takenAtTill, ...laterPayments, ...credits].filter((c) => c.method === "Cash").reduce((sum, c) => sum + c.amount, 0);
-  // Cash spent, and cash taken to the bank -- both left the drawer.
+  // Cash spent (salary paid in cash too), and cash taken to the bank -- all left the drawer.
   const cashOut =
     expenses.filter((e) => (e.paymentMethod || "Cash") === "Cash").reduce((sum, e) => sum + e.amount, 0) +
+    salaryPay.reduce((sum, p) => sum + p.amount, 0) +
     deposits.reduce((sum, d) => sum + d.amount, 0);
   const sinceLastClose = Math.round((cashIn - cashOut) * 100) / 100;
 
@@ -1127,99 +1163,120 @@ async function openingCashFor(start: Date, branchId?: string) {
 
 // ─── Dashboard aggregates ───────────────────────────────────
 export interface DashboardData {
-  // Today's sales: every payment made today towards an invoice of any date
-  // (lib/sales/received) -- a balance paid off today counts today, and the part
-  // of a bill paid on an earlier day counted on that day.
-  todaySales: number;
-  // The part of todaySales paid on invoices made before today.
-  todayFromEarlier: number;
-  // Invoices made today at their full value, paid or not.
-  todayInvoiced: number;
-  todayInvoiceCount: number;
-  totalInvoices: number;
-  outstanding: number;
+  // Orders being made up, and orders ready to pick up or deliver. The money
+  // figures (sales, invoiced, outstanding) are on Analytics, for the owner.
+  ordersInProcess: number;
+  readyToPickUp: number;
+  readyToDeliver: number;
+  // Jobs sent to a lab that haven't come back yet.
+  labJobsOut: number;
   lowStockCount: number;
-  totalProfit: number;
-  dailyTrend: { label: string; value: number }[];
-  topBrands: { label: string; value: number }[];
-  recentSales: { id: string; invoiceNo: string; date: string; customerName: string; total: number; paymentStatus: string }[];
+  recentSales: { id: string; invoiceNo: string; date: string; customerName: string; total: number; paymentStatus: string; orderStatus?: string }[];
   reminders: { text: string; type: "balance" | "pickup" | "lab" | "stock"; date: string }[];
 }
 
 export async function getDashboardData(branchId?: string): Promise<DashboardData> {
   const saleWhere = branchId ? { branchId } : {};
-  const today = new Date().toISOString().slice(0, 10);
-  const [products, sales] = await Promise.all([
+  const [products, sales, labJobsOut, openOrders] = await Promise.all([
     db.product.findMany({ where: { active: true } }),
     db.sale.findMany({
-      where: saleWhere,
+      where: { ...saleWhere, OR: [{ paymentStatus: { not: "PAID" } }, { onlineOrderStatus: { not: null } }] },
       orderBy: { date: "desc" },
-      include: { customer: true, items: true, payments: { select: { amount: true, date: true } } },
+      include: { customer: true },
     }),
+    db.labOrder.count({ where: { status: { in: ["ORDERED", "IN_PROGRESS"] } } }),
+    db.sale.groupBy({ by: ["onlineOrderStatus"], where: saleWhere, _count: { _all: true } }),
   ]);
+  const recent = await db.sale.findMany({ where: saleWhere, orderBy: { date: "desc" }, take: 5, include: { customer: true } });
 
-  const productBrand = new Map(products.map((p) => [p.id, p.brand]));
-
-  // Every payment, on the day it was made, with the day its invoice was made.
-  const paymentDays = sales.flatMap((s) =>
-    paymentsOnDays({ dateTime: s.date, total: s.total, profit: s.profit, paid: s.paid, payments: s.payments })
-      .map((p) => ({ day: iso(p.date), amount: p.amount, invoiceDay: iso(s.date) })));
-  const paidToday = paymentDays.filter((p) => p.day === today);
-  const todaySales = paidToday.reduce((sum, p) => sum + p.amount, 0);
-  const todayFromEarlier = paidToday.filter((p) => p.invoiceDay < today).reduce((sum, p) => sum + p.amount, 0);
-  const madeToday = sales.filter((s) => iso(s.date) === today);
-  const todayInvoiced = madeToday.reduce((sum, s) => sum + s.total, 0);
-  const outstanding = sales.filter((s) => s.paymentStatus !== "PAID").reduce((sum, s) => sum + s.balance, 0);
-  const totalProfit = sales.reduce((sum, s) => sum + s.profit, 0);
+  const countOf = (status: string) => openOrders.find((g) => g.onlineOrderStatus === status)?._count._all ?? 0;
   const lowStock = products.filter((p) => p.stock <= p.lowStockThreshold);
+  const who = (s: (typeof sales)[number]) => (s.customer ? customerLabel(s.customer) : "Walk-in");
 
-  // Daily trend (last 14 days that have sales), each payment on its own day.
-  const days: Record<string, number> = {};
-  paymentDays.forEach((p) => { days[p.day] = (days[p.day] || 0) + p.amount; });
-  const dailyTrend = Object.entries(days)
-    .sort(([a], [b]) => a.localeCompare(b))
-    .slice(-14)
-    .map(([date, total]) => ({
-      label: new Date(date).toLocaleDateString("en-PK", { day: "2-digit", month: "short" }),
-      value: total,
-    }));
-
-  // Top brands by revenue
-  const brands: Record<string, number> = {};
-  sales.forEach((s) => s.items.forEach((it) => {
-    const brand = it.productId ? productBrand.get(it.productId) : undefined;
-    if (brand) brands[brand] = (brands[brand] || 0) + it.total;
-  }));
-  const topBrands = Object.entries(brands)
-    .sort(([, a], [, b]) => b - a)
-    .slice(0, 6)
-    .map(([brand, revenue]) => ({ label: brand, value: revenue }));
-
-  // Reminders: outstanding balances + low stock
+  // Reminders: orders ready to hand over, balances to collect, low stock.
   const reminders: DashboardData["reminders"] = [];
+  sales.filter((s) => s.onlineOrderStatus === "READY_FOR_PICKUP" || s.onlineOrderStatus === "OUT_FOR_DELIVERY").slice(0, 3).forEach((s) => {
+    reminders.push({
+      text: `${who(s)} — ${s.invoiceNo} ${s.onlineOrderStatus === "OUT_FOR_DELIVERY" ? "ready to deliver" : "ready to pick up"}`,
+      type: "pickup", date: iso(s.date),
+    });
+  });
   sales.filter((s) => s.paymentStatus !== "PAID" && s.balance > 0).slice(0, 2).forEach((s) => {
-    reminders.push({ text: `${s.customer ? customerLabel(s.customer) : "Walk-in"} — balance ${Math.round(s.balance).toLocaleString()} Rs due`, type: "balance", date: iso(s.date) });
+    reminders.push({ text: `${who(s)} — balance ${Math.round(s.balance).toLocaleString()} Rs due`, type: "balance", date: iso(s.date) });
   });
   lowStock.slice(0, 3).forEach((p) => {
     reminders.push({ text: `Low stock: ${p.name} (${p.stock} left)`, type: "stock", date: "Now" });
   });
 
   return {
-    todaySales,
-    todayFromEarlier,
-    todayInvoiced,
-    todayInvoiceCount: madeToday.length,
-    totalInvoices: sales.length,
-    outstanding,
+    ordersInProcess: countOf("PROCESSING"),
+    readyToPickUp: countOf("READY_FOR_PICKUP"),
+    readyToDeliver: countOf("OUT_FOR_DELIVERY"),
+    labJobsOut,
     lowStockCount: lowStock.length,
-    totalProfit,
-    dailyTrend,
-    topBrands,
-    recentSales: sales.slice(0, 5).map((s) => ({
+    recentSales: recent.map((s) => ({
       id: s.id, invoiceNo: s.invoiceNo, date: iso(s.date),
       customerName: s.customer ? customerLabel(s.customer) : "Walk-in", total: s.total,
       paymentStatus: paymentStatusLabel[s.paymentStatus],
+      orderStatus: ORDER_STATUSES.find((o) => o.value === s.onlineOrderStatus)?.label,
     })),
     reminders,
   };
+}
+
+
+// ─── Salaries ───────────────────────────────────────────────
+export interface SalaryEntryView {
+  id: string;
+  month: string;
+  kind: SalaryKindValue;
+  amount: number;
+  method: string;
+  date: string;
+  note: string;
+  recordedBy: string;
+}
+
+export interface EmployeeView {
+  id: string;
+  name: string;
+  jobTitle: string;
+  phone: string;
+  monthlySalary: number;
+  salaryHistory: SalaryStep[];
+  joinedOn: string;
+  notes: string;
+  active: boolean;
+  leftOn: string;
+  // Anything recorded against the month being looked at.
+  entries: SalaryEntryView[];
+  hasEntries: boolean;
+}
+
+/** Everyone ever on the payroll, with what's recorded for one month ("2026-10"). */
+export async function getPayroll(month: string): Promise<EmployeeView[]> {
+  const rows = await db.employee.findMany({
+    orderBy: [{ active: "desc" }, { name: "asc" }],
+    include: {
+      salaryEntries: { where: { month }, orderBy: [{ date: "asc" }, { createdAt: "asc" }] },
+      _count: { select: { salaryEntries: true } },
+    },
+  });
+  return rows.map((e) => ({
+    id: e.id,
+    name: e.name,
+    jobTitle: e.jobTitle,
+    phone: e.phone,
+    monthlySalary: e.monthlySalary,
+    salaryHistory: readSalaryHistory(e.salaryHistory),
+    joinedOn: iso(e.joinedOn),
+    notes: e.notes,
+    active: e.active,
+    leftOn: iso(e.leftOn),
+    entries: e.salaryEntries.map((s) => ({
+      id: s.id, month: s.month, kind: s.kind, amount: s.amount, method: s.method,
+      date: s.date.toISOString(), note: s.note, recordedBy: s.recordedBy,
+    })),
+    hasEntries: e._count.salaryEntries > 0,
+  }));
 }

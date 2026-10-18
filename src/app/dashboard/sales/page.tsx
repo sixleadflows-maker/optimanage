@@ -5,7 +5,9 @@ import { shopDetailsFromSettings } from "@/components/invoice/InvoiceDocuments";
 
 export const dynamic = "force-dynamic";
 
-export default async function SalesPage() {
+export default async function SalesPage({ searchParams }: { searchParams: Promise<{ order?: string }> }) {
+  // ?order=process|ready|delivered opens the list on those orders (from the dashboard).
+  const { order } = await searchParams;
   const [sales, settings, customers, users, session] = await Promise.all([
     getSales(), getSettings(), getCustomers(), getUsers(), auth(),
   ]);
@@ -23,6 +25,7 @@ export default async function SalesPage() {
       }))}
       staff={users.filter((u) => u.active).map((u) => ({ id: u.id, name: u.name }))}
       shop={shopDetailsFromSettings(settings)}
+      initialOrderFilter={order}
     />
   );
 }

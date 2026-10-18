@@ -151,6 +151,8 @@ model Prescription {
   lensName        String @default("")
   lensColor       String @default("")
   lensDescription String @default("")
+  // Lab jobs sent out for this prescription.
+  labOrders  LabOrder[]
   createdAt  DateTime @default(now())
 }
 
@@ -270,6 +272,10 @@ model Sale {
   fulfillmentType   FulfillmentType?
   deliveryAddress   String             @default("")
   deliveryFee       Float              @default(0)
+  // Where the order is: in process, ready to pick up / deliver, delivered.
+  // Online orders always have one; a shop order has one when the glasses are
+  // being made up (null when the goods were handed over at the counter).
+  // The name is from when only online orders had a status.
   onlineOrderStatus OnlineOrderStatus?
 
   prescriptions   Prescription[]
@@ -492,7 +498,12 @@ model LabOrder {
   labId        String
   lab          Lab            @relation(fields: [labId], references: [id])
   lensType     String         @default("")
+  // The prescription in words ("R -2.00 / -0.50 × 180 · L ..."), so the order
+  // still reads right if the saved prescription it came from is deleted.
   prescription String         @default("")
+  // The customer's saved prescription the lab is making up, when there is one.
+  rxId         String?
+  rx           Prescription?  @relation(fields: [rxId], references: [id], onDelete: SetNull)
   price        Float          @default(0)
   status       LabOrderStatus @default(ORDERED)
   orderedDate  DateTime       @default(now())
@@ -522,6 +533,61 @@ model Expense {
   // against the day's closing cash.
   paymentMethod String @default("Cash")
   createdAt   DateTime @default(now())
+}
+
+// ─── Salaries ───────────────────────────────────────────────
+
+// Someone the shop pays a salary to. Separate from sign-in accounts: a fitter
+// or helper who never uses the system is on the payroll too.
+model Employee {
+  id            String    @id @default(cuid())
+  name          String
+  jobTitle      String    @default("")
+  phone         String    @default("")
+  // The salary now. What it was in earlier months is in salaryHistory, so a
+  // raise doesn't rewrite what was owed before it.
+  monthlySalary Float     @default(0)
+  // [{ "from": "2026-10", "amount": 30000 }, ...] oldest first.
+  salaryHistory Json      @default("[]")
+  joinedOn      DateTime?
+  notes         String    @default("")
+  // Left the shop: off the month's pay sheet, but their pay history stays.
+  active        Boolean   @default(true)
+  leftOn        DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  salaryEntries SalaryEntry[]
+}
+
+// Pay given to someone on the payroll, or taken off it. `month` is the month
+// the pay is for ("2026-10"), which isn't always the month it was paid in:
+// October's salary is often handed over in early November.
+model SalaryEntry {
+  id         String     @id @default(cuid())
+  employeeId String
+  employee   Employee   @relation(fields: [employeeId], references: [id])
+  month      String
+  kind       SalaryKind
+  amount     Float
+  // Cash comes out of the drawer on `date`; other methods don't touch it.
+  method     String     @default("Cash")
+  date       DateTime   @default(now())
+  note       String     @default("")
+  recordedBy String     @default("")
+  createdAt  DateTime   @default(now())
+
+  @@index([month])
+  @@index([date])
+}
+
+// SALARY, ADVANCE and BONUS are money paid out (an expense on the day paid).
+// DEDUCTION is a cut from the month's pay -- absence, a loss -- and no money moves.
+enum SalaryKind {
+  SALARY
+  ADVANCE
+  BONUS
+  DEDUCTION
 }
 
 // ─── Daily Cash Collection ──────────────────────────────────

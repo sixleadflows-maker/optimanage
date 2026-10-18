@@ -4,10 +4,11 @@ import { PrescriptionsClient } from "./PrescriptionsClient";
 
 export const dynamic = "force-dynamic";
 
-export default async function PrescriptionsPage({ searchParams }: { searchParams: Promise<{ edit?: string; addTo?: string }> }) {
+export default async function PrescriptionsPage({ searchParams }: { searchParams: Promise<{ edit?: string; addTo?: string; customer?: string }> }) {
   // ?edit=<id> opens that prescription ready to correct (linked from a customer's
-  // history); ?addTo=<invoice id> adds one to an invoice that already exists.
-  const { edit, addTo } = await searchParams;
+  // history); ?addTo=<invoice id> adds one to an invoice that already exists;
+  // ?customer=<id> starts new prescriptions for that customer.
+  const { edit, addTo, customer } = await searchParams;
   const [prescriptions, customers, addToSale, session] = await Promise.all([
     getPrescriptions(), getCustomers(), addTo ? getSaleBrief(addTo) : null, auth(),
   ]);
@@ -19,6 +20,7 @@ export default async function PrescriptionsPage({ searchParams }: { searchParams
       customers={rxCustomers}
       canDelete={canDelete}
       initialEditId={edit}
+      initialCustomerId={customer}
       addToSale={addToSale}
     />
   );

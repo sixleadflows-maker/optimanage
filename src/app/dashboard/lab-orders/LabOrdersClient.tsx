@@ -2,16 +2,20 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import type { LabOrder } from "@/lib/mock/types";
+import type { LabOrder, Prescription } from "@/lib/mock/types";
 import type { LabVendorView } from "@/lib/data";
 import { formatCurrency, formatDate } from "@/lib/utils/format";
 import { useApp } from "@/lib/context";
 import { LAB_ORDER_STATUSES } from "@/lib/constants";
 import { createLabOrder, advanceLabStatus, updateLabOrder, deleteLabOrder } from "@/lib/actions/lab-orders";
 import { createLab, updateLab, deleteLab } from "@/lib/actions/labs";
-import { FlaskConical, ArrowRight, Plus, X, Loader2, Beaker, Pencil, Trash2 } from "lucide-react";
+import { FlaskConical, ArrowRight, Plus, X, Loader2, Beaker, Pencil, Trash2, Search } from "lucide-react";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { RxTable } from "@/components/ui/RxTable";
+import { RxEntryTable, type RxFormValues } from "@/components/ui/RxEntryTable";
+import { matchesSearch } from "@/lib/utils/search";
+import { formatEyeValue, parseRxText, rxFormTexts } from "@/lib/utils/rx";
 
 const statusColors: Record<string, string> = {
   "Ordered": "bg-blue-500/10 text-blue-600 border-blue-200",
@@ -22,9 +26,29 @@ const statusColors: Record<string, string> = {
 
 const EMPTY_LAB = { name: "", contact: "", phone: "", email: "", address: "" };
 
-interface LabCustomer { id: string; name: string; }
+interface LabCustomer { id: string; name: string; phone: string; phone2: string; serialNumber: string; prescriptions: Prescription[]; }
 
 const EMPTY_ORDER = { customerId: "", labId: "", lensType: "", prescription: "", price: 0, expectedDate: "", notes: "" };
+
+const EMPTY_RX: RxFormValues & { label: string } = {
+  rightSph: "", rightCyl: "", rightAxis: "", rightPd: "", rightAdd: "",
+  leftSph: "", leftCyl: "", leftAxis: "", leftPd: "", leftAdd: "",
+  label: "",
+};
+
+// Where the order's prescription comes from: one already on the customer's
+// record, a new one typed in now (saved to their record too), or just words.
+type RxMode = "saved" | "new" | "words";
+
+/** A saved prescription on one line, to pick from. */
+function rxLine(rx: Prescription) {
+  const eye = (e: Prescription["rightEye"]) =>
+    [
+      formatEyeValue("Sph", e), e.cyl || e.cylText ? `/ ${formatEyeValue("Cyl", e)}` : "", e.axis ? `× ${e.axis}` : "",
+      e.add || e.addText ? `ADD ${formatEyeValue("Add", e)}` : "",
+    ].filter(Boolean).join(" ");
+  return `R ${eye(rx.rightEye)} · L ${eye(rx.leftEye)}`;
+}
 
 export function LabOrdersClient({
   labOrders, customers, labs, canDelete,
@@ -37,8 +61,25 @@ export function LabOrdersClient({
   const [saving, setSaving] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [form, setForm] = useState({ ...EMPTY_ORDER });
+  const [customerSearch, setCustomerSearch] = useState("");
+  const [rxMode, setRxMode] = useState<RxMode>("new");
+  const [rxId, setRxId] = useState("");
+  const [newRx, setNewRx] = useState({ ...EMPTY_RX });
   // Set while the order form is changing an existing order.
   const [editingOrder, setEditingOrder] = useState<LabOrder | null>(null);
+
+  const customerById = new Map(customers.map((c) => [c.id, c]));
+  const picked = form.customerId ? customerById.get(form.customerId) : undefined;
+  const customerMatches = customerSearch.trim() && !form.customerId
+    ? customers.filter((c) => matchesSearch(customerSearch, [c.name, c.phone, c.phone2, c.serialNumber])).slice(0, 6)
+    : [];
+  // Their newest prescription is the one usually going to the lab.
+  const pickCustomer = (c: LabCustomer) => {
+    setForm((f) => ({ ...f, customerId: c.id }));
+    setCustomerSearch(c.name);
+    setRxId(c.prescriptions[0]?.id ?? "");
+    setRxMode(c.prescriptions.length ? "saved" : "new");
+  };
   const [deletingOrder, setDeletingOrder] = useState<LabOrder | null>(null);
   const [deletingLab, setDeletingLab] = useState<LabVendorView | null>(null);
   const [removing, setRemoving] = useState(false);
@@ -46,14 +87,23 @@ export function LabOrdersClient({
   const openNewOrder = () => {
     setEditingOrder(null);
     setForm({ ...EMPTY_ORDER });
+    setCustomerSearch("");
+    setRxMode("new");
+    setRxId("");
+    setNewRx({ ...EMPTY_RX });
     setShowAdd(true);
   };
   const openEditOrder = (o: LabOrder) => {
     setEditingOrder(o);
     setForm({
       customerId: o.customerId, labId: o.labId, lensType: o.lensType, prescription: o.prescription,
-      price: o.price, expectedDate: o.expectedDate, notes: o.notes,
+      price: o.price, expectedDate: o.expectedDate ? o.expectedDate.slice(0, 10) : "", notes: o.notes,
     });
+    setCustomerSearch(o.customerName);
+    // An older order has its prescription in words only.
+    setRxMode(o.rx ? "saved" : "words");
+    setRxId(o.rx?.id ?? "");
+    setNewRx({ ...EMPTY_RX });
     setShowAdd(true);
   };
 
@@ -110,15 +160,35 @@ export function LabOrdersClient({
       showToast("Select a customer and a lab", "error");
       return;
     }
+    if (rxMode === "saved" && !rxId) {
+      showToast("Pick one of their prescriptions, or type a new one", "error");
+      return;
+    }
+    const n = parseRxText;
+    const input = {
+      ...form,
+      rxId: rxMode === "saved" ? rxId : null,
+      newRx: rxMode === "new"
+        ? {
+            rightSph: n(newRx.rightSph), rightCyl: n(newRx.rightCyl), rightAxis: n(newRx.rightAxis), rightPd: n(newRx.rightPd), rightAdd: n(newRx.rightAdd),
+            leftSph: n(newRx.leftSph), leftCyl: n(newRx.leftCyl), leftAxis: n(newRx.leftAxis), leftPd: n(newRx.leftPd), leftAdd: n(newRx.leftAdd),
+            ...rxFormTexts(newRx),
+            label: newRx.label.trim(),
+            notes: "",
+          }
+        : null,
+      prescription: rxMode === "words" ? form.prescription : "",
+    };
     setSaving(true);
     try {
       if (editingOrder) {
-        const res = await updateLabOrder(editingOrder.id, form);
+        const res = await updateLabOrder(editingOrder.id, input);
         if (!res.ok) { showToast(res.error, "error"); return; }
         showToast(`${editingOrder.orderNo} updated`, "success");
       } else {
-        const res = await createLabOrder(form);
-        showToast(`Lab order created — ${res.orderNo}`, "success");
+        const res = await createLabOrder(input);
+        if (!res.ok) { showToast(res.error, "error"); return; }
+        showToast(rxMode === "new" ? `Lab order created — ${res.orderNo}. The prescription is on ${picked?.name || "the customer"}'s record too.` : `Lab order created — ${res.orderNo}`, "success");
       }
       setShowAdd(false);
       setEditingOrder(null);
@@ -266,6 +336,7 @@ export function LabOrdersClient({
                       </div>
                       <p className="text-sm font-medium">{order.customerName}</p>
                       <p className="text-xs text-muted-foreground mt-1">{order.lensType}</p>
+                      {order.prescription && <p className="text-[10px] mt-1 tabular-nums leading-snug">{order.prescription}</p>}
                       <p className="text-[10px] text-muted-foreground mt-0.5">{order.lab}</p>
                       <div className="flex items-center justify-between mt-3 pt-2 border-t border-border">
                         <p className="text-xs font-semibold text-primary">{formatCurrency(order.price)}</p>
@@ -296,6 +367,7 @@ export function LabOrdersClient({
                 <th className="text-left py-3 px-3 text-xs font-medium text-muted-foreground">Customer</th>
                 <th className="text-left py-3 px-3 text-xs font-medium text-muted-foreground">Lab</th>
                 <th className="text-left py-3 px-3 text-xs font-medium text-muted-foreground">Lens Type</th>
+                <th className="text-left py-3 px-3 text-xs font-medium text-muted-foreground">Prescription</th>
                 <th className="text-right py-3 px-3 text-xs font-medium text-muted-foreground">Price</th>
                 <th className="text-center py-3 px-3 text-xs font-medium text-muted-foreground">Status</th>
                 <th className="text-left py-3 px-3 text-xs font-medium text-muted-foreground">Expected</th>
@@ -304,7 +376,7 @@ export function LabOrdersClient({
             </thead>
             <tbody>
               {labOrders.length === 0 && (
-                <tr><td colSpan={8}>
+                <tr><td colSpan={9}>
                   <EmptyState icon={FlaskConical} title="No lab orders yet" hint="Outsourced lens jobs appear here — track them from Ordered through Fitted." />
                 </td></tr>
               )}
@@ -314,6 +386,7 @@ export function LabOrdersClient({
                   <td className="py-3 px-3">{order.customerName}</td>
                   <td className="py-3 px-3 text-xs text-muted-foreground">{order.lab}</td>
                   <td className="py-3 px-3 text-xs">{order.lensType}</td>
+                  <td className="py-3 px-3 text-[11px] tabular-nums max-w-[260px]">{order.prescription || "—"}</td>
                   <td className="py-3 px-3 text-right font-medium">{formatCurrency(order.price)}</td>
                   <td className="py-3 px-3 text-center">
                     <span className={`chip ${statusColors[order.status]}`}>{order.status}</span>
@@ -340,19 +413,34 @@ export function LabOrdersClient({
 
       {showAdd && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowAdd(false)}>
-          <div className="glass-modal p-6 w-full max-w-lg animate-rise" onClick={(e) => e.stopPropagation()}>
+          <div className="glass-modal solid-sheet p-6 w-full max-w-2xl animate-rise max-h-[92vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold">{editingOrder ? `Edit ${editingOrder.orderNo}` : "New Lab Order"}</h3>
               <button onClick={() => setShowAdd(false)} className="cursor-pointer"><X className="w-5 h-5" /></button>
             </div>
             <div className="space-y-3">
               <div className="grid grid-cols-2 gap-3">
-                <div>
+                <div className="relative">
                   <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Customer *</label>
-                  <select value={form.customerId} onChange={(e) => setForm({ ...form, customerId: e.target.value })} className="w-full px-3 py-2.5 glass-input text-sm">
-                    <option value="">Select…</option>
-                    {customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  </select>
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+                    <input type="text" value={customerSearch} placeholder="Name, phone or serial…"
+                      onChange={(e) => { setCustomerSearch(e.target.value); setForm({ ...form, customerId: "" }); setRxId(""); }}
+                      className="w-full pl-9 pr-3 py-2.5 glass-input text-sm" />
+                  </div>
+                  {customerMatches.length > 0 && (
+                    <div className="absolute left-0 right-0 top-full mt-1 z-10 glass solid-sheet rounded-xl p-1.5 shadow-lg max-h-48 overflow-y-auto">
+                      {customerMatches.map((c) => (
+                        <button key={c.id} type="button" onClick={() => pickCustomer(c)}
+                          className="w-full text-left px-3 py-1.5 rounded-lg hover:bg-surface-hover text-xs cursor-pointer">
+                          {[c.name, c.serialNumber && `Serial ${c.serialNumber}`, c.phone].filter(Boolean).join(" · ")}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {customerSearch.trim() && !form.customerId && customerMatches.length === 0 && (
+                    <p className="text-[10px] text-warning mt-1">No customer found — add them on the Customers page first.</p>
+                  )}
                 </div>
                 <div>
                   <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Lab *</label>
@@ -377,10 +465,70 @@ export function LabOrdersClient({
                   <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Expected Date</label>
                   <input type="date" value={form.expectedDate} onChange={(e) => setForm({ ...form, expectedDate: e.target.value })} className="w-full px-3 py-2.5 glass-input text-sm" />
                 </div>
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Prescription</label>
-                  <input type="text" value={form.prescription} onChange={(e) => setForm({ ...form, prescription: e.target.value })} className="w-full px-4 py-2.5 glass-input text-sm" placeholder="e.g. -2.00 / -1.75" />
+              </div>
+
+              <div className="p-3 rounded-xl border border-border space-y-3">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <label className="text-xs font-semibold">Prescription for the lab</label>
+                  <div className="flex gap-1" role="tablist">
+                    {([
+                      ["saved", `Saved${picked ? ` (${picked.prescriptions.length})` : ""}`],
+                      ["new", "Type a new one"],
+                      ["words", "In words"],
+                    ] as const).map(([mode, text]) => (
+                      <button key={mode} type="button" role="tab" aria-selected={rxMode === mode} onClick={() => setRxMode(mode)}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold cursor-pointer ${rxMode === mode ? "bg-primary text-white" : "bg-surface hover:bg-surface-hover"}`}>
+                        {text}
+                      </button>
+                    ))}
+                  </div>
                 </div>
+
+                {rxMode === "saved" && (
+                  !picked ? (
+                    <p className="text-xs text-muted-foreground">Pick the customer first — their prescriptions show here.</p>
+                  ) : picked.prescriptions.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">{`No prescriptions on ${picked.name}'s record yet — type a new one.`}</p>
+                  ) : (
+                    <div className="space-y-2">
+                      <div className="rounded-lg border border-border max-h-40 overflow-y-auto divide-y divide-border">
+                        {picked.prescriptions.map((rx) => (
+                          <label key={rx.id} className={`flex items-start gap-2 px-3 py-2 cursor-pointer ${rxId === rx.id ? "bg-primary/5" : "hover:bg-surface-hover"}`}>
+                            <input type="radio" name="lab-rx" checked={rxId === rx.id} onChange={() => setRxId(rx.id)} className="mt-0.5" />
+                            <span className="min-w-0">
+                              <span className="block text-xs font-medium">
+                                {formatDate(rx.date)}
+                                {rx.label && <span className="font-normal text-muted-foreground">{` · ${rx.label}`}</span>}
+                              </span>
+                              <span className="block text-[10px] text-muted-foreground tabular-nums">{rxLine(rx)}</span>
+                            </span>
+                          </label>
+                        ))}
+                      </div>
+                      {picked.prescriptions.find((rx) => rx.id === rxId) && (
+                        <RxTable right={picked.prescriptions.find((rx) => rx.id === rxId)!.rightEye} left={picked.prescriptions.find((rx) => rx.id === rxId)!.leftEye} />
+                      )}
+                    </div>
+                  )
+                )}
+
+                {rxMode === "new" && (
+                  <div className="space-y-2">
+                    <input type="text" value={newRx.label} onChange={(e) => setNewRx({ ...newRx, label: e.target.value })}
+                      className="w-full px-3 py-2 glass-input text-xs" placeholder="Whose eyes / what for (optional) — e.g. distance, reading" />
+                    <div className="-mx-1.5">
+                      <RxEntryTable values={newRx} onChange={(key, value) => setNewRx((r) => ({ ...r, [key]: value }))} />
+                    </div>
+                    <p className="text-[10px] text-muted-foreground">
+                      {picked ? `Saved to ${picked.name}'s prescription record as well, dated today.` : "It's saved to the customer's prescription record as well."}
+                    </p>
+                  </div>
+                )}
+
+                {rxMode === "words" && (
+                  <input type="text" value={form.prescription} onChange={(e) => setForm({ ...form, prescription: e.target.value })}
+                    className="w-full px-4 py-2.5 glass-input text-sm" placeholder="e.g. -2.00 / -1.75" />
+                )}
               </div>
               <div>
                 <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Notes</label>

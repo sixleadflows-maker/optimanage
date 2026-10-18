@@ -5,12 +5,12 @@ import { useRouter } from "next/navigation";
 import type { PrescriptionView } from "@/lib/data";
 import { formatDate } from "@/lib/utils/format";
 import { useApp } from "@/lib/context";
-import { createPrescription, deletePrescription, updatePrescription, setPrescriptionNotesHidden } from "@/lib/actions/prescriptions";
+import { createPrescription, createPrescriptions, deletePrescription, updatePrescription, setPrescriptionNotesHidden } from "@/lib/actions/prescriptions";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { RxTable } from "@/components/ui/RxTable";
 import { RxEntryTable } from "@/components/ui/RxEntryTable";
 import { formatEyeValue, parseRxText, rxFieldText, rxFormTexts } from "@/lib/utils/rx";
-import { Eye, Save, Search, Loader2, Pencil, Trash2, X, EyeOff, UserPlus } from "lucide-react";
+import { Eye, Save, Search, Loader2, Pencil, Trash2, X, EyeOff, UserPlus, Plus } from "lucide-react";
 import { CustomerFormModal, type SavedCustomer } from "@/app/dashboard/customers/CustomerFormModal";
 import { matchesSearch } from "@/lib/utils/search";
 
@@ -21,6 +21,19 @@ const empty = {
   leftSph: "", leftCyl: "", leftAxis: "", leftPd: "", leftAdd: "",
   label: "",
   notes: "",
+};
+
+// One prescription being typed in. Several can be saved for a customer at
+// once: distance and reading, or each person in a family.
+type Draft = typeof empty & { key: string; isOwn: boolean };
+let draftSeq = 0;
+const newDraft = (from: Partial<Draft> = {}): Draft => ({ ...empty, isOwn: false, ...from, key: `rx-${++draftSeq}` });
+const isBlank = (d: Draft) =>
+  !d.label.trim() && !d.notes.trim() && (Object.keys(empty) as (keyof typeof empty)[]).every((k) => !d[k].trim());
+// The shop's calendar day, for the date box.
+const todayLocal = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 };
 
 /** The form filled from a saved prescription, ready to correct. */
@@ -40,6 +53,7 @@ export function PrescriptionsClient({
   customers,
   canDelete,
   initialEditId,
+  initialCustomerId,
   addToSale,
 }: {
   prescriptions: PrescriptionView[];
@@ -47,17 +61,23 @@ export function PrescriptionsClient({
   canDelete: boolean;
   // Opened from a customer's history to correct this one.
   initialEditId?: string;
+  // Opened from a customer's page to add prescriptions for them.
+  initialCustomerId?: string;
   // Opened from an invoice to put a prescription on it after the event.
   addToSale?: { id: string; invoiceNo: string; customerId: string; customerName: string } | null;
 }) {
   const { showToast } = useApp();
   const router = useRouter();
   const initialEdit = initialEditId ? prescriptions.find((p) => p.id === initialEditId) ?? null : null;
-  const [selectedCustomer, setSelectedCustomer] = useState(initialEdit?.customerId ?? addToSale?.customerId ?? "");
-  const [customerSearch, setCustomerSearch] = useState(initialEdit?.customerName ?? addToSale?.customerName ?? "");
+  const initialCustomer = !initialEdit && !addToSale && initialCustomerId ? customers.find((c) => c.id === initialCustomerId) ?? null : null;
+  const [selectedCustomer, setSelectedCustomer] = useState(initialEdit?.customerId ?? addToSale?.customerId ?? initialCustomer?.id ?? "");
+  const [customerSearch, setCustomerSearch] = useState(initialEdit?.customerName ?? addToSale?.customerName ?? initialCustomer?.name ?? "");
   const [saving, setSaving] = useState(false);
-  const [isOwn, setIsOwn] = useState(initialEdit?.isOwnPrescription ?? false);
-  const [form, setForm] = useState(() => (initialEdit ? formFromRx(initialEdit) : { ...empty }));
+  const [drafts, setDrafts] = useState<Draft[]>(() => [
+    initialEdit ? newDraft({ ...formFromRx(initialEdit), isOwn: initialEdit.isOwnPrescription }) : newDraft(),
+  ]);
+  const [testDay, setTestDay] = useState(todayLocal);
+  const editDraft = (key: string, patch: Partial<Draft>) => setDrafts((list) => list.map((d) => (d.key === key ? { ...d, ...patch } : d)));
   // Set while the form is correcting an existing prescription.
   const [editing, setEditing] = useState<PrescriptionView | null>(initialEdit);
   const [deleting, setDeleting] = useState<PrescriptionView | null>(null);
@@ -105,23 +125,23 @@ export function PrescriptionsClient({
   }, [prescriptions, listSearch, customerById]);
 
   const num = parseRxText;
-  const values = () => ({
-    rightSph: num(form.rightSph), rightCyl: num(form.rightCyl), rightAxis: num(form.rightAxis), rightPd: num(form.rightPd), rightAdd: num(form.rightAdd),
-    leftSph: num(form.leftSph), leftCyl: num(form.leftCyl), leftAxis: num(form.leftAxis), leftPd: num(form.leftPd), leftAdd: num(form.leftAdd),
-    ...rxFormTexts(form),
-    label: form.label.trim(),
-    notes: form.notes,
-    isOwnPrescription: isOwn,
+  const values = (d: Draft) => ({
+    rightSph: num(d.rightSph), rightCyl: num(d.rightCyl), rightAxis: num(d.rightAxis), rightPd: num(d.rightPd), rightAdd: num(d.rightAdd),
+    leftSph: num(d.leftSph), leftCyl: num(d.leftCyl), leftAxis: num(d.leftAxis), leftPd: num(d.leftPd), leftAdd: num(d.leftAdd),
+    ...rxFormTexts(d),
+    label: d.label.trim(),
+    notes: d.notes,
+    isOwnPrescription: d.isOwn,
   });
 
   const resetForm = () => {
-    setForm({ ...empty });
-    setIsOwn(false);
+    setDrafts([newDraft()]);
+    setTestDay(todayLocal());
     setSelectedCustomer("");
     setCustomerSearch("");
     setEditing(null);
-    // Opened from elsewhere: drop the link's ?edit= / ?addTo= so a reload is a clean form.
-    if (initialEditId || addToSale) router.replace("/dashboard/prescriptions", { scroll: false });
+    // Opened from elsewhere: drop the link's ?edit= / ?addTo= / ?customer= so a reload is a clean form.
+    if (initialEditId || addToSale || initialCustomerId) router.replace("/dashboard/prescriptions", { scroll: false });
   };
 
   // A customer who isn't on file yet is added right here and picked for this prescription.
@@ -147,9 +167,14 @@ export function PrescriptionsClient({
       [formatEyeValue("Sph", e), e.cyl || e.cylText ? `/ ${formatEyeValue("Cyl", e)}` : "", e.axis ? `× ${e.axis}` : ""].filter(Boolean).join(" ");
     return `R ${eye(rx.rightEye)}  ·  L ${eye(rx.leftEye)}`;
   };
+  // Fills the last prescription being typed if it's still empty, otherwise
+  // starts another one from it.
   const copyReading = (rx: PrescriptionView) => {
-    setForm({ ...formFromRx(rx), notes: rx.notesHidden ? "" : rx.notes });
-    setIsOwn(rx.isOwnPrescription);
+    const filled = { ...formFromRx(rx), notes: rx.notesHidden ? "" : rx.notes, isOwn: rx.isOwnPrescription };
+    setDrafts((list) => {
+      const last = list[list.length - 1];
+      return isBlank(last) ? [...list.slice(0, -1), { ...last, ...filled }] : [...list, newDraft(filled)];
+    });
     showToast(`Filled in from the reading of ${formatDate(rx.date)} — change what's different, then save`, "info");
   };
 
@@ -157,8 +182,7 @@ export function PrescriptionsClient({
     setEditing(rx);
     setSelectedCustomer(rx.customerId);
     setCustomerSearch(rx.customerName);
-    setIsOwn(rx.isOwnPrescription);
-    setForm(formFromRx(rx));
+    setDrafts([newDraft({ ...formFromRx(rx), isOwn: rx.isOwnPrescription })]);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
@@ -172,17 +196,23 @@ export function PrescriptionsClient({
       showToast("Select a customer first", "error");
       return;
     }
+    // An extra prescription box left empty is dropped rather than saved blank.
+    const toSave = drafts.length > 1 ? drafts.filter((d) => !isBlank(d)) : drafts;
+    if (toSave.length === 0) {
+      showToast("Type in the prescription first", "error");
+      return;
+    }
     setSaving(true);
     try {
       if (editing && asNew) {
-        const res = await createPrescription({ customerId: editing.customerId, ...values() });
+        const res = await createPrescription({ customerId: editing.customerId, ...values(drafts[0]) });
         if (!res.ok) {
           showToast(res.error, "error");
           return;
         }
         showToast(`New prescription saved for ${editing.customerName} — the one from ${formatDate(editing.date)} is kept`, "success");
       } else if (editing) {
-        const res = await updatePrescription(editing.id, values());
+        const res = await updatePrescription(editing.id, values(drafts[0]));
         if (!res.ok) {
           showToast(res.error, "error");
           return;
@@ -190,18 +220,21 @@ export function PrescriptionsClient({
         showToast(`${editing.customerName}'s prescription updated`, "success");
       } else {
         // Added to an invoice that already exists, when that's where this started.
-        const res = await createPrescription({ customerId: selectedCustomer, saleId: addToSale?.id, ...values() });
+        const res = await createPrescriptions({
+          customerId: selectedCustomer, saleId: addToSale?.id, date: testDay, prescriptions: toSave.map(values),
+        });
         if (!res.ok) {
           showToast(res.error, "error");
           return;
         }
         const who = customerById.get(selectedCustomer)?.name ?? customerSearch;
+        const what = toSave.length > 1 ? `${toSave.length} prescriptions` : "Prescription";
         showToast(
           addToSale
             ? res.attachedCustomer
-              ? `Prescription added to ${addToSale.invoiceNo} — the invoice is now on ${who}`
-              : `Prescription added to ${addToSale.invoiceNo}`
-            : "Prescription saved",
+              ? `${what} added to ${addToSale.invoiceNo} — the invoice is now on ${who}`
+              : `${what} added to ${addToSale.invoiceNo}`
+            : `${what} saved for ${who}`,
           "success",
         );
       }
@@ -319,8 +352,53 @@ export function PrescriptionsClient({
             </div>
           )}
 
-          <div className="mb-4 -mx-1.5">
-            <RxEntryTable values={form} onChange={(key, value) => setForm((p) => ({ ...p, [key]: value }))} />
+          {!editing && (
+            <div className="mb-4">
+              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Date of the eye test</label>
+              <input type="date" value={testDay} max={todayLocal()} onChange={(e) => setTestDay(e.target.value || todayLocal())}
+                className="w-full sm:w-48 px-3 py-2 glass-input text-sm" />
+              {testDay !== todayLocal() && (
+                <p className="text-[10px] text-muted-foreground mt-1">{`An older slip: it goes into their history on ${formatDate(testDay)}.`}</p>
+              )}
+            </div>
+          )}
+
+          <div className="space-y-4 mb-4">
+            {drafts.map((d, i) => (
+              <div key={d.key} className={drafts.length > 1 ? "p-3 rounded-xl border border-border space-y-3" : "space-y-4"}>
+                {drafts.length > 1 && (
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs font-semibold">{`Prescription ${i + 1}${d.label.trim() ? ` — ${d.label.trim()}` : ""}`}</p>
+                    <button type="button" onClick={() => setDrafts((list) => list.filter((x) => x.key !== d.key))}
+                      title="Remove this prescription" className="p-1 rounded-md hover:bg-surface-hover cursor-pointer">
+                      <X className="w-3.5 h-3.5 text-destructive" />
+                    </button>
+                  </div>
+                )}
+
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Whose eyes / what for</label>
+                  <input type="text" value={d.label} onChange={(e) => editDraft(d.key, { label: e.target.value })}
+                    className="w-full px-4 py-2 glass-input text-sm"
+                    placeholder={drafts.length > 1 ? `e.g. ${i === 0 ? "Distance" : i === 1 ? "Reading" : "a family member's name"}` : "Optional — “distance”, “reading”, or a family member's name"} />
+                </div>
+
+                <div className="-mx-1.5">
+                  <RxEntryTable values={d} onChange={(key, value) => editDraft(d.key, { [key]: value })} />
+                </div>
+
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Notes</label>
+                  <textarea value={d.notes} onChange={(e) => editDraft(d.key, { notes: e.target.value })}
+                    rows={2} className="w-full px-4 py-2 glass-input text-sm resize-none" placeholder="Any additional notes..." />
+                </div>
+
+                <label className="flex items-center gap-2 text-xs font-medium cursor-pointer">
+                  <input type="checkbox" checked={d.isOwn} onChange={(e) => editDraft(d.key, { isOwn: e.target.checked })} className="rounded" />
+                  Own Prescription — customer brought this from outside
+                </label>
+              </div>
+            ))}
           </div>
 
           <p className="text-[11px] text-muted-foreground -mt-2 mb-4">
@@ -328,22 +406,13 @@ export function PrescriptionsClient({
             in the box and pick ABC for words like Plano.
           </p>
 
-          <div className="mb-4">
-            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Whose eyes / what for</label>
-            <input type="text" value={form.label} onChange={(e) => setForm((p) => ({ ...p, label: e.target.value }))}
-              className="w-full px-4 py-2 glass-input text-sm" placeholder="Optional — a family member's name, or “reading”" />
-          </div>
-
-          <div className="mb-4">
-            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Notes</label>
-            <textarea value={form.notes} onChange={(e) => setForm((p) => ({ ...p, notes: e.target.value }))}
-              rows={2} className="w-full px-4 py-2 glass-input text-sm resize-none" placeholder="Any additional notes..." />
-          </div>
-
-          <label className="flex items-center gap-2 text-xs font-medium mb-4 cursor-pointer">
-            <input type="checkbox" checked={isOwn} onChange={(e) => setIsOwn(e.target.checked)} className="rounded" />
-            Own Prescription — customer brought this from outside
-          </label>
+          {!editing && (
+            <button type="button" onClick={() => setDrafts((list) => [...list, newDraft()])}
+              className="w-full mb-4 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-primary/10 text-primary text-xs font-semibold hover:bg-primary/15 transition-colors cursor-pointer">
+              <Plus className="w-3.5 h-3.5" />
+              {`Add another prescription${selectedCustomer ? ` for ${customerById.get(selectedCustomer)?.name || customerSearch}` : ""}`}
+            </button>
+          )}
 
           {editingOlder ? (
             <div className="space-y-2">
@@ -364,7 +433,7 @@ export function PrescriptionsClient({
             <button onClick={() => handleSave()} disabled={saving}
               className="w-full flex items-center justify-center gap-2 py-2.5 bg-primary text-white rounded-xl text-sm font-medium hover:bg-primary-hover transition-colors disabled:opacity-60">
               {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-              {editing ? "Save Changes" : "Save Prescription"}
+              {editing ? "Save Changes" : drafts.length > 1 ? `Save ${drafts.length} prescriptions` : "Save Prescription"}
             </button>
           )}
         </div>

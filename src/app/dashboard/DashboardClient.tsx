@@ -1,148 +1,56 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import type { DashboardData } from "@/lib/data";
 import { formatCurrency, formatDate } from "@/lib/utils/format";
-import { paymentStatusChipClass } from "@/lib/constants";
-import {
-  DollarSign, FileText, AlertTriangle, TrendingUp,
-  Clock, ArrowUpRight, ArrowDownRight,
-} from "lucide-react";
+import { orderStatusChipClass, paymentStatusChipClass } from "@/lib/constants";
+import { AlertTriangle, Clock, FlaskConical, PackageCheck, Timer, ArrowRight } from "lucide-react";
 import { AnimatedCounter } from "@/components/ui/AnimatedCounter";
 
-function MiniAreaChart({ data, height = 200 }: { data: { label: string; value: number }[]; height?: number }) {
-  const lineRef = useRef<SVGPolylineElement>(null);
-  const [ready, setReady] = useState(false);
-
-  useEffect(() => {
-    const el = lineRef.current;
-    if (!el) return;
-    const len = el.getTotalLength();
-    el.style.strokeDasharray = `${len}`;
-    el.style.strokeDashoffset = `${len}`;
-    requestAnimationFrame(() => {
-      el.style.transition = "stroke-dashoffset 1.5s ease-out";
-      el.style.strokeDashoffset = "0";
-    });
-    const t = setTimeout(() => setReady(true), 200);
-    return () => clearTimeout(t);
-  }, [data]);
-
-  if (data.length === 0) {
-    return <div className="flex items-center justify-center text-sm text-muted-foreground" style={{ height }}>No sales recorded yet</div>;
-  }
-  const max = Math.max(...data.map((d) => d.value), 1);
-  const w = 600;
-  const h = height;
-  const pad = 30;
-  const points = data.map((d, i) => ({
-    x: pad + (data.length === 1 ? 0.5 : i / (data.length - 1)) * (w - pad * 2),
-    y: h - pad - (d.value / max) * (h - pad * 2),
-  }));
-  const line = points.map((p) => `${p.x},${p.y}`).join(" ");
-  const area = `${points[0].x},${h - pad} ${line} ${points[points.length - 1].x},${h - pad}`;
-
-  return (
-    <svg viewBox={`0 0 ${w} ${h}`} className="w-full" style={{ height }}>
-      <defs>
-        <linearGradient id="areaFill" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#6d5ef0" stopOpacity={0.2} />
-          <stop offset="100%" stopColor="#6d5ef0" stopOpacity={0.02} />
-        </linearGradient>
-      </defs>
-      {[0, 0.25, 0.5, 0.75, 1].map((t) => (
-        <line key={t} x1={pad} x2={w - pad} y1={h - pad - t * (h - pad * 2)} y2={h - pad - t * (h - pad * 2)}
-          stroke="rgba(0,0,0,0.06)" strokeDasharray="4 4" />
-      ))}
-      <polygon points={area} fill="url(#areaFill)"
-        style={{ opacity: ready ? 1 : 0, transition: "opacity 0.8s ease-out 0.6s" }} />
-      <polyline ref={lineRef} points={line} fill="none" stroke="#6d5ef0" strokeWidth={2.5} strokeLinejoin="round" />
-      {points.map((p, i) => (
-        <circle key={i} cx={p.x} cy={p.y} r={3} fill="#6d5ef0"
-          style={{ opacity: ready ? 1 : 0, transform: ready ? "scale(1)" : "scale(0)", transformOrigin: `${p.x}px ${p.y}px`, transition: `all 0.3s ease-out ${0.8 + i * 0.04}s` }} />
-      ))}
-      {data.map((d, i) => (
-        <text key={i} x={points[i].x} y={h - 8} textAnchor="middle" fontSize={9} fill="rgba(0,0,0,0.4)"
-          style={{ opacity: ready ? 1 : 0, transition: `opacity 0.3s ease-out ${0.5 + i * 0.03}s` }}>
-          {d.label}
-        </text>
-      ))}
-    </svg>
-  );
-}
-
-function HBarChart({ data }: { data: { label: string; value: number }[] }) {
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => { const t = setTimeout(() => setMounted(true), 100); return () => clearTimeout(t); }, []);
-  if (data.length === 0) {
-    return <div className="flex items-center justify-center text-sm text-muted-foreground py-12">No brand sales yet</div>;
-  }
-  const max = Math.max(...data.map((d) => d.value), 1);
-  return (
-    <div className="space-y-2.5">
-      {data.map((d, i) => (
-        <div key={d.label} className="flex items-center gap-3"
-          style={{ opacity: mounted ? 1 : 0, transform: mounted ? "translateX(0)" : "translateX(-12px)", transition: `all 0.4s ease-out ${i * 0.1}s` }}>
-          <span className="text-[11px] text-muted-foreground w-20 text-right truncate">{d.label}</span>
-          <div className="flex-1 h-5 bg-surface rounded-full overflow-hidden">
-            <div className="h-full bg-primary rounded-full"
-              style={{ width: mounted ? `${(d.value / max) * 100}%` : "0%", transition: `width 0.8s ease-out ${0.3 + i * 0.1}s` }} />
-          </div>
-          <span className="text-[11px] font-medium w-16 text-right">{formatCurrency(d.value)}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 export function DashboardClient({ data }: { data: DashboardData }) {
-  const kpis = [
+  const ready = data.readyToPickUp + data.readyToDeliver;
+  // The day's work at a glance. The money figures -- sales, invoiced and
+  // outstanding -- are on Analytics, which only the owner sees.
+  const tiles = [
     {
-      label: "Today's Sales", raw: data.todaySales, format: formatCurrency, change: "today", up: true, icon: DollarSign, color: "text-success",
-      // Every payment made today counts, including balances paid off on older invoices.
-      note: `${data.todayFromEarlier > 0 ? `${formatCurrency(data.todayFromEarlier)} of it paid on earlier invoices · ` : ""}New invoices today: ${formatCurrency(data.todayInvoiced)}`,
+      label: "Orders in process", value: data.ordersInProcess, icon: Timer, color: "text-warning",
+      note: "Glasses being made up", href: "/dashboard/sales?order=process",
     },
-    { label: "Total Invoices", raw: data.totalInvoices, format: (n: number) => n.toString(), change: "all-time", up: true, icon: FileText, color: "text-primary", note: "" },
-    { label: "Outstanding", raw: data.outstanding, format: formatCurrency, change: "due", up: false, icon: TrendingUp, color: "text-warning", note: "" },
-    { label: "Low Stock Items", raw: data.lowStockCount, format: (n: number) => n.toString(), change: `${data.lowStockCount} items`, up: false, icon: AlertTriangle, color: "text-destructive", note: "" },
+    {
+      label: "Ready to pick up / deliver", value: ready, icon: PackageCheck, color: "text-success",
+      note: ready ? `${data.readyToPickUp} to pick up · ${data.readyToDeliver} to deliver` : "Nothing waiting", href: "/dashboard/sales?order=ready",
+    },
+    {
+      label: "Jobs at the lab", value: data.labJobsOut, icon: FlaskConical, color: "text-primary",
+      note: "Sent out, not back yet", href: "/dashboard/lab-orders",
+    },
+    {
+      label: "Low Stock Items", value: data.lowStockCount, icon: AlertTriangle, color: "text-destructive",
+      note: "At or below their alert level", href: "/dashboard/monitor",
+    },
   ];
 
   return (
     <div className="space-y-6 animate-fade-in">
       <div>
         <h1 className="text-2xl font-bold tracking-tight text-gradient">Dashboard</h1>
-        <p className="text-sm text-muted-foreground mt-0.5">Overview of your optical store performance</p>
+        <p className="text-sm text-muted-foreground mt-0.5">Orders, lab jobs and stock at a glance</p>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 stagger-rise">
-        {kpis.map((kpi) => (
-          <div key={kpi.label} className="glass-card p-5">
+        {tiles.map((t) => (
+          <Link key={t.label} href={t.href} className="glass-card p-5 group hover:ring-1 hover:ring-primary/30 transition-shadow">
             <div className="flex items-start justify-between mb-3">
-              <div className={`w-9 h-9 rounded-xl bg-surface flex items-center justify-center ${kpi.color}`}>
-                <kpi.icon className="w-4 h-4" />
+              <div className={`w-9 h-9 rounded-xl bg-surface flex items-center justify-center ${t.color}`}>
+                <t.icon className="w-4 h-4" />
               </div>
-              <span className={`flex items-center gap-0.5 text-xs font-medium ${kpi.up ? "text-success" : "text-destructive"}`}>
-                {kpi.up ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
-                {kpi.change}
-              </span>
+              <ArrowRight className="w-3.5 h-3.5 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
             </div>
-            <p className="text-2xl font-bold tracking-tight font-display"><AnimatedCounter value={kpi.raw} format={kpi.format} /></p>
-            <p className="text-xs text-muted-foreground mt-1">{kpi.label}</p>
-            {kpi.note && <p className="text-[11px] font-medium text-success mt-1.5">{kpi.note}</p>}
-          </div>
+            <p className="text-2xl font-bold tracking-tight font-display"><AnimatedCounter value={t.value} format={(n: number) => n.toString()} /></p>
+            <p className="text-xs text-muted-foreground mt-1">{t.label}</p>
+            <p className="text-[11px] text-muted-foreground mt-1.5">{t.note}</p>
+          </Link>
         ))}
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="lg:col-span-2 glass-card p-5">
-          <h3 className="text-sm font-semibold mb-4">Sales Trend</h3>
-          <MiniAreaChart data={data.dailyTrend} height={260} />
-        </div>
-
-        <div className="glass-card p-5">
-          <h3 className="text-sm font-semibold mb-4">Top Brands by Revenue</h3>
-          <HBarChart data={data.topBrands} />
-        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -160,9 +68,10 @@ export function DashboardClient({ data }: { data: DashboardData }) {
                 </div>
                 <div className="text-right">
                   <p className="text-sm font-semibold">{formatCurrency(sale.total)}</p>
-                  <span className={`chip ${paymentStatusChipClass(sale.paymentStatus)}`}>
-                    {sale.paymentStatus}
-                  </span>
+                  <div className="flex items-center justify-end gap-1 mt-0.5">
+                    {sale.orderStatus && <span className={`chip ${orderStatusChipClass(sale.orderStatus)}`}>{sale.orderStatus}</span>}
+                    <span className={`chip ${paymentStatusChipClass(sale.paymentStatus)}`}>{sale.paymentStatus}</span>
+                  </div>
                 </div>
               </div>
             ))}
@@ -186,7 +95,7 @@ export function DashboardClient({ data }: { data: DashboardData }) {
                 }`} />
                 <div className="flex-1">
                   <p className="text-sm">{r.text}</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">{r.date}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">{r.date === "Now" ? r.date : formatDate(r.date)}</p>
                 </div>
               </div>
             ))}

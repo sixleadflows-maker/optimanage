@@ -44,6 +44,8 @@ export interface SalePrescriptionInput extends Partial<RxTextColumns>, RxLensFie
 export interface PersistSaleInput {
   items: SaleCoreItem[];
   customerId?: string | null;
+  // A shop order whose glasses are still to be made up: it starts "In process".
+  inProcess?: boolean;
   paymentMethod: string;
   // Paid partly by one method and partly by another: the parts add up to what
   // is paid now (the whole total, or the advance).
@@ -396,7 +398,8 @@ export async function persistSale(input: PersistSaleInput, meta: PersistSaleMeta
         fulfillmentType: meta.fulfillmentType ?? null,
         deliveryAddress: meta.deliveryAddress ?? "",
         deliveryFee,
-        onlineOrderStatus: meta.source === "ONLINE" ? "PROCESSING" : null,
+        // Online orders are always made up; a shop order only when the till said so.
+        onlineOrderStatus: meta.source === "ONLINE" || input.inProcess ? "PROCESSING" : null,
         clientRef: meta.clientRef || null,
         offlineRef: meta.offlineRef ?? "",
         stockDeducted: deductStock,

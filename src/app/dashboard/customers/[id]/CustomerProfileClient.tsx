@@ -15,7 +15,7 @@ import { shareNumber, allNumbers } from "@/lib/utils/phone";
 import { CollectPaymentModal, EditInvoiceModal, EditPaymentModal, type EditorCustomer, type EditorStaff } from "@/app/dashboard/sales/InvoiceEditor";
 import { InvoiceDetails } from "@/components/invoice/InvoiceDetails";
 import { CustomerFormModal } from "../CustomerFormModal";
-import { ArrowLeft, MessageCircle, Bell, Eye, EyeOff, RefreshCw, Phone, Mail, MapPin, Trash2, Loader2, Pencil, FilePlus, Glasses, ChevronDown, Wallet, Users } from "lucide-react";
+import { ArrowLeft, MessageCircle, Bell, Eye, EyeOff, RefreshCw, Phone, Mail, MapPin, Trash2, Loader2, Pencil, FilePlus, Glasses, ChevronDown, Wallet, Users, Plus } from "lucide-react";
 import Link from "next/link";
 
 export function CustomerProfileClient({
@@ -215,10 +215,18 @@ export function CustomerProfileClient({
 
         <div className="lg:col-span-2 space-y-4">
           <div className="glass-card p-5">
-            <h3 className="text-sm font-semibold">Prescription History</h3>
-            <p className="text-[11px] text-muted-foreground mt-0.5 mb-4">
-              Every prescription on file, newest first, each with the date it was taken. A new one never replaces an older one.
-            </p>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold">Prescription History</h3>
+                <p className="text-[11px] text-muted-foreground mt-0.5 mb-4">
+                  Every prescription on file, newest visit first, each with the date it was taken. A new one never replaces an older one.
+                </p>
+              </div>
+              <Link href={`/dashboard/prescriptions?customer=${customer.id}`}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/10 text-primary text-xs font-semibold hover:bg-primary/15 transition-colors flex-shrink-0">
+                <Plus className="w-3.5 h-3.5" /> Add prescription
+              </Link>
+            </div>
             {customer.prescriptions.length === 0 ? (
               <p className="text-sm text-muted-foreground text-center py-6">No prescriptions on file</p>
             ) : (

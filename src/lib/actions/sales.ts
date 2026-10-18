@@ -18,6 +18,7 @@ import type { PaymentPart } from "@/lib/sales/paymentSplit";
 import { customersWithPhone } from "@/lib/trash/heldValues";
 import { sameName } from "@/lib/utils/phone";
 import { unexpectedFailure } from "@/lib/utils/serverFailure";
+import { ORDER_STATUSES, type OrderStatusValue } from "@/lib/constants";
 
 
 export interface CartItemInput {
@@ -81,6 +82,9 @@ export interface CreateSaleInput {
   // A customer added at the till while offline, created (or matched on phone)
   // when the bill syncs.
   newCustomer?: { name: string; phone: string; phone2?: string };
+  // The glasses are still to be made up: the order starts "In process".
+  // Left out (older tills) or false: handed over at the counter, no status.
+  inProcess?: boolean;
 }
 
 // An old invoice is one dated this far before now; anything closer is just the
@@ -391,19 +395,22 @@ export async function updateSalePayment(input: UpdatePaymentInput) {
   }
 }
 
-export type OnlineOrderStatusValue =
-  | "PROCESSING"
-  | "READY_FOR_PICKUP"
-  | "OUT_FOR_DELIVERY"
-  | "COMPLETED"
-  | "CANCELLED";
-
-export async function updateOnlineOrderStatus(saleId: string, status: OnlineOrderStatusValue) {
+/**
+ * Moves an order along: in process, ready to pick up or deliver, delivered.
+ * Null takes the status off (a shop order that was handed over there and then).
+ * Anyone at the counter can do it.
+ */
+export async function updateOrderStatus(saleId: string, status: OrderStatusValue | null) {
   const session = await auth();
-  if (!session?.user) throw new Error("Unauthorized");
-  await db.sale.update({ where: { id: saleId }, data: { onlineOrderStatus: status } });
+  if (!session?.user) return { ok: false as const, error: "You've been signed out — sign in again" };
+  if (status !== null && !ORDER_STATUSES.some((o) => o.value === status)) return { ok: false as const, error: "Pick a status from the list" };
+  const updated = await db.sale.updateMany({ where: { id: saleId }, data: { onlineOrderStatus: status } });
+  if (updated.count === 0) return { ok: false as const, error: "This invoice has been deleted" };
   revalidatePath("/dashboard/sales");
-  return { ok: true };
+  revalidatePath("/dashboard");
+  revalidatePath("/dashboard/monitor");
+  revalidatePath("/dashboard/customers", "layout");
+  return { ok: true as const };
 }
 
 // Deleting an invoice is Owner-only -- it reverses stock and customer

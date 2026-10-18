@@ -4,44 +4,37 @@ import { useState } from "react";
 import type { DashboardData, SaleView } from "@/lib/data";
 import type { Product } from "@/lib/mock/types";
 import { formatCurrency, formatDate, formatDateTime } from "@/lib/utils/format";
-import { paymentStatusChipClass } from "@/lib/constants";
+import { orderStatusChipClass, paymentStatusChipClass } from "@/lib/constants";
 import {
-  DollarSign, FileText, TrendingUp, AlertTriangle,
-  ChevronDown, ChevronUp, PackageX, Receipt,
+  AlertTriangle, ChevronDown, ChevronUp, PackageX, Receipt, Timer, PackageCheck, FlaskConical,
 } from "lucide-react";
 import { EmptyState } from "@/components/ui/EmptyState";
 
 export function MonitorClient({
-  dashboard, stockAlerts, sales, canSeeCosts,
+  dashboard, stockAlerts, sales,
 }: {
   dashboard: DashboardData;
   stockAlerts: Product[];
   sales: SaleView[];
-  canSeeCosts: boolean;
 }) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  const totalRevenue = sales.reduce((sum, s) => sum + s.total, 0);
-  const marginPct = totalRevenue > 0 ? (dashboard.totalProfit / totalRevenue) * 100 : 0;
-
+  // Sales, invoiced, outstanding and profit are on Analytics (owner only).
   const kpis = [
+    { label: "Orders in process", value: dashboard.ordersInProcess.toString(), icon: Timer, color: "text-warning", note: "" },
     {
-      label: "Today's Sales", value: formatCurrency(dashboard.todaySales), icon: DollarSign, color: "text-success",
-      // Every payment made today counts, including balances paid off on older invoices.
-      note: `${dashboard.todayFromEarlier > 0 ? `${formatCurrency(dashboard.todayFromEarlier)} of it paid on earlier invoices · ` : ""}New invoices today: ${formatCurrency(dashboard.todayInvoiced)}`,
+      label: "Ready to pick up / deliver", value: (dashboard.readyToPickUp + dashboard.readyToDeliver).toString(), icon: PackageCheck, color: "text-success",
+      note: `${dashboard.readyToPickUp} to pick up · ${dashboard.readyToDeliver} to deliver`,
     },
-    { label: "Total Invoices", value: dashboard.totalInvoices.toString(), icon: FileText, color: "text-primary", note: "" },
-    { label: "Outstanding Balance", value: formatCurrency(dashboard.outstanding), icon: TrendingUp, color: "text-warning", note: "" },
-    ...(canSeeCosts
-      ? [{ label: "Total Profit", value: `${formatCurrency(dashboard.totalProfit)} · ${marginPct.toFixed(0)}%`, icon: TrendingUp, color: "text-success", note: "" }]
-      : []),
+    { label: "Jobs at the lab", value: dashboard.labJobsOut.toString(), icon: FlaskConical, color: "text-primary", note: "" },
+    { label: "Stock alerts", value: stockAlerts.length.toString(), icon: AlertTriangle, color: "text-destructive", note: "" },
   ];
 
   return (
     <div className="space-y-6 animate-fade-in">
       <div>
         <h1 className="text-2xl font-bold tracking-tight text-gradient">Monitor</h1>
-        <p className="text-sm text-muted-foreground mt-0.5">Read-only overview — sales, profit, stock alerts, and invoices</p>
+        <p className="text-sm text-muted-foreground mt-0.5">Read-only overview — orders, stock alerts and invoices</p>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 stagger-rise">
@@ -102,6 +95,7 @@ export function MonitorClient({
                       <p className="text-xs text-muted-foreground">{formatDate(sale.date)}</p>
                     </div>
                     <div className="flex items-center gap-3">
+                      {sale.orderStatus && <span className={`chip ${orderStatusChipClass(sale.orderStatus)}`}>{sale.orderStatus}</span>}
                       <span className={`chip ${paymentStatusChipClass(sale.paymentStatus)}`}>{sale.paymentStatus}</span>
                       <span className="text-sm font-semibold">{formatCurrency(sale.total)}</span>
                       {isOpen ? <ChevronUp className="w-3.5 h-3.5 text-muted-foreground" /> : <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />}

@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { auth } from "@/lib/auth";
-import { SNAPSHOT_TRASH_KINDS, TRASH_PURGED_AT, TRASH_RETENTION_DAYS, type SnapshotTrashKind, type TrashKind } from "@/lib/constants";
+import { OWNER_ONLY_TRASH, SNAPSHOT_TRASH_KINDS, TRASH_PURGED_AT, TRASH_RETENTION_DAYS, type SnapshotTrashKind, type TrashKind } from "@/lib/constants";
 import { restoreSnapshot, TrashError } from "@/lib/trash/snapshots";
 
 const TOO_OLD = "This was deleted over 30 days ago and can no longer be restored";
@@ -31,6 +31,7 @@ const PAGES: Record<TrashKind, string[]> = {
   payment: ["/dashboard", "/dashboard/sales", "/dashboard/customers", "/dashboard/cash"],
   bankDeposit: ["/dashboard/cash"],
   customerCredit: ["/dashboard/customers", "/dashboard/cash", "/dashboard/pos"],
+  salaryEntry: ["/dashboard/salaries", "/dashboard/cash", "/dashboard/analytics"],
 };
 
 function refresh(kind: TrashKind) {
@@ -63,6 +64,9 @@ export async function restoreItem(kind: TrashKind, id: string) {
     // same tier as deleting one.
     if (kind === "invoice" && session.user.role !== "OWNER") {
       return { ok: false as const, error: "Only the owner can restore an invoice" };
+    }
+    if ((OWNER_ONLY_TRASH as readonly string[]).includes(kind) && session.user.role !== "OWNER") {
+      return { ok: false as const, error: "Only the owner can restore this" };
     }
     try {
       await restoreSnapshot(id);

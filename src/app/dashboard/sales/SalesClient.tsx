@@ -11,8 +11,9 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { PrintPortal } from "@/components/ui/PrintPortal";
 import { createReturn, deleteReturn, updateReturn } from "@/lib/actions/returns";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
-import { updateOnlineOrderStatus, deleteSale, type OnlineOrderStatusValue } from "@/lib/actions/sales";
-import { PAYMENT_STATUS, paymentStatusChipClass } from "@/lib/constants";
+import { deleteSale } from "@/lib/actions/sales";
+import { PAYMENT_STATUS, paymentStatusChipClass, isReadyStatus } from "@/lib/constants";
+import { OrderStatusControl } from "@/components/invoice/OrderStatusControl";
 import { primaryMethod } from "@/lib/sales/paymentSplit";
 import { paymentsOnDays, type PaymentOnDay } from "@/lib/sales/received";
 import { ThermalReceipt, A4Invoice, invoiceFromSale, type ShopDetails } from "@/components/invoice/InvoiceDocuments";
@@ -21,13 +22,19 @@ import { CollectPaymentModal, EditInvoiceModal, EditPaymentModal, type EditorCus
 import { matchesSearch } from "@/lib/utils/search";
 
 const REFUND_METHODS = ["Cash", "Card", "Bank Transfer", "JazzCash"];
-const ONLINE_ORDER_STATUSES: { value: OnlineOrderStatusValue; label: string }[] = [
-  { value: "PROCESSING", label: "Processing" },
-  { value: "READY_FOR_PICKUP", label: "Ready for Pickup" },
-  { value: "OUT_FOR_DELIVERY", label: "Out for Delivery" },
-  { value: "COMPLETED", label: "Completed" },
-  { value: "CANCELLED", label: "Cancelled" },
-];
+// The order filter: in process, ready (to pick up or deliver), delivered.
+const ORDER_FILTERS = [
+  { key: "all", label: "All orders" },
+  { key: "process", label: "In process" },
+  { key: "ready", label: "Ready" },
+  { key: "delivered", label: "Delivered" },
+] as const;
+type OrderFilter = (typeof ORDER_FILTERS)[number]["key"];
+const inOrderFilter = (s: SaleView, f: OrderFilter) =>
+  f === "all" ||
+  (f === "process" && s.orderStatus === "In process") ||
+  (f === "ready" && isReadyStatus(s.orderStatus)) ||
+  (f === "delivered" && s.orderStatus === "Delivered");
 
 // The shop's own calendar day for a sale (not the UTC one), so a late-evening
 // sale falls on the day it was actually made.
@@ -37,7 +44,7 @@ function localDay(isoDateTime: string) {
 }
 
 export function SalesClient({
-  sales, isOwner, canEdit, customers, staff, shop,
+  sales, isOwner, canEdit, customers, staff, shop, initialOrderFilter,
 }: {
   sales: SaleView[];
   isOwner: boolean;
@@ -45,8 +52,13 @@ export function SalesClient({
   customers: EditorCustomer[];
   staff: EditorStaff[];
   shop: ShopDetails;
+  // From the dashboard's "In process" / "Ready" counts (?order=process).
+  initialOrderFilter?: string;
 }) {
   const [search, setSearch] = useState("");
+  const [orderFilter, setOrderFilter] = useState<OrderFilter>(
+    ORDER_FILTERS.find((f) => f.key === initialOrderFilter)?.key ?? "all",
+  );
   const [statusFilter, setStatusFilter] = useState<string>("All");
   const [sourceFilter, setSourceFilter] = useState<string>("All");
   const [fromDate, setFromDate] = useState("");
@@ -177,7 +189,7 @@ export function SalesClient({
       // In the chosen dates if it was made then -- or paid on then: a balance
       // paid off today brings an older invoice into today's list.
       const matchesDates = !hasDates || inDates(localDay(s.dateTime)) || paidInDates(s).length > 0;
-      return found && matchesStatus && matchesSource && matchesDates;
+      return found && matchesStatus && matchesSource && matchesDates && inOrderFilter(s, orderFilter);
     });
 
     result.sort((a, b) => {
@@ -195,7 +207,7 @@ export function SalesClient({
 
     return result;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sales, search, statusFilter, sourceFilter, fromDate, toDate, sortBy, paidOn]);
+  }, [sales, search, statusFilter, sourceFilter, fromDate, toDate, sortBy, paidOn, orderFilter]);
 
   const setRange = (range: "today" | "month" | "all") => {
     const today = localDay(new Date().toISOString());
@@ -206,22 +218,7 @@ export function SalesClient({
 
   const oldestSale = sales.length > 0 ? sales[sales.length - 1] : null;
 
-  const handleStatusChange = async (saleId: string, status: OnlineOrderStatusValue) => {
-    try {
-      await updateOnlineOrderStatus(saleId, status);
-      router.refresh();
-    } catch (e) {
-      showToast(e instanceof Error ? e.message : "Could not update order status", "error");
-    }
-  };
-
-  // Sales are the payments made in the chosen dates (all payments when no dates
-  // are chosen); invoiced is the bills made in them, paid or not.
-  const totalSales = hasDates
-    ? filtered.reduce((sum, s) => sum + paidInDates(s).reduce((t, p) => t + p.amount, 0), 0)
-    : filtered.reduce((sum, s) => sum + s.paid, 0);
-  const totalInvoiced = filtered.filter((s) => !hasDates || inDates(localDay(s.dateTime))).reduce((sum, s) => sum + s.total, 0);
-  const totalBalance = filtered.reduce((sum, s) => sum + s.balance, 0);
+  const orderCount = (f: OrderFilter) => sales.filter((s) => inOrderFilter(s, f)).length;
 
   const exportCsv = () => {
     if (filtered.length === 0) { showToast("Nothing to export", "info"); return; }
@@ -256,22 +253,7 @@ export function SalesClient({
         </button>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="glass-card p-4">
-          <p className="text-xs text-muted-foreground">{hasDates ? "Sales — paid in these dates" : "Sales — all payments"}</p>
-          <p className="text-xl font-bold mt-1 text-success">{formatCurrency(totalSales)}</p>
-          <p className="text-[10px] text-muted-foreground mt-0.5">Each payment counts on the day it was made</p>
-        </div>
-        <div className="glass-card p-4">
-          <p className="text-xs text-muted-foreground">{hasDates ? "Invoiced — bills made in these dates" : "Invoiced — all bills"}</p>
-          <p className="text-xl font-bold mt-1">{formatCurrency(totalInvoiced)}</p>
-        </div>
-        <div className="glass-card p-4">
-          <p className="text-xs text-muted-foreground">Outstanding</p>
-          <p className="text-xl font-bold mt-1 text-destructive">{formatCurrency(totalBalance)}</p>
-        </div>
-      </div>
-
+      {/* The sales, invoiced and outstanding totals are on Analytics (owner only). */}
 
       <div className="glass-card p-4">
         <div className="flex flex-col sm:flex-row gap-3 mb-3">
@@ -331,6 +313,18 @@ export function SalesClient({
           </div>
         </div>
 
+        <div className="flex items-center gap-1.5 mb-3 flex-wrap">
+          <span className="text-xs font-medium text-muted-foreground mr-1">Orders</span>
+          {ORDER_FILTERS.map((f) => (
+            <button key={f.key} onClick={() => setOrderFilter(f.key)}
+              className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-all whitespace-nowrap cursor-pointer ${
+                orderFilter === f.key ? "bg-primary text-white" : "bg-surface hover:bg-surface-hover"
+              }`}>
+              {f.key === "all" ? f.label : `${f.label} (${orderCount(f.key)})`}
+            </button>
+          ))}
+        </div>
+
         <div className="flex items-center gap-3 mb-4 flex-wrap">
           <label className="text-xs font-medium text-muted-foreground">Sort by</label>
           <select
@@ -359,7 +353,7 @@ export function SalesClient({
                 <th className="text-center py-3 px-3 text-xs font-medium text-muted-foreground">Status</th>
                 <th className="text-center py-3 px-3 text-xs font-medium text-muted-foreground">Payment</th>
                 <th className="text-center py-3 px-3 text-xs font-medium text-muted-foreground">Source</th>
-                <th className="text-center py-3 px-3 text-xs font-medium text-muted-foreground">Fulfillment</th>
+                <th className="text-center py-3 px-3 text-xs font-medium text-muted-foreground">Order status</th>
                 <th className="text-center py-3 px-3 text-xs font-medium text-muted-foreground">Actions</th>
               </tr>
             </thead>
@@ -402,19 +396,10 @@ export function SalesClient({
                       {sale.source}
                     </span>
                   </td>
-                  <td className="py-3 px-3 text-center">
-                    {sale.source === "Online" ? (
-                      <select
-                        value={sale.onlineOrderStatus ?? "Processing"}
-                        onChange={(e) => handleStatusChange(sale.id, ONLINE_ORDER_STATUSES.find((s) => s.label === e.target.value)!.value)}
-                        className="px-2 py-1 glass-input text-[11px]"
-                      >
-                        {ONLINE_ORDER_STATUSES.map((s) => (
-                          <option key={s.value} value={s.label}>{s.label}</option>
-                        ))}
-                      </select>
-                    ) : (
-                      <span className="text-muted-foreground text-xs">—</span>
+                  <td className="py-3 px-3 text-center whitespace-nowrap">
+                    <OrderStatusControl sale={sale} shopName={shop.name} />
+                    {sale.source === "Online" && sale.fulfillmentType && (
+                      <p className="text-[10px] text-muted-foreground mt-0.5">{`Online · ${sale.fulfillmentType}`}</p>
                     )}
                   </td>
                   <td className="py-3 px-3">

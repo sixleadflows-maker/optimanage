@@ -12,6 +12,7 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import {
   Trash2, RotateCcw, Package, MapPin, UserRound, Users, Loader2, Truck, FlaskConical,
   Receipt, Undo2, Wallet, Eye, ClipboardList, XCircle, Boxes, Banknote, Landmark,
+  HandCoins,
 } from "lucide-react";
 
 const kindMeta: Record<TrashKind, { icon: typeof Package; label: string; plural: string; color: string }> = {
@@ -31,10 +32,11 @@ const kindMeta: Record<TrashKind, { icon: typeof Package; label: string; plural:
   stockAdjustment: { icon: Boxes, label: "Stock change", plural: "Stock changes", color: "bg-warning/10 text-warning" },
   location: { icon: MapPin, label: "Location", plural: "Locations", color: "bg-secondary/10 text-secondary" },
   staff: { icon: UserRound, label: "Staff", plural: "Staff", color: "bg-warning/10 text-warning" },
+  salaryEntry: { icon: HandCoins, label: "Salary entry", plural: "Salary entries", color: "bg-primary/10 text-primary" },
 };
 
 // Restoring these hands back access or money, so only the owner can.
-const OWNER_ONLY_RESTORE: TrashKind[] = ["staff", "invoice"];
+const OWNER_ONLY_RESTORE: TrashKind[] = ["staff", "invoice", "salaryEntry"];
 
 export function TrashClient({ items, isOwner }: { items: TrashItemView[]; isOwner: boolean }) {
   const router = useRouter();

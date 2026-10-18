@@ -126,3 +126,37 @@ export function rxFormTexts(f: {
     leftSphText: rxTextOf(f.leftSph), leftCylText: rxTextOf(f.leftCyl), leftAddText: rxTextOf(f.leftAdd),
   };
 }
+
+/**
+ * Prescriptions in the order a history reads: the latest visit first, and the
+ * prescriptions from one visit -- distance and reading on one slip, or a
+ * family's -- together, in the order they were typed in. Several saved with
+ * one bill share the same moment, so sorting by date alone left them in any
+ * order, reading before distance one day and after it the next.
+ */
+export function rxHistoryOrder<T extends { id: string; customerId: string; saleId: string | null; date: Date; createdAt: Date }>(rows: T[]): T[] {
+  const visit = (r: T) => r.saleId ? `sale:${r.saleId}` : `${r.customerId}:${r.date.toISOString().slice(0, 10)}`;
+  const latest = new Map<string, number>();
+  for (const r of rows) latest.set(visit(r), Math.max(latest.get(visit(r)) ?? 0, r.date.getTime()));
+  return [...rows].sort((a, b) => {
+    const va = visit(a);
+    const vb = visit(b);
+    if (va !== vb) return latest.get(vb)! - latest.get(va)! || va.localeCompare(vb);
+    return a.createdAt.getTime() - b.createdAt.getTime() || a.id.localeCompare(b.id);
+  });
+}
+
+/** A prescription on one line, as on a lab slip: "R -2.00 / -0.50 × 180 ADD +2.50 · L -2.25 / -0.75 × 170". */
+export function rxSummary(p: {
+  rightSph: number; rightCyl: number; rightAxis: number; rightAdd: number;
+  leftSph: number; leftCyl: number; leftAxis: number; leftAdd: number;
+} & Partial<RxTextColumns>): string {
+  const eye = (sph: number, cyl: number, axis: number, add: number, sphText = "", cylText = "", addText = "") =>
+    [
+      formatRxPower(sph, sphText),
+      cyl || cylText.trim() ? `/ ${formatRxPower(cyl, cylText)}` : "",
+      axis ? `× ${axis}` : "",
+      add || addText.trim() ? `ADD ${formatRxPower(add, addText)}` : "",
+    ].filter(Boolean).join(" ");
+  return `R ${eye(p.rightSph, p.rightCyl, p.rightAxis, p.rightAdd, p.rightSphText, p.rightCylText, p.rightAddText)} · L ${eye(p.leftSph, p.leftCyl, p.leftAxis, p.leftAdd, p.leftSphText, p.leftCylText, p.leftAddText)}`;
+}

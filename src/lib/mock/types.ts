@@ -102,7 +102,9 @@ export interface Sale {
   fulfillmentType?: "Pickup" | "Delivery";
   deliveryAddress: string;
   deliveryFee: number;
-  onlineOrderStatus?: "Processing" | "Ready for Pickup" | "Out for Delivery" | "Completed" | "Cancelled";
+  // Where the order is (in process, ready to pick up / deliver, delivered).
+  // Unset for a shop order handed over at the counter.
+  orderStatus?: "In process" | "Ready to pick up" | "Ready to deliver" | "Delivered" | "Cancelled";
 }
 
 export interface Supplier {
@@ -159,7 +161,10 @@ export interface LabOrder {
   labId: string;
   lab: string;
   lensType: string;
+  // In words; always set, so an order reads right even without `rx`.
   prescription: string;
+  // The customer's saved prescription the lab is making up, when there is one.
+  rx: Prescription | null;
   price: number;
   status: "Ordered" | "In Progress" | "Received" | "Fitted";
   orderedDate: string;
