@@ -26,6 +26,7 @@ export function CashEntries({ entries, date }: { entries: CashEntry[]; date: str
   const time = (iso: string) => new Date(iso).toLocaleTimeString("en-PK", { hour: "numeric", minute: "2-digit" });
 
   const what = (e: CashEntry) => {
+    if (e.kind === "refund") return `Refund ${e.ref} on the bill of ${formatDate(e.invoiceDate.slice(0, 10))}`;
     if (e.kind === "advance") return e.amount >= 0 ? "Advance paid in" : "Advance handed back";
     if (e.method === CREDIT_METHOD) return "Paid from their advance — no money came in";
     if (e.kind === "sale") return "New sale";
@@ -41,7 +42,7 @@ export function CashEntries({ entries, date }: { entries: CashEntry[]; date: str
         <div>
           <h3 className="text-sm font-semibold flex items-center gap-2"><ListChecks className="w-4 h-4 text-primary" /> Where the money came from</h3>
           <p className="text-[11px] text-muted-foreground mt-0.5">
-            Every payment taken on this day. Each tab adds up to the total above — use it to check the drawer line by line.
+            Every payment taken on this day, and any refund handed back. Each tab adds up to the total above — use it to check the drawer line by line.
           </p>
         </div>
         <div className="flex gap-1.5 flex-wrap" role="tablist">
@@ -76,6 +77,7 @@ export function CashEntries({ entries, date }: { entries: CashEntry[]; date: str
             <tbody>
               {shown.map((e) => {
                 const older = e.kind === "payment" && e.invoiceDate.slice(0, 10) < date;
+                const refund = e.kind === "refund";
                 return (
                   <tr key={e.id} className={`border-t border-border ${e.method === CREDIT_METHOD ? "text-muted-foreground" : ""}`}>
                     <td className="py-2 pr-3 whitespace-nowrap tabular-nums">{time(e.time)}</td>
@@ -87,7 +89,7 @@ export function CashEntries({ entries, date }: { entries: CashEntry[]; date: str
                       ) : e.customer}
                     </td>
                     <td className="py-2 pr-3">
-                      <span className={older ? "chip bg-primary/10 text-primary" : ""}>{what(e)}</span>
+                      <span className={refund ? "chip bg-destructive/10 text-destructive" : older ? "chip bg-primary/10 text-primary" : ""}>{what(e)}</span>
                       {e.note && <span className="block text-[10px] text-muted-foreground mt-0.5">{e.note}</span>}
                     </td>
                     {tab === "All" && <td className="py-2 pr-3 whitespace-nowrap">{e.method}</td>}

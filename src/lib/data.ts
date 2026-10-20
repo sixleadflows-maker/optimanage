@@ -5,7 +5,7 @@ import type {
 } from "@/lib/mock/types";
 import { readSplit, tillParts, type PaymentPart } from "@/lib/sales/paymentSplit";
 import { creditHeld, creditHeldByCustomer } from "@/lib/sales/credit";
-import { paymentsOnDays } from "@/lib/sales/received";
+import { paymentsOnDays, refundOnDay } from "@/lib/sales/received";
 import { CREDIT_METHOD, ORDER_STATUSES, OWNER_ONLY_TRASH } from "@/lib/constants";
 import { rxHistoryOrder } from "@/lib/utils/rx";
 import { readSalaryHistory, type SalaryKindValue, type SalaryStep } from "@/lib/salaries";
@@ -217,7 +217,7 @@ export type SaleView = Sale & {
   // reads "Cash + Card").
   paymentSplit: PaymentPart[];
   hasReturn: boolean;
-  returns: { id: string; returnNo: string; date: string; totalRefund: number; reason: string }[];
+  returns: { id: string; returnNo: string; date: string; totalRefund: number; refundMethod: string; reason: string }[];
   // A balance the customer was let off (already inside `discount`), when and by whom.
   balanceCancelled: number;
   balanceCancelledAt: string;
@@ -242,7 +242,7 @@ const saleInclude = {
   receivedBy: true,
   lensProduct: { select: { brand: true, name: true, salePrice: true } },
   payments: { orderBy: { date: "asc" }, include: { receivedBy: { select: { name: true } } } },
-  returns: { select: { id: true, returnNo: true, date: true, totalRefund: true, reason: true }, orderBy: { date: "asc" } },
+  returns: { select: { id: true, returnNo: true, date: true, totalRefund: true, refundMethod: true, reason: true }, orderBy: { date: "asc" } },
   // In the order they were typed in at the till (one bill saves them all at once).
   prescriptions: { orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
 } satisfies Prisma.SaleInclude;
@@ -305,7 +305,9 @@ function mapSale(s: SaleRow): SaleView {
     balanceCancelled: s.balanceCancelled,
     balanceCancelledAt: s.balanceCancelledAt ? s.balanceCancelledAt.toISOString() : "",
     balanceCancelledBy: s.balanceCancelledBy,
-    returns: s.returns.map((r) => ({ id: r.id, returnNo: r.returnNo, date: r.date.toISOString(), totalRefund: r.totalRefund, reason: r.reason })),
+    returns: s.returns.map((r) => ({
+      id: r.id, returnNo: r.returnNo, date: r.date.toISOString(), totalRefund: r.totalRefund, refundMethod: r.refundMethod, reason: r.reason,
+    })),
     prescriptions: s.prescriptions.map(mapPrescription),
     subtotal: s.subtotal,
     discount: s.discount,
@@ -831,6 +833,22 @@ export interface AnalyticsData {
   // the day it was made, its total, what's still owed on it, and each payment
   // on the day it was made.
   ledger: LedgerBill[];
+  // Every refund handed back on a return, newest first.
+  refunds: RefundView[];
+}
+
+export interface RefundView {
+  id: string;
+  day: string;
+  amount: number;
+  // The profit it took back: the refund less what the returned goods cost.
+  profit: number;
+  returnNo: string;
+  invoiceNo: string;
+  invoiceDay: string;
+  customer: string;
+  method: string;
+  reason: string;
 }
 
 export interface LedgerBill {
@@ -841,13 +859,20 @@ export interface LedgerBill {
 }
 
 export async function getAnalyticsData(): Promise<AnalyticsData> {
-  const [products, sales, expenses, settings, salaryPay] = await Promise.all([
+  const [products, sales, expenses, settings, salaryPay, returns] = await Promise.all([
     db.product.findMany({ where: { active: true } }),
     db.sale.findMany({ include: { items: true, payments: { select: { amount: true, date: true } } } }),
     db.expense.findMany(),
     db.shopSettings.findUnique({ where: { id: "default" } }),
     // Salary handed over is a cost like any expense (a cut moves no money).
     db.salaryEntry.aggregate({ where: { kind: { not: "DEDUCTION" } }, _sum: { amount: true } }),
+    db.return.findMany({
+      orderBy: { date: "desc" },
+      include: {
+        items: { select: { quantity: true, saleItem: { select: { unitCost: true } } } },
+        sale: { select: { invoiceNo: true, date: true, customer: { select: { name: true, phone: true } } } },
+      },
+    }),
   ]);
 
   const productById = new Map(products.map((p) => [p.id, p]));
@@ -882,6 +907,20 @@ export async function getAnalyticsData(): Promise<AnalyticsData> {
       }
       itemSales[it.productId] = (itemSales[it.productId] || 0) + it.quantity;
     });
+  });
+
+  // Money handed back on returns comes off the day it was handed back, and
+  // takes the profit made on those goods with it.
+  const refunds: RefundView[] = returns.map((r) => {
+    const back = refundOnDay({ date: r.date, totalRefund: r.totalRefund, items: r.items.map((i) => ({ quantity: i.quantity, unitCost: i.saleItem.unitCost })) });
+    const day = iso(r.date);
+    days[day] = (days[day] || 0) + back.amount;
+    totalRevenue += back.amount;
+    grossProfit += back.profit;
+    return {
+      id: r.id, day, amount: r.totalRefund, profit: -back.profit, returnNo: r.returnNo, invoiceNo: r.sale.invoiceNo, invoiceDay: iso(r.sale.date),
+      customer: r.sale.customer ? customerLabel(r.sale.customer) : "Walk-in", method: r.refundMethod, reason: r.reason,
+    };
   });
 
   const totalExpenses = expenses.reduce((sum, e) => sum + e.amount, 0) + (salaryPay._sum.amount ?? 0);
@@ -945,6 +984,7 @@ export async function getAnalyticsData(): Promise<AnalyticsData> {
     },
     requiresPin: !!settings?.analyticsPin,
     ledger,
+    refunds,
   };
 }
 
@@ -977,6 +1017,10 @@ export interface CashCollectionData {
   // Every bit of money that came in (or went back out as an advance refund) that
   // day, oldest first: what the method totals above are made of.
   entries: CashEntry[];
+  // Refunds handed back on returns that day: all of them, and the cash ones
+  // (already taken off cashSales, like an advance handed back).
+  refunds: number;
+  cashRefunds: number;
   saved: { openingCash: number; closingCash: number; notes: string; closedBy: string } | null;
   // What the drawer should open with: the last close, plus the cash taken (less
   // cash spent and banked) on any day since that hasn't been closed off.
@@ -991,8 +1035,11 @@ export interface CashEntry {
   // Below zero for an advance handed back.
   amount: number;
   // "sale": taken when the bill was made; "payment": paid on the bill afterwards
-  // (on this day); "advance": money paid in ahead, or handed back.
-  kind: "sale" | "payment" | "advance";
+  // (on this day); "advance": money paid in ahead, or handed back; "refund":
+  // handed back on a return (below zero).
+  kind: "sale" | "payment" | "advance" | "refund";
+  // The return's number, for a refund.
+  ref: string;
   invoiceNo: string;
   // When the bill itself was made, so a balance paid on an older bill shows as one.
   invoiceDate: string;
@@ -1022,7 +1069,7 @@ export async function getCashCollection(dateStr: string, branchId?: string): Pro
   const { start, end } = dayRange(dateStr);
   const saleWhere = { date: { gte: start, lt: end }, ...(branchId ? { branchId } : {}) };
   const customerName = { select: { id: true, name: true, phone: true } } as const;
-  const [sales, laterPayments, expenses, deposits, saved, credits, salaryPay] = await Promise.all([
+  const [sales, laterPayments, expenses, deposits, saved, credits, salaryPay, refunds] = await Promise.all([
     db.sale.findMany({
       where: saleWhere,
       include: { payments: { select: { amount: true } }, customer: customerName, receivedBy: { select: { name: true } } },
@@ -1046,6 +1093,14 @@ export async function getCashCollection(dateStr: string, branchId?: string): Pro
     }),
     // Salary, advances and bonuses handed over that day (a cut moves no money).
     db.salaryEntry.findMany({ where: { date: { gte: start, lt: end }, kind: { not: "DEDUCTION" } }, select: { amount: true, method: true } }),
+    // Refunds handed back on returns that day, whatever day the bill was.
+    db.return.findMany({
+      where: { date: { gte: start, lt: end }, ...(branchId ? { sale: { branchId } } : {}) },
+      select: {
+        id: true, returnNo: true, date: true, totalRefund: true, refundMethod: true, reason: true, processedBy: { select: { name: true } },
+        sale: { select: { invoiceNo: true, date: true, customer: customerName } },
+      },
+    }),
   ]);
 
   // A sale's own `paid` is the running total including anything collected
@@ -1055,7 +1110,9 @@ export async function getCashCollection(dateStr: string, branchId?: string): Pro
   // An advance is money in the drawer on the day it's paid in (and out of it
   // on the day it's handed back). A bill paid FROM an advance brings nothing in
   // that day -- the money was counted when the advance came in.
-  const collected = [...takenAtTill, ...laterPayments, ...credits].filter((c) => c.method !== CREDIT_METHOD);
+  // A refund on a return is money going back out, by the way it was handed back.
+  const handedBack = refunds.map((r) => ({ method: r.refundMethod, amount: -r.totalRefund }));
+  const collected = [...takenAtTill, ...laterPayments, ...credits, ...handedBack].filter((c) => c.method !== CREDIT_METHOD);
 
   const byMethod = (m: string) => collected.filter((c) => c.method === m).reduce((sum, c) => sum + c.amount, 0);
 
@@ -1067,18 +1124,23 @@ export async function getCashCollection(dateStr: string, branchId?: string): Pro
       tillParts(s, s.paid - s.payments.reduce((sum, p) => sum + p.amount, 0))
         .filter((part) => Math.abs(part.amount) > 0.009)
         .map((part, i) => ({
-          id: `${s.id}-${i}`, time: s.date.toISOString(), method: part.method, amount: part.amount, kind: "sale" as const,
+          id: `${s.id}-${i}`, time: s.date.toISOString(), method: part.method, amount: part.amount, kind: "sale" as const, ref: "",
           invoiceNo: s.invoiceNo, invoiceDate: s.date.toISOString(), customerId: s.customer?.id ?? "", customer: who(s.customer),
           by: s.receivedBy?.name ?? "", note: "",
         }))),
     ...laterPayments.map((p) => ({
-      id: p.id, time: p.date.toISOString(), method: p.method, amount: p.amount, kind: "payment" as const,
+      id: p.id, time: p.date.toISOString(), method: p.method, amount: p.amount, kind: "payment" as const, ref: "",
       invoiceNo: p.sale.invoiceNo, invoiceDate: p.sale.date.toISOString(), customerId: p.sale.customer?.id ?? "", customer: who(p.sale.customer),
       by: p.receivedBy?.name ?? "", note: p.note,
     })),
     ...credits.map((c) => ({
-      id: c.id, time: c.date.toISOString(), method: c.method, amount: c.amount, kind: "advance" as const,
+      id: c.id, time: c.date.toISOString(), method: c.method, amount: c.amount, kind: "advance" as const, ref: "",
       invoiceNo: "", invoiceDate: "", customerId: c.customer.id, customer: who(c.customer), by: c.recordedBy, note: c.note,
+    })),
+    ...refunds.map((r) => ({
+      id: r.id, time: r.date.toISOString(), method: r.refundMethod, amount: -r.totalRefund, kind: "refund" as const, ref: r.returnNo,
+      invoiceNo: r.sale.invoiceNo, invoiceDate: r.sale.date.toISOString(), customerId: r.sale.customer?.id ?? "", customer: who(r.sale.customer),
+      by: r.processedBy?.name ?? "", note: r.reason,
     })),
   ].sort((a, b) => a.time.localeCompare(b.time));
   const totalCollection = collected.reduce((sum, c) => sum + c.amount, 0);
@@ -1111,6 +1173,8 @@ export async function getCashCollection(dateStr: string, branchId?: string): Pro
     })),
     invoiceCount: sales.length,
     entries,
+    refunds: refunds.reduce((sum, r) => sum + r.totalRefund, 0),
+    cashRefunds: refunds.filter((r) => r.refundMethod === "Cash").reduce((sum, r) => sum + r.totalRefund, 0),
     saved: saved ? { openingCash: saved.openingCash, closingCash: saved.closingCash, notes: saved.notes, closedBy: saved.closedBy } : null,
     opening: await openingCashFor(start, branchId),
   };
@@ -1129,7 +1193,7 @@ async function openingCashFor(start: Date, branchId?: string) {
   if (!lastClose) return null;
 
   const gap = { gte: new Date(lastClose.date.getTime() + 24 * 60 * 60 * 1000), lt: start };
-  const [sales, laterPayments, expenses, deposits, credits, salaryPay] = await Promise.all([
+  const [sales, laterPayments, expenses, deposits, credits, salaryPay, cashRefunds] = await Promise.all([
     db.sale.findMany({
       where: { date: gap, ...(branchId ? { branchId } : {}) },
       select: { paid: true, paymentMethod: true, paymentSplit: true, payments: { select: { amount: true } } },
@@ -1142,6 +1206,7 @@ async function openingCashFor(start: Date, branchId?: string) {
     db.bankDeposit.findMany({ where: { date: gap }, select: { amount: true } }),
     db.customerCredit.findMany({ where: { date: gap }, select: { amount: true, method: true } }),
     db.salaryEntry.findMany({ where: { date: gap, kind: { not: "DEDUCTION" }, method: "Cash" }, select: { amount: true } }),
+    db.return.findMany({ where: { date: gap, refundMethod: "Cash", ...(branchId ? { sale: { branchId } } : {}) }, select: { totalRefund: true } }),
   ]);
 
   const takenAtTill = sales.flatMap((s) => tillParts(s, s.paid - s.payments.reduce((sum, p) => sum + p.amount, 0)));
@@ -1151,6 +1216,7 @@ async function openingCashFor(start: Date, branchId?: string) {
   const cashOut =
     expenses.filter((e) => (e.paymentMethod || "Cash") === "Cash").reduce((sum, e) => sum + e.amount, 0) +
     salaryPay.reduce((sum, p) => sum + p.amount, 0) +
+    cashRefunds.reduce((sum, r) => sum + r.totalRefund, 0) +
     deposits.reduce((sum, d) => sum + d.amount, 0);
   const sinceLastClose = Math.round((cashIn - cashOut) * 100) / 100;
 

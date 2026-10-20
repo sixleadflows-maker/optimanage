@@ -296,7 +296,7 @@ export function InvoiceDetails({
             {sale.returns.map((r) => (
               <div key={r.id} className="flex items-center justify-between gap-3">
                 <span>
-                  <span className="font-medium">{r.returnNo}</span> · {when(r.date)} · refund {formatCurrency(r.totalRefund)}
+                  <span className="font-medium">{r.returnNo}</span> · {when(r.date)} · refund {formatCurrency(r.totalRefund)}{r.refundMethod ? ` (${r.refundMethod})` : ""}
                   {r.reason && <span className="text-muted-foreground">{` · ${r.reason}`}</span>}
                 </span>
                 {canUndoReturn && (onEditReturn || onUndoReturn) && (

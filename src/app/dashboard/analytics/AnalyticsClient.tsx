@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useState, useEffect, useCallback } from "react";
-import type { AnalyticsData, LedgerBill } from "@/lib/data";
+import type { AnalyticsData, LedgerBill, RefundView } from "@/lib/data";
 import { formatCurrency } from "@/lib/utils/format";
 import { verifyAnalyticsPin, getMonthlyAnalytics, type MonthlyAnalyticsData, type MonthDay } from "@/lib/actions/analytics";
 import { changeAnalyticsPin, resetAnalyticsPinWithPassword } from "@/lib/actions/settings";
@@ -153,10 +153,12 @@ function DayByDay({ days }: { days: MonthDay[] }) {
                             <span className="min-w-0 truncate">
                               <span className="font-semibold">{p.invoiceNo}</span>
                               <span className="text-muted-foreground">{` · ${p.customer}${p.method ? ` · ${p.method}` : ""}`}</span>
-                              {p.earlier && <span className="chip bg-primary/10 text-primary ml-1.5">earlier invoice</span>}
+                              {p.refund
+                                ? <span className="chip bg-destructive/10 text-destructive ml-1.5">refund</span>
+                                : p.earlier && <span className="chip bg-primary/10 text-primary ml-1.5">earlier invoice</span>}
                             </span>
                             <span className="flex-shrink-0 text-right">
-                              <span className="font-semibold">{formatCurrency(p.amount)}</span>
+                              <span className={`font-semibold ${p.amount < 0 ? "text-destructive" : ""}`}>{formatCurrency(p.amount)}</span>
                               <span className={`ml-2 ${p.profit < 0 ? "text-destructive" : "text-success"}`}>{`profit ${formatCurrency(p.profit)}`}</span>
                             </span>
                           </div>
@@ -208,7 +210,7 @@ function rangeFor(key: RangeKey): { from: string; to: string } {
  * the bills made in them at full value; outstanding is what's still owed on
  * those bills (on every bill, for all time).
  */
-function SalesSummary({ ledger }: { ledger: LedgerBill[] }) {
+function SalesSummary({ ledger, refunds }: { ledger: LedgerBill[]; refunds: RefundView[] }) {
   const [range, setRange] = useState<RangeKey>("today");
   const [custom, setCustom] = useState(() => rangeFor("month"));
   const { from, to } = range === "custom" ? custom : rangeFor(range);
@@ -232,6 +234,9 @@ function SalesSummary({ ledger }: { ledger: LedgerBill[] }) {
       if (b.balance > 0.009) { owed += b.balance; owing++; }
     }
   }
+  // Money handed back on returns in the dates comes off the sales.
+  const refundsIn = refunds.filter((r) => inRange(r.day));
+  const refunded = refundsIn.reduce((t, r) => t + r.amount, 0);
   const label = range === "all" ? "all time" : from === to ? new Date(`${from}T12:00:00Z`).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : "these dates";
 
   return (
@@ -261,13 +266,19 @@ function SalesSummary({ ledger }: { ledger: LedgerBill[] }) {
           <input type="date" value={custom.to} min={custom.from || undefined} onChange={(e) => setCustom((c) => ({ ...c, to: e.target.value }))} className="px-3 py-1.5 glass-input text-xs" />
         </div>
       )}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         <div className="rounded-xl bg-surface p-4">
-          <p className="text-xs text-muted-foreground">{`Sales — money paid in, ${label}`}</p>
-          <p className="text-xl font-bold mt-1 text-success">{formatCurrency(sales)}</p>
+          <p className="text-xs text-muted-foreground">{`Sales — money kept, ${label}`}</p>
+          <p className="text-xl font-bold mt-1 text-success">{formatCurrency(sales - refunded)}</p>
           <p className="text-[10px] text-muted-foreground mt-0.5">
-            {fromEarlier > 0 ? `${formatCurrency(fromEarlier)} of it paid on bills from before · ` : ""}each payment counts on the day it was made
+            {refunded > 0 ? `${formatCurrency(sales)} paid in − ${formatCurrency(refunded)} refunded · ` : ""}
+            {fromEarlier > 0 ? `${formatCurrency(fromEarlier)} paid on bills from before · ` : ""}each payment counts on the day it was made
           </p>
+        </div>
+        <div className="rounded-xl bg-surface p-4">
+          <p className="text-xs text-muted-foreground">{`Refunded — handed back, ${label}`}</p>
+          <p className={`text-xl font-bold mt-1 ${refunded > 0 ? "text-destructive" : ""}`}>{refunded > 0 ? `−${formatCurrency(refunded)}` : formatCurrency(0)}</p>
+          <p className="text-[10px] text-muted-foreground mt-0.5">{`${refundsIn.length} return${refundsIn.length === 1 ? "" : "s"} · on the day the money went back`}</p>
         </div>
         <div className="rounded-xl bg-surface p-4">
           <p className="text-xs text-muted-foreground">{`Invoiced — bills made, ${label}`}</p>
@@ -280,6 +291,41 @@ function SalesSummary({ ledger }: { ledger: LedgerBill[] }) {
           <p className="text-[10px] text-muted-foreground mt-0.5">{`${owing} invoice${owing === 1 ? "" : "s"} with a balance`}</p>
         </div>
       </div>
+
+      {refundsIn.length > 0 && (
+        <div className="mt-4">
+          <p className="text-xs font-semibold mb-2">{`Refunds, ${label}`}</p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs tabular-nums">
+              <thead>
+                <tr className="text-muted-foreground text-left">
+                  <th className="font-medium py-1.5 pr-3">Day</th>
+                  <th className="font-medium py-1.5 pr-3">Return · bill · customer</th>
+                  <th className="font-medium py-1.5 pr-3">Why</th>
+                  <th className="font-medium py-1.5 pr-3">How</th>
+                  <th className="font-medium py-1.5 pr-3 text-right">Profit lost</th>
+                  <th className="font-medium py-1.5 text-right">Refund</th>
+                </tr>
+              </thead>
+              <tbody>
+                {refundsIn.map((r) => (
+                  <tr key={r.id} className="border-t border-border">
+                    <td className="py-1.5 pr-3 whitespace-nowrap">{new Date(`${r.day}T12:00:00Z`).toLocaleDateString("en-GB", { day: "2-digit", month: "short" })}</td>
+                    <td className="py-1.5 pr-3">
+                      <span className="font-semibold">{r.returnNo}</span>
+                      <span className="text-muted-foreground">{` · ${r.invoiceNo} of ${new Date(`${r.invoiceDay}T12:00:00Z`).toLocaleDateString("en-GB", { day: "2-digit", month: "short" })} · ${r.customer}`}</span>
+                    </td>
+                    <td className="py-1.5 pr-3 text-muted-foreground">{r.reason || "—"}</td>
+                    <td className="py-1.5 pr-3">{r.method}</td>
+                    <td className="py-1.5 pr-3 text-right text-destructive">{formatCurrency(r.profit)}</td>
+                    <td className="py-1.5 text-right font-semibold text-destructive">{`−${formatCurrency(r.amount)}`}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -601,7 +647,7 @@ export function AnalyticsClient({ data }: { data: AnalyticsData }) {
         <p className="text-sm text-muted-foreground mt-0.5">Business intelligence and insights</p>
       </div>
 
-      <SalesSummary ledger={data.ledger} />
+      <SalesSummary ledger={data.ledger} refunds={data.refunds} />
 
       <MonthlyPerformance />
 

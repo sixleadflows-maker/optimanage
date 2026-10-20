@@ -110,6 +110,11 @@ export function CashClient({ data, date, canManage }: { data: CashCollectionData
           <div className="space-y-1.5 text-sm border-t border-border pt-4">
             <div className="flex justify-between"><span className="text-muted-foreground">Opening cash</span><span>{formatCurrency(openingCash)}</span></div>
             <div className="flex justify-between"><span className="text-muted-foreground">+ Cash sales</span><span className="text-success">{formatCurrency(data.cashSales)}</span></div>
+            {data.cashRefunds > 0 && (
+              <p className="text-[11px] text-destructive -mt-1">
+                {`After ${formatCurrency(data.cashRefunds)} refunded in cash on returns — see the refund lines above.`}
+              </p>
+            )}
             {(data.advancesIn > 0 || data.advancesRefunded > 0) && (
               <p className="text-[11px] text-muted-foreground">
                 {`Today's takings include customer advances: ${formatCurrency(data.advancesIn)} received${data.advancesRefunded > 0 ? `, ${formatCurrency(data.advancesRefunded)} handed back` : ""} (whichever way they were paid). Bills paid from an advance add nothing on the day.`}
@@ -150,6 +155,12 @@ export function CashClient({ data, date, canManage }: { data: CashCollectionData
             <div className="space-y-2.5 text-sm">
               <div className="flex justify-between"><span className="text-muted-foreground">Invoices</span><span className="font-medium">{data.invoiceCount}</span></div>
               <div className="flex justify-between"><span className="text-muted-foreground">Total collected</span><span className="font-medium">{formatCurrency(data.totalCollection)}</span></div>
+              {data.refunds > 0 && (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Refunds handed back (already taken off)</span>
+                  <span className="font-medium text-destructive">{`−${formatCurrency(data.refunds)}`}</span>
+                </div>
+              )}
               <div className="flex justify-between"><span className="text-muted-foreground">Cash expenses</span><span className="font-medium text-destructive">{formatCurrency(data.expenses)}</span></div>
               {data.otherExpenses > 0 && (
                 <div className="flex justify-between">

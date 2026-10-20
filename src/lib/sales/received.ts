@@ -44,3 +44,27 @@ export function paymentsOnDays(sale: SaleMoney): PaymentOnDay[] {
   }
   return out;
 }
+
+// A refund on a return is the other way round: money going back out, on the
+// day it was handed back, as a minus on that day's sales.
+
+export interface RefundMoney {
+  date: string | Date;
+  totalRefund: number;
+  // What the returned goods cost the shop. They're back in the shop, so that
+  // cost isn't lost: what the refund takes away is the profit made on them.
+  items: { quantity: number; unitCost: number }[];
+}
+
+export interface RefundOnDay {
+  date: Date;
+  // Below zero: money handed back.
+  amount: number;
+  profit: number;
+}
+
+/** The money handed back on a return, on the day it was, and the profit it takes back. */
+export function refundOnDay(r: RefundMoney): RefundOnDay {
+  const cost = r.items.reduce((sum, i) => sum + i.quantity * i.unitCost, 0);
+  return { date: new Date(r.date), amount: -r.totalRefund, profit: -(r.totalRefund - cost) };
+}

@@ -177,6 +177,9 @@ export function SalesClient({
   const inDates = (day: string) => (!fromDate || day >= fromDate) && (!toDate || day <= toDate);
   // The payments an invoice received inside the chosen dates.
   const paidInDates = (s: SaleView) => (paidOn.get(s.id) ?? []).filter((p) => inDates(localDay(p.date.toISOString())));
+  // Refunds handed back inside the chosen dates, on returns against an invoice.
+  const refundsInDates = (s: SaleView) => s.returns.filter((r) => inDates(localDay(r.date)));
+  const refundedOn = (s: SaleView) => s.returns.reduce((sum, r) => sum + r.totalRefund, 0);
 
   const filtered = useMemo(() => {
     let result = sales.filter((s) => {
@@ -184,11 +187,12 @@ export function SalesClient({
         s.invoiceNo, s.offlineRef, s.customerName, s.customerPhone, s.customerPhone2, s.customerSerial,
         ...s.items.flatMap((i) => [i.productName, i.description]),
       ]);
-      const matchesStatus = statusFilter === "All" || s.paymentStatus === statusFilter;
+      // "Refunded": invoices with a return on them.
+      const matchesStatus = statusFilter === "All" || (statusFilter === "Refunded" ? s.returns.length > 0 : s.paymentStatus === statusFilter);
       const matchesSource = sourceFilter === "All" || s.source === sourceFilter;
       // In the chosen dates if it was made then -- or paid on then: a balance
       // paid off today brings an older invoice into today's list.
-      const matchesDates = !hasDates || inDates(localDay(s.dateTime)) || paidInDates(s).length > 0;
+      const matchesDates = !hasDates || inDates(localDay(s.dateTime)) || paidInDates(s).length > 0 || refundsInDates(s).length > 0;
       return found && matchesStatus && matchesSource && matchesDates && inOrderFilter(s, orderFilter);
     });
 
@@ -268,7 +272,7 @@ export function SalesClient({
             />
           </div>
           <div className="flex gap-1.5 flex-wrap">
-            {["All", ...PAYMENT_STATUS].map((status) => (
+            {["All", ...PAYMENT_STATUS, "Refunded"].map((status) => (
               <button
                 key={status}
                 onClick={() => setStatusFilter(status)}
@@ -380,12 +384,22 @@ export function SalesClient({
                         {`${formatCurrency(p.amount)} paid ${formatDate(p.date.toISOString())}`}
                       </p>
                     ))}
+                    {hasDates && refundsInDates(sale).map((r) => (
+                      <p key={r.id} className="text-[10px] font-medium text-destructive whitespace-nowrap">
+                        {`${formatCurrency(r.totalRefund)} refunded ${formatDate(r.date)}`}
+                      </p>
+                    ))}
                   </td>
                   <td className="py-3 px-3 text-muted-foreground whitespace-nowrap">{formatDate(sale.dateTime)}</td>
                   <td className="py-3 px-3">{sale.customerName}</td>
                   <td className="py-3 px-3 text-muted-foreground">{sale.items.length} item{sale.items.length === 1 ? "" : "s"}</td>
                   <td className="py-3 px-3 text-right font-medium">{formatCurrency(sale.total)}</td>
-                  <td className="py-3 px-3 text-right text-success">{formatCurrency(sale.paid)}</td>
+                  <td className="py-3 px-3 text-right text-success">
+                    {formatCurrency(sale.paid)}
+                    {sale.returns.length > 0 && (
+                      <p className="text-[10px] font-medium text-destructive whitespace-nowrap">{`−${formatCurrency(refundedOn(sale))} refunded`}</p>
+                    )}
+                  </td>
                   <td className="py-3 px-3 text-right">{sale.balance > 0 ? <span className="text-destructive">{formatCurrency(sale.balance)}</span> : "—"}</td>
                   <td className="py-3 px-3 text-center">
                     <span className={`chip whitespace-nowrap ${paymentStatusChipClass(sale.paymentStatus)}`}>{sale.paymentStatus}</span>
@@ -485,7 +499,7 @@ export function SalesClient({
                 onChanged={(message) => { setViewingSale(null); showToast(message, "success"); router.refresh(); }}
                 onEditReturn={(ret) => {
                   setEditingReturn(ret);
-                  setReturnForm({ reason: ret.reason, refundMethod: "Cash", totalRefund: ret.totalRefund });
+                  setReturnForm({ reason: ret.reason, refundMethod: ret.refundMethod || "Cash", totalRefund: ret.totalRefund });
                 }}
               />
             </div>

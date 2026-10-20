@@ -3,7 +3,7 @@
 import { compare } from "bcryptjs";
 import { db } from "@/lib/db";
 import { auth } from "@/lib/auth";
-import { paymentsOnDays } from "@/lib/sales/received";
+import { paymentsOnDays, refundOnDay } from "@/lib/sales/received";
 
 export async function verifyAnalyticsPin(pin: string): Promise<{ ok: boolean }> {
   const session = await auth();
@@ -50,6 +50,8 @@ export interface MonthDay {
     method: string;
     // Paid on an invoice made on an earlier day.
     earlier: boolean;
+    // Money handed back on a return (amount and profit below zero).
+    refund?: boolean;
   }[];
 }
 
@@ -66,7 +68,7 @@ export async function getMonthlyAnalytics(year: number, month: number): Promise<
   const lastMonth = { gte: prevStart, lt: start };
 
   // Invoices made in the month, and older ones that were paid on in it.
-  const [products, sales, prevSales, expenses, prevExpenses, salaryPay, prevSalaryPay] = await Promise.all([
+  const [products, sales, prevSales, expenses, prevExpenses, salaryPay, prevSalaryPay, returns] = await Promise.all([
     db.product.findMany({ where: { active: true } }),
     db.sale.findMany({
       where: { OR: [{ date: thisMonth }, { payments: { some: { date: thisMonth } } }] },
@@ -85,6 +87,14 @@ export async function getMonthlyAnalytics(year: number, month: number): Promise<
     // Salary handed over in the month is a cost too (a cut moves no money).
     db.salaryEntry.aggregate({ where: { date: thisMonth, kind: { not: "DEDUCTION" } }, _sum: { amount: true } }),
     db.salaryEntry.aggregate({ where: { date: lastMonth, kind: { not: "DEDUCTION" } }, _sum: { amount: true } }),
+    // Refunds handed back in either month: they come off that day's sales.
+    db.return.findMany({
+      where: { date: { gte: prevStart, lt: end } },
+      include: {
+        items: { select: { quantity: true, saleItem: { select: { unitCost: true } } } },
+        sale: { select: { invoiceNo: true, customer: { select: { name: true, phone: true } } } },
+      },
+    }),
   ]);
 
   const productById = new Map(products.map((p) => [p.id, p]));
@@ -133,6 +143,27 @@ export async function getMonthlyAnalytics(year: number, month: number): Promise<
     }
   }
 
+  let prevRefunds = 0;
+  let prevRefundProfit = 0;
+  for (const r of returns) {
+    const back = refundOnDay({ date: r.date, totalRefund: r.totalRefund, items: r.items.map((i) => ({ quantity: i.quantity, unitCost: i.saleItem.unitCost })) });
+    if (!within(r.date, start, end)) {
+      prevRefunds += back.amount;
+      prevRefundProfit += back.profit;
+      continue;
+    }
+    totalSales += back.amount;
+    grossProfit += back.profit;
+    const row = dayRow(dayOf(r.date));
+    row.sales += back.amount;
+    row.profit += back.profit;
+    row.payments.push({
+      invoiceNo: `${r.sale.invoiceNo} · ${r.returnNo}`,
+      customer: r.sale.customer ? r.sale.customer.name.trim() || r.sale.customer.phone || "No name yet" : "Walk-in",
+      amount: back.amount, profit: back.profit, method: r.refundMethod, earlier: true, refund: true,
+    });
+  }
+
   const totalExpenses = expenses.reduce((sum, e) => sum + e.amount, 0) + (salaryPay._sum.amount ?? 0);
   const netProfit = grossProfit - totalExpenses;
   const days = [...byDay.values()].sort((a, b) => b.date.localeCompare(a.date));
@@ -159,6 +190,8 @@ export async function getMonthlyAnalytics(year: number, month: number): Promise<
       prevMonthGrossProfit += p.profit;
     }
   }
+  prevMonthSales += prevRefunds;
+  prevMonthGrossProfit += prevRefundProfit;
   const prevMonthExpenses = prevExpenses.reduce((sum, e) => sum + e.amount, 0) + (prevSalaryPay._sum.amount ?? 0);
 
   return {
