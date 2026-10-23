@@ -14,11 +14,11 @@ export function DashboardClient({ data }: { data: DashboardData }) {
   const tiles = [
     {
       label: "Orders in process", value: data.ordersInProcess, icon: Timer, color: "text-warning",
-      note: "Glasses being made up", href: "/dashboard/sales?order=process",
+      note: "Glasses being made up", href: "/dashboard/orders?order=process",
     },
     {
       label: "Ready to pick up / deliver", value: ready, icon: PackageCheck, color: "text-success",
-      note: ready ? `${data.readyToPickUp} to pick up · ${data.readyToDeliver} to deliver` : "Nothing waiting", href: "/dashboard/sales?order=ready",
+      note: ready ? `${data.readyToPickUp} to pick up · ${data.readyToDeliver} to deliver` : "Nothing waiting", href: "/dashboard/orders?order=ready",
     },
     {
       label: "Jobs at the lab", value: data.labJobsOut, icon: FlaskConical, color: "text-primary",

@@ -12,8 +12,7 @@ import { PrintPortal } from "@/components/ui/PrintPortal";
 import { createReturn, deleteReturn, updateReturn } from "@/lib/actions/returns";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { deleteSale } from "@/lib/actions/sales";
-import { PAYMENT_STATUS, paymentStatusChipClass, isReadyStatus } from "@/lib/constants";
-import { OrderStatusControl } from "@/components/invoice/OrderStatusControl";
+import { PAYMENT_STATUS, paymentStatusChipClass } from "@/lib/constants";
 import { primaryMethod } from "@/lib/sales/paymentSplit";
 import { paymentsOnDays, type PaymentOnDay } from "@/lib/sales/received";
 import { ThermalReceipt, A4Invoice, invoiceFromSale, type ShopDetails } from "@/components/invoice/InvoiceDocuments";
@@ -22,19 +21,6 @@ import { CollectPaymentModal, EditInvoiceModal, EditPaymentModal, type EditorCus
 import { matchesSearch } from "@/lib/utils/search";
 
 const REFUND_METHODS = ["Cash", "Card", "Bank Transfer", "JazzCash"];
-// The order filter: in process, ready (to pick up or deliver), delivered.
-const ORDER_FILTERS = [
-  { key: "all", label: "All orders" },
-  { key: "process", label: "In process" },
-  { key: "ready", label: "Ready" },
-  { key: "delivered", label: "Delivered" },
-] as const;
-type OrderFilter = (typeof ORDER_FILTERS)[number]["key"];
-const inOrderFilter = (s: SaleView, f: OrderFilter) =>
-  f === "all" ||
-  (f === "process" && s.orderStatus === "In process") ||
-  (f === "ready" && isReadyStatus(s.orderStatus)) ||
-  (f === "delivered" && s.orderStatus === "Delivered");
 
 // The shop's own calendar day for a sale (not the UTC one), so a late-evening
 // sale falls on the day it was actually made.
@@ -44,7 +30,7 @@ function localDay(isoDateTime: string) {
 }
 
 export function SalesClient({
-  sales, isOwner, canEdit, customers, staff, shop, initialOrderFilter,
+  sales, isOwner, canEdit, customers, staff, shop,
 }: {
   sales: SaleView[];
   isOwner: boolean;
@@ -52,13 +38,8 @@ export function SalesClient({
   customers: EditorCustomer[];
   staff: EditorStaff[];
   shop: ShopDetails;
-  // From the dashboard's "In process" / "Ready" counts (?order=process).
-  initialOrderFilter?: string;
 }) {
   const [search, setSearch] = useState("");
-  const [orderFilter, setOrderFilter] = useState<OrderFilter>(
-    ORDER_FILTERS.find((f) => f.key === initialOrderFilter)?.key ?? "all",
-  );
   const [statusFilter, setStatusFilter] = useState<string>("All");
   const [sourceFilter, setSourceFilter] = useState<string>("All");
   const [fromDate, setFromDate] = useState("");
@@ -193,7 +174,7 @@ export function SalesClient({
       // In the chosen dates if it was made then -- or paid on then: a balance
       // paid off today brings an older invoice into today's list.
       const matchesDates = !hasDates || inDates(localDay(s.dateTime)) || paidInDates(s).length > 0 || refundsInDates(s).length > 0;
-      return found && matchesStatus && matchesSource && matchesDates && inOrderFilter(s, orderFilter);
+      return found && matchesStatus && matchesSource && matchesDates;
     });
 
     result.sort((a, b) => {
@@ -211,7 +192,7 @@ export function SalesClient({
 
     return result;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sales, search, statusFilter, sourceFilter, fromDate, toDate, sortBy, paidOn, orderFilter]);
+  }, [sales, search, statusFilter, sourceFilter, fromDate, toDate, sortBy, paidOn]);
 
   const setRange = (range: "today" | "month" | "all") => {
     const today = localDay(new Date().toISOString());
@@ -221,8 +202,6 @@ export function SalesClient({
   };
 
   const oldestSale = sales.length > 0 ? sales[sales.length - 1] : null;
-
-  const orderCount = (f: OrderFilter) => sales.filter((s) => inOrderFilter(s, f)).length;
 
   const exportCsv = () => {
     if (filtered.length === 0) { showToast("Nothing to export", "info"); return; }
@@ -317,18 +296,6 @@ export function SalesClient({
           </div>
         </div>
 
-        <div className="flex items-center gap-1.5 mb-3 flex-wrap">
-          <span className="text-xs font-medium text-muted-foreground mr-1">Orders</span>
-          {ORDER_FILTERS.map((f) => (
-            <button key={f.key} onClick={() => setOrderFilter(f.key)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-all whitespace-nowrap cursor-pointer ${
-                orderFilter === f.key ? "bg-primary text-white" : "bg-surface hover:bg-surface-hover"
-              }`}>
-              {f.key === "all" ? f.label : `${f.label} (${orderCount(f.key)})`}
-            </button>
-          ))}
-        </div>
-
         <div className="flex items-center gap-3 mb-4 flex-wrap">
           <label className="text-xs font-medium text-muted-foreground">Sort by</label>
           <select
@@ -357,13 +324,12 @@ export function SalesClient({
                 <th className="text-center py-3 px-3 text-xs font-medium text-muted-foreground">Status</th>
                 <th className="text-center py-3 px-3 text-xs font-medium text-muted-foreground">Payment</th>
                 <th className="text-center py-3 px-3 text-xs font-medium text-muted-foreground">Source</th>
-                <th className="text-center py-3 px-3 text-xs font-medium text-muted-foreground">Order status</th>
                 <th className="text-center py-3 px-3 text-xs font-medium text-muted-foreground">Actions</th>
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 && (
-                <tr><td colSpan={12}>
+                <tr><td colSpan={11}>
                   <EmptyState icon={Receipt}
                     title={sales.length === 0 ? "No invoices yet" : "No invoices match"}
                     hint={sales.length === 0
@@ -409,12 +375,6 @@ export function SalesClient({
                     <span className={`text-[10px] px-2 py-0.5 rounded-md font-medium ${sale.source === "Online" ? "bg-secondary/10 text-secondary" : "bg-surface text-muted-foreground"}`}>
                       {sale.source}
                     </span>
-                  </td>
-                  <td className="py-3 px-3 text-center whitespace-nowrap">
-                    <OrderStatusControl sale={sale} shopName={shop.name} />
-                    {sale.source === "Online" && sale.fulfillmentType && (
-                      <p className="text-[10px] text-muted-foreground mt-0.5">{`Online · ${sale.fulfillmentType}`}</p>
-                    )}
                   </td>
                   <td className="py-3 px-3">
                     <div className="flex items-center justify-center gap-1.5">

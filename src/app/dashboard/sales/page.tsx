@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import { getSales, getSettings, getCustomers, getUsers } from "@/lib/data";
 import { auth } from "@/lib/auth";
 import { SalesClient } from "./SalesClient";
@@ -6,8 +7,9 @@ import { shopDetailsFromSettings } from "@/components/invoice/InvoiceDocuments";
 export const dynamic = "force-dynamic";
 
 export default async function SalesPage({ searchParams }: { searchParams: Promise<{ order?: string }> }) {
-  // ?order=process|ready|delivered opens the list on those orders (from the dashboard).
+  // Orders have a page of their own now; an old link to the order filter goes there.
   const { order } = await searchParams;
+  if (order) redirect(`/dashboard/orders?order=${encodeURIComponent(order)}`);
   const [sales, settings, customers, users, session] = await Promise.all([
     getSales(), getSettings(), getCustomers(), getUsers(), auth(),
   ]);
@@ -25,7 +27,6 @@ export default async function SalesPage({ searchParams }: { searchParams: Promis
       }))}
       staff={users.filter((u) => u.active).map((u) => ({ id: u.id, name: u.name }))}
       shop={shopDetailsFromSettings(settings)}
-      initialOrderFilter={order}
     />
   );
 }
