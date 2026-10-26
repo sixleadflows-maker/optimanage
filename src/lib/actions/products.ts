@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { barcodeCandidates } from "@/lib/utils/barcode";
 import { db } from "@/lib/db";
 import { auth } from "@/lib/auth";
 
@@ -271,7 +272,7 @@ export async function searchProductsForSale(query: string): Promise<ProductSearc
         { name: { contains: q, mode: "insensitive" } },
         { brand: { contains: q, mode: "insensitive" } },
         { model: { contains: q, mode: "insensitive" } },
-        { barcode: q },
+        { barcode: { in: barcodeCandidates(q) } },
       ],
     },
     select: { id: true, brand: true, name: true, model: true, salePrice: true, stock: true },

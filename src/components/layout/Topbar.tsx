@@ -11,6 +11,7 @@ import { unstable_isUnrecognizedActionError } from "next/navigation";
 import { reportOutdatedPage } from "@/components/layout/UpdateNotice";
 import type { BranchView } from "@/lib/data";
 import { formatCurrency } from "@/lib/utils/format";
+import { SCAN_EVENT, cleanScan, scanCharacter } from "@/lib/utils/barcode";
 import { Menu, Search, Moon, Sun, Wifi, WifiOff, ChevronDown, LogOut, Loader2, User, Package } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -113,6 +114,68 @@ export function Topbar({ user, branches }: { user: TopbarUser; branches: BranchV
     return () => clearTimeout(timer);
   }, [scanValue, runSearch]);
 
+  // A scan with no box selected used to go nowhere. A scanner types far faster
+  // than a person -- a few milliseconds a key -- so a quick burst of at least
+  // four keys is taken as a scan. The page gets it first (the till adds the
+  // product to the bill); otherwise it's searched here and the results shown.
+  useEffect(() => {
+    const MAX_GAP_MS = 80;
+    const MIN_LENGTH = 4;
+    let typed = "";
+    let lastKey = 0;
+    let noEnter: ReturnType<typeof setTimeout> | undefined;
+    // A box that takes typing. A checkbox, button or drop-down that was tapped
+    // last doesn't count, so a scan still comes through.
+    const NOT_TYPED_INTO = ["checkbox", "radio", "button", "submit", "reset", "range", "color", "file", "image"];
+    const isTypingSpot = (el: Element | null) =>
+      el instanceof HTMLElement && (
+        el.isContentEditable || el.tagName === "TEXTAREA" ||
+        (el instanceof HTMLInputElement && !NOT_TYPED_INTO.includes(el.type))
+      );
+
+    const scanned = (raw: string) => {
+      const code = cleanScan(raw);
+      if (code.length < MIN_LENGTH) return;
+      const takenByPage = !window.dispatchEvent(new CustomEvent(SCAN_EVENT, { detail: code, cancelable: true }));
+      if (takenByPage) return;
+      setScanValue(code);
+      setOpen(true);
+      void runSearch(code);
+    };
+
+    const onKey = (e: KeyboardEvent) => {
+      // Typed into a box: the box handles it, as it always has.
+      if (e.ctrlKey || e.altKey || e.metaKey || isTypingSpot(document.activeElement)) { typed = ""; return; }
+      const now = performance.now();
+      if (e.key === "Enter" || e.key === "Tab") {
+        if (typed.length >= MIN_LENGTH && now - lastKey < 200) {
+          e.preventDefault();
+          clearTimeout(noEnter);
+          scanned(typed);
+        }
+        typed = "";
+        return;
+      }
+      const ch = scanCharacter(e);
+      if (!ch) return;
+      if (now - lastKey > MAX_GAP_MS) typed = "";
+      typed += ch;
+      lastKey = now;
+      // Some scanners are set to send no Enter: a pause after a burst ends it.
+      clearTimeout(noEnter);
+      noEnter = setTimeout(() => {
+        if (typed.length >= MIN_LENGTH) scanned(typed);
+        typed = "";
+      }, 250);
+    };
+
+    document.addEventListener("keydown", onKey, true);
+    return () => {
+      document.removeEventListener("keydown", onKey, true);
+      clearTimeout(noEnter);
+    };
+  }, [runSearch]);
+
   const closeSearch = () => {
     setOpen(false);
     setScanValue("");
@@ -180,8 +243,12 @@ export function Topbar({ user, branches }: { user: TopbarUser; branches: BranchV
             onChange={(e) => { setScanValue(e.target.value); setOpen(true); }}
             onFocus={() => setOpen(true)}
             onKeyDown={(e) => {
-              // A barcode scanner types the code and presses Enter: search at once.
-              if (e.key === "Enter" && query) { setOpen(true); void runSearch(query); }
+              // A barcode scanner types the code and presses Enter (or Tab): search at once.
+              if ((e.key === "Enter" || (e.key === "Tab" && query.length >= 4)) && query) {
+                if (e.key === "Tab") e.preventDefault();
+                setOpen(true);
+                void runSearch(query);
+              }
             }}
             className="w-full pl-9 pr-4 py-2 glass-input text-sm"
           />

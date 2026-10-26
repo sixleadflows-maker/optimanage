@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { sameBarcode } from "@/lib/utils/barcode";
 import { Search, X, PenLine, Plus } from "lucide-react";
 import type { Product } from "@/lib/mock/types";
 import { formatCurrency } from "@/lib/utils/format";
@@ -77,7 +78,7 @@ export function LensPicker({
     if (e.key !== "Enter") return;
     const q = query.trim();
     if (!q) return;
-    const hit = lenses.find((p) => p.barcode && p.barcode === q) ?? (shown.length === 1 ? shown[0] : undefined);
+    const hit = lenses.find((p) => p.barcode && sameBarcode(p.barcode, q)) ?? (shown.length === 1 ? shown[0] : undefined);
     if (hit && hit.stock > 0) pick(hit);
   };
 

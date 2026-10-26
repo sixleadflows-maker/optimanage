@@ -27,6 +27,7 @@ import { RxEntryTable } from "@/components/ui/RxEntryTable";
 import { parseRxText, rxFieldText, rxFormTexts, formatRxPower, type RxTextColumns } from "@/lib/utils/rx";
 import { ThermalReceipt, A4Invoice, lensNote, type InvoiceData, type ShopDetails } from "@/components/invoice/InvoiceDocuments";
 import { matchesSearch } from "@/lib/utils/search";
+import { SCAN_EVENT, cleanScan, sameBarcode } from "@/lib/utils/barcode";
 import { LensPicker, type PickedLens } from "./LensPicker";
 import { CostMargin } from "./CostMargin";
 import { shareNumber, allNumbers } from "@/lib/utils/phone";
@@ -1063,22 +1064,64 @@ export function POSClient({
     setLensProductId("");
   };
 
-  // Barcode scanners type the code then send Enter — add exact matches straight to the cart.
+  // A scanned code onto the bill. When more than one product carries the same
+  // barcode, they're listed to pick from rather than one added at a guess.
+  // False when no product has the code.
+  const addScanned = (raw: string) => {
+    const code = cleanScan(raw);
+    const matches = products.filter((p) => p.barcode && sameBarcode(p.barcode, code));
+    if (matches.length === 0) return false;
+    setEntryMode("manual");
+    if (matches.length > 1) {
+      setSearch(matches[0].barcode);
+      showToast(`${matches.length} products have the barcode ${matches[0].barcode} — tap the right one`, "info");
+      return true;
+    }
+    addToCart(matches[0].id);
+    setSearch("");
+    showToast(`Added ${matches[0].name}`, "success");
+    return true;
+  };
+
+  // Barcode scanners type the code then send Enter (some send Tab) — add the
+  // product straight to the bill.
   const handleSearchKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key !== "Enter") return;
+    if (e.key !== "Enter" && e.key !== "Tab") return;
     const q = search.trim();
     if (!q) return;
-    let match = products.find((p) => p.barcode && p.barcode === q);
-    if (!match && filteredProducts.length === 1) match = filteredProducts[0];
-    if (match) {
-      addToCart(match.id);
+    if (e.key === "Tab") {
+      // Tab still moves on as usual unless what's in the box is a barcode.
+      if (q.length >= 4 && addScanned(q)) e.preventDefault();
+      return;
+    }
+    if (addScanned(q)) return;
+    if (filteredProducts.length === 1) {
+      addToCart(filteredProducts[0].id);
       setSearch("");
       setEntryMode("manual");
-      showToast(`Added ${match.name}`, "success");
+      showToast(`Added ${filteredProducts[0].name}`, "success");
     } else {
-      showToast("No product matches that barcode", "error");
+      showToast(`No product has the barcode ${q}`, "error");
     }
   };
+
+  // A scan with no box selected -- on the start screen, or after tapping
+  // somewhere on the bill -- comes here from the top bar and goes on the bill.
+  const onScanRef = useRef<(code: string) => boolean>(() => false);
+  useEffect(() => {
+    onScanRef.current = (code) => {
+      if (showReceipt) return false; // the bill's finished: let the top bar search it
+      if (!addScanned(code)) showToast(`No product has the barcode ${code}`, "error");
+      return true;
+    };
+  });
+  useEffect(() => {
+    const onScan = (e: Event) => {
+      if (onScanRef.current((e as CustomEvent<string>).detail)) e.preventDefault();
+    };
+    window.addEventListener(SCAN_EVENT, onScan);
+    return () => window.removeEventListener(SCAN_EVENT, onScan);
+  }, []);
 
   const resetSale = () => {
     setEntryMode("choose");

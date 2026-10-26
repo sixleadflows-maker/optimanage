@@ -3,6 +3,7 @@
 import { db } from "@/lib/db";
 import { auth } from "@/lib/auth";
 import { searchCustomers, type CustomerSearchHit } from "@/lib/actions/customers";
+import { barcodeCandidates, cleanScan, sameBarcode } from "@/lib/utils/barcode";
 
 export interface ProductSearchResult {
   id: string;
@@ -26,7 +27,7 @@ export type GlobalSearchResult =
 export async function globalSearch(query: string): Promise<GlobalSearchResult> {
   const session = await auth();
   if (!session?.user) return { ok: false, error: "You've been signed out — sign in again to search" };
-  const q = query.trim();
+  const q = cleanScan(query);
   if (!q) return { ok: true, products: [], customers: [] };
 
   // A single character is only ever a scanned code, never worth a name search.
@@ -39,7 +40,8 @@ export async function globalSearch(query: string): Promise<GlobalSearchResult> {
       where: {
         active: true,
         OR: [
-          { barcode: q },
+          // As scanned, or with the zeros in front a scanner may add or drop.
+          { barcode: { in: barcodeCandidates(q) } },
           ...(byText && words.length
             ? [{
                 AND: words.map((w) => ({
@@ -61,7 +63,7 @@ export async function globalSearch(query: string): Promise<GlobalSearchResult> {
   ]);
 
   // A scanned barcode is what was meant -- it goes first.
-  rows.sort((a, b) => Number(b.barcode === q) - Number(a.barcode === q));
+  rows.sort((a, b) => Number(sameBarcode(b.barcode, q)) - Number(sameBarcode(a.barcode, q)));
   return {
     ok: true,
     products: rows.map((p) => ({
