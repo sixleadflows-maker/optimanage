@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { SaleView } from "@/lib/data";
-import { formatCurrency, toLocalInput } from "@/lib/utils/format";
+import { formatCurrency, formatDate, toLocalInput } from "@/lib/utils/format";
 import { useApp } from "@/lib/context";
 import { cancelBalance, collectSalePayment, updateSale, updateSalePayment } from "@/lib/actions/sales";
 import { searchProductsForSale, type ProductSearchHit } from "@/lib/actions/products";
@@ -283,6 +283,7 @@ export function EditInvoiceModal({
   canBackdate,
   onClose,
   onDone,
+  onEditPayment,
 }: {
   sale: SaleView;
   customers: EditorCustomer[];
@@ -290,6 +291,8 @@ export function EditInvoiceModal({
   canBackdate: boolean;
   onClose: () => void;
   onDone: (message: string) => void;
+  /** Closes the editor and opens the correction for one payment received later. */
+  onEditPayment?: (payment: SaleView["payments"][number]) => void;
 }) {
   const { showToast } = useApp();
   const [lines, setLines] = useState<EditLine[]>(
@@ -548,6 +551,13 @@ export function EditInvoiceModal({
                 {PAYMENT_METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
                 <option value={SPLIT_METHOD}>Split (more than one)</option>
               </select>
+              {/* Changing this on a bill paid later used to look like it changed
+                  that payment too, and left the day's cash counting it as before. */}
+              {laterPaid > 0 && (
+                <p className="text-[10px] text-muted-foreground mt-1">
+                  {`Only for what was taken at the till. The ${formatCurrency(laterPaid)} paid later keeps its own method — change it with "Change" beside it below.`}
+                </p>
+              )}
             </div>
             <div className="col-span-2">
               <label className="text-[10px] text-muted-foreground block mb-1 flex items-center gap-1">
@@ -829,11 +839,19 @@ export function EditInvoiceModal({
                 className="w-28 px-2 py-1 glass-input text-xs text-right" />
             </div>
           )}
-          {laterPaid > 0 && (
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">+ Paid later ({sale.payments.length})</span><span>{formatCurrency(laterPaid)}</span>
+          {sale.payments.map((p) => (
+            <div key={p.id} className="flex items-center justify-between gap-2">
+              <span className="text-muted-foreground flex items-center gap-1.5">
+                {`+ Paid later · ${formatDate(p.date)} · ${p.method}`}
+                {onEditPayment && (
+                  <button type="button" onClick={() => onEditPayment(p)}
+                    title="Correct this payment's method, amount or date (closes this editor without saving it)"
+                    className="text-primary font-semibold cursor-pointer">Change</button>
+                )}
+              </span>
+              <span>{formatCurrency(p.amount)}</span>
             </div>
-          )}
+          ))}
           <div className="flex justify-between font-semibold">
             <span>{newBalance > 0 ? "Balance owed" : "Balance"}</span>
             <span className={newBalance > 0 ? "text-destructive" : "text-success"}>

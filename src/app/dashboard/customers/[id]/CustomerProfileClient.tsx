@@ -369,6 +369,7 @@ export function CustomerProfileClient({
             showToast(message, "success");
             router.refresh();
           }}
+          onEditPayment={canEdit ? (payment) => { setEditingSale(null); setEditingPayment({ sale: editingSale, payment }); } : undefined}
         />
       )}
 
