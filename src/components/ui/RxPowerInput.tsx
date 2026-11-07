@@ -39,11 +39,15 @@ export function RxPowerInput({
   onChange,
   compact = false,
   placeholder = "0.00",
+  placeholderIsValue = false,
 }: {
   value: string;
   onChange: (value: string) => void;
   compact?: boolean;
   placeholder?: string;
+  // The placeholder is a worked-out figure the box stands for until something
+  // is typed (the reading from SPH + ADD), so it reads like one, not like a hint.
+  placeholderIsValue?: boolean;
 }) {
   const [choosing, setChoosing] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -187,7 +191,7 @@ export function RxPowerInput({
             // Written out in full once the number is in: "2.5" becomes "+2.50".
             if (digits.trim() && digits !== ".") onChange(formatRxPower(parseRxText(value)));
           }}
-          className={`w-full glass-input text-center pl-5 pr-1 ${
+          className={`w-full glass-input text-center pl-5 pr-1 ${placeholderIsValue ? "placeholder:text-foreground/70" : ""} ${
             compact ? "py-1.5 text-[11px]" : "py-2 text-[11px] @min-[76px]:pl-8 @min-[76px]:pr-2 @min-[76px]:text-xs"
           }`}
         />

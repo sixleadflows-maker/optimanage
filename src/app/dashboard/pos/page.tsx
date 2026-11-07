@@ -23,6 +23,8 @@ export default async function POSPage({ searchParams }: { searchParams: Promise<
           leftPd: last.leftEye.pd, leftAdd: last.leftEye.add,
           rightSphText: last.rightEye.sphText, rightCylText: last.rightEye.cylText, rightAddText: last.rightEye.addText,
           leftSphText: last.leftEye.sphText, leftCylText: last.leftEye.cylText, leftAddText: last.leftEye.addText,
+          rightReadSph: last.rightEye.readSph, rightReadCyl: last.rightEye.readCyl, rightReadAxis: last.rightEye.readAxis,
+          leftReadSph: last.leftEye.readSph, leftReadCyl: last.leftEye.readCyl, leftReadAxis: last.leftEye.readAxis,
           // A note hidden in the history stays off the till screen too.
           notes: last.notesHidden ? "" : last.notes,
           isOwn: last.isOwnPrescription,

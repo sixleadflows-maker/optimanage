@@ -65,6 +65,10 @@ export interface EyeRx {
   sphText: string;
   cylText: string;
   addText: string;
+  // The reading power as typed in ("" when it's left to SPH + ADD).
+  readSph: string;
+  readCyl: string;
+  readAxis: string;
 }
 
 export interface SaleItem {

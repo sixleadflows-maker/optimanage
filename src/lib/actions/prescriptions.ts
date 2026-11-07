@@ -138,6 +138,8 @@ export interface SavedReading {
   leftSph: number; leftCyl: number; leftAxis: number; leftPd: number; leftAdd: number;
   rightSphText: string; rightCylText: string; rightAddText: string;
   leftSphText: string; leftCylText: string; leftAddText: string;
+  rightReadSph: string; rightReadCyl: string; rightReadAxis: string;
+  leftReadSph: string; leftReadCyl: string; leftReadAxis: string;
   // A note hidden in the history stays hidden here too.
   notes: string;
   isOwn: boolean;
@@ -167,6 +169,8 @@ export async function getCustomerReadings(customerId: string): Promise<SavedRead
     leftSph: r.leftSph, leftCyl: r.leftCyl, leftAxis: r.leftAxis, leftPd: r.leftPd, leftAdd: r.leftAdd,
     rightSphText: r.rightSphText, rightCylText: r.rightCylText, rightAddText: r.rightAddText,
     leftSphText: r.leftSphText, leftCylText: r.leftCylText, leftAddText: r.leftAddText,
+    rightReadSph: r.rightReadSph, rightReadCyl: r.rightReadCyl, rightReadAxis: r.rightReadAxis,
+    leftReadSph: r.leftReadSph, leftReadCyl: r.leftReadCyl, leftReadAxis: r.leftReadAxis,
     notes: r.notesHidden ? "" : r.notes,
     isOwn: r.isOwnPrescription,
     invoiceNo: r.sale?.invoiceNo ?? "",

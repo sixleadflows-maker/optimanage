@@ -112,6 +112,7 @@ function mapPrescription(p: {
   id: string; date: Date; rightSph: number; rightCyl: number; rightAxis: number; rightPd: number; rightAdd: number;
   leftSph: number; leftCyl: number; leftAxis: number; leftPd: number; leftAdd: number; notes: string;
   rightSphText: string; rightCylText: string; rightAddText: string; leftSphText: string; leftCylText: string; leftAddText: string;
+  rightReadSph: string; rightReadCyl: string; rightReadAxis: string; leftReadSph: string; leftReadCyl: string; leftReadAxis: string;
   label: string; notesHidden: boolean; isOwnPrescription: boolean;
   lensName: string; lensColor: string; lensDescription: string;
 }): Prescription {
@@ -121,10 +122,12 @@ function mapPrescription(p: {
     rightEye: {
       sph: p.rightSph, cyl: p.rightCyl, axis: p.rightAxis, pd: p.rightPd, add: p.rightAdd,
       sphText: p.rightSphText, cylText: p.rightCylText, addText: p.rightAddText,
+      readSph: p.rightReadSph, readCyl: p.rightReadCyl, readAxis: p.rightReadAxis,
     },
     leftEye: {
       sph: p.leftSph, cyl: p.leftCyl, axis: p.leftAxis, pd: p.leftPd, add: p.leftAdd,
       sphText: p.leftSphText, cylText: p.leftCylText, addText: p.leftAddText,
+      readSph: p.leftReadSph, readCyl: p.leftReadCyl, readAxis: p.leftReadAxis,
     },
     label: p.label,
     notes: p.notes,

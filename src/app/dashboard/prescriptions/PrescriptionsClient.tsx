@@ -9,7 +9,7 @@ import { createPrescription, createPrescriptions, deletePrescription, updatePres
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { RxTable } from "@/components/ui/RxTable";
 import { RxEntryTable } from "@/components/ui/RxEntryTable";
-import { formatEyeValue, parseRxText, rxFieldText, rxFormTexts } from "@/lib/utils/rx";
+import { formatEyeValue, parseRxText, readingFieldText, readingLine, rxFieldText, rxFormTexts } from "@/lib/utils/rx";
 import { Eye, Save, Search, Loader2, Pencil, Trash2, X, EyeOff, UserPlus, Plus } from "lucide-react";
 import { CustomerFormModal, type SavedCustomer } from "@/app/dashboard/customers/CustomerFormModal";
 import { matchesSearch } from "@/lib/utils/search";
@@ -19,6 +19,7 @@ interface RxCustomer { id: string; name: string; phone: string; phone2?: string;
 const empty = {
   rightSph: "", rightCyl: "", rightAxis: "", rightPd: "", rightAdd: "",
   leftSph: "", leftCyl: "", leftAxis: "", leftPd: "", leftAdd: "",
+  rightReadSph: "", rightReadCyl: "", rightReadAxis: "", leftReadSph: "", leftReadCyl: "", leftReadAxis: "",
   label: "",
   notes: "",
 };
@@ -44,6 +45,8 @@ const formFromRx = (rx: PrescriptionView) => ({
   leftSph: rxFieldText("Sph", rx.leftEye.sph, rx.leftEye.sphText), leftCyl: rxFieldText("Cyl", rx.leftEye.cyl, rx.leftEye.cylText),
   leftAxis: rxFieldText("Axis", rx.leftEye.axis), leftPd: rxFieldText("Pd", rx.leftEye.pd),
   leftAdd: rxFieldText("Add", rx.leftEye.add, rx.leftEye.addText),
+  rightReadSph: readingFieldText(rx.rightEye.readSph), rightReadCyl: readingFieldText(rx.rightEye.readCyl), rightReadAxis: readingFieldText(rx.rightEye.readAxis),
+  leftReadSph: readingFieldText(rx.leftEye.readSph), leftReadCyl: readingFieldText(rx.leftEye.readCyl), leftReadAxis: readingFieldText(rx.leftEye.readAxis),
   label: rx.label,
   notes: rx.notes,
 });
@@ -164,7 +167,7 @@ export function PrescriptionsClient({
   const customerReadings = !editing && selectedCustomer ? prescriptions.filter((p) => p.customerId === selectedCustomer) : [];
   const readingSummary = (rx: PrescriptionView) => {
     const eye = (e: PrescriptionView["rightEye"]) =>
-      [formatEyeValue("Sph", e), e.cyl || e.cylText ? `/ ${formatEyeValue("Cyl", e)}` : "", e.axis ? `× ${e.axis}` : ""].filter(Boolean).join(" ");
+      [formatEyeValue("Sph", e), e.cyl || e.cylText ? `/ ${formatEyeValue("Cyl", e)}` : "", e.axis ? `× ${e.axis}` : "", readingLine(e.readSph, e.readCyl, e.readAxis)].filter(Boolean).join(" ");
     return `R ${eye(rx.rightEye)}  ·  L ${eye(rx.leftEye)}`;
   };
   // Fills the last prescription being typed if it's still empty, otherwise

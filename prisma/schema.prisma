@@ -136,6 +136,16 @@ model Prescription {
   leftCylText  String @default("")
   leftAddText  String @default("")
 
+  // The reading (near) power when it was typed in -- a slip that only gives
+  // the reading, or one written differently from SPH + ADD. Kept as written
+  // ("+1.50", "90"); a box left empty shows what SPH + ADD works out to.
+  rightReadSph  String @default("")
+  rightReadCyl  String @default("")
+  rightReadAxis String @default("")
+  leftReadSph   String @default("")
+  leftReadCyl   String @default("")
+  leftReadAxis  String @default("")
+
   // Whose eyes this is for, when one order carries several prescriptions under
   // the same customer -- a family member's name, or "distance" / "reading".
   label      String   @default("")

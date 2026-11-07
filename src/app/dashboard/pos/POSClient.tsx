@@ -24,7 +24,7 @@ import { SplitPaymentFields, splitAmountsTotal, type SplitAmounts } from "@/comp
 import { firstImage } from "@/lib/utils/images";
 import { LensLoader } from "@/components/ui/LensLoader";
 import { RxEntryTable } from "@/components/ui/RxEntryTable";
-import { parseRxText, rxFieldText, rxFormTexts, formatRxPower, type RxTextColumns } from "@/lib/utils/rx";
+import { parseRxText, readingFieldText, readingLine, rxFieldText, rxFormTexts, formatRxPower, type RxTextColumns } from "@/lib/utils/rx";
 import { ThermalReceipt, A4Invoice, lensNote, type InvoiceData, type ShopDetails } from "@/components/invoice/InvoiceDocuments";
 import { matchesSearch } from "@/lib/utils/search";
 import { SCAN_EVENT, cleanScan, sameBarcode } from "@/lib/utils/barcode";
@@ -106,6 +106,9 @@ interface RxEntry {
   isOwn: boolean;
   rightSph: string; rightCyl: string; rightAxis: string; rightPd: string; rightAdd: string;
   leftSph: string; leftCyl: string; leftAxis: string; leftPd: string; leftAdd: string;
+  // The reading typed into its own boxes ("" leaves it to SPH + ADD).
+  rightReadSph: string; rightReadCyl: string; rightReadAxis: string;
+  leftReadSph: string; leftReadCyl: string; leftReadAxis: string;
   notes: string;
   // The record it was filled in from (attached as it is if left unchanged), and
   // the one it was saved to from here -- which stays the one record for this
@@ -145,6 +148,7 @@ const blankRx = (): RxEntry => ({
 const EMPTY_RX = {
   rightSph: "", rightCyl: "", rightAxis: "", rightPd: "", rightAdd: "",
   leftSph: "", leftCyl: "", leftAxis: "", leftPd: "", leftAdd: "",
+  rightReadSph: "", rightReadCyl: "", rightReadAxis: "", leftReadSph: "", leftReadCyl: "", leftReadAxis: "",
   notes: "",
   lensName: "", lensPrice: "", lensCost: "", lensQty: 1, lensColorChoice: "", lensColorOther: "", lensDescription: "", lensSearch: "",
 };
@@ -927,6 +931,8 @@ export function POSClient({
     leftSph: rxFieldText("Sph", last.leftSph, last.leftSphText), leftCyl: rxFieldText("Cyl", last.leftCyl, last.leftCylText),
     leftAxis: rxFieldText("Axis", last.leftAxis), leftPd: rxFieldText("Pd", last.leftPd),
     leftAdd: rxFieldText("Add", last.leftAdd, last.leftAddText),
+    rightReadSph: readingFieldText(last.rightReadSph), rightReadCyl: readingFieldText(last.rightReadCyl), rightReadAxis: readingFieldText(last.rightReadAxis),
+    leftReadSph: readingFieldText(last.leftReadSph), leftReadCyl: readingFieldText(last.leftReadCyl), leftReadAxis: readingFieldText(last.leftReadAxis),
     label: last.label,
     notes: last.notes,
     isOwn: last.isOwn,
@@ -936,9 +942,9 @@ export function POSClient({
 
   // One line for a saved reading in the list: "R -1.50 / -0.50 × 90 · L -1.25".
   const readingSummary = (r: SavedReading) => {
-    const eye = (sph: number, sphText: string, cyl: number, cylText: string, axis: number) =>
-      [formatRxPower(sph, sphText), cyl || cylText ? `/ ${formatRxPower(cyl, cylText)}` : "", axis ? `× ${axis}` : ""].filter(Boolean).join(" ");
-    return `R ${eye(r.rightSph, r.rightSphText, r.rightCyl, r.rightCylText, r.rightAxis)}  ·  L ${eye(r.leftSph, r.leftSphText, r.leftCyl, r.leftCylText, r.leftAxis)}`;
+    const eye = (sph: number, sphText: string, cyl: number, cylText: string, axis: number, reading: string) =>
+      [formatRxPower(sph, sphText), cyl || cylText ? `/ ${formatRxPower(cyl, cylText)}` : "", axis ? `× ${axis}` : "", reading].filter(Boolean).join(" ");
+    return `R ${eye(r.rightSph, r.rightSphText, r.rightCyl, r.rightCylText, r.rightAxis, readingLine(r.rightReadSph, r.rightReadCyl, r.rightReadAxis))}  ·  L ${eye(r.leftSph, r.leftSphText, r.leftCyl, r.leftCylText, r.leftAxis, readingLine(r.leftReadSph, r.leftReadCyl, r.leftReadAxis))}`;
   };
 
   const showReadings = async () => {

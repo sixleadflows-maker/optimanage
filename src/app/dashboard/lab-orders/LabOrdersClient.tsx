@@ -15,7 +15,7 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { RxTable } from "@/components/ui/RxTable";
 import { RxEntryTable, type RxFormValues } from "@/components/ui/RxEntryTable";
 import { matchesSearch } from "@/lib/utils/search";
-import { formatEyeValue, parseRxText, rxFormTexts } from "@/lib/utils/rx";
+import { formatEyeValue, parseRxText, readingLine, rxFormTexts } from "@/lib/utils/rx";
 
 const statusColors: Record<string, string> = {
   "Ordered": "bg-blue-500/10 text-blue-600 border-blue-200",
@@ -33,6 +33,7 @@ const EMPTY_ORDER = { customerId: "", labId: "", lensType: "", prescription: "",
 const EMPTY_RX: RxFormValues & { label: string } = {
   rightSph: "", rightCyl: "", rightAxis: "", rightPd: "", rightAdd: "",
   leftSph: "", leftCyl: "", leftAxis: "", leftPd: "", leftAdd: "",
+  rightReadSph: "", rightReadCyl: "", rightReadAxis: "", leftReadSph: "", leftReadCyl: "", leftReadAxis: "",
   label: "",
 };
 
@@ -46,6 +47,7 @@ function rxLine(rx: Prescription) {
     [
       formatEyeValue("Sph", e), e.cyl || e.cylText ? `/ ${formatEyeValue("Cyl", e)}` : "", e.axis ? `× ${e.axis}` : "",
       e.add || e.addText ? `ADD ${formatEyeValue("Add", e)}` : "",
+      readingLine(e.readSph, e.readCyl, e.readAxis),
     ].filter(Boolean).join(" ");
   return `R ${eye(rx.rightEye)} · L ${eye(rx.leftEye)}`;
 }

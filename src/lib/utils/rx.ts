@@ -80,12 +80,22 @@ export function parseRxText(v: string): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+// The reading power typed into its own boxes, as written ("+1.50", "90"). A
+// box left empty shows what SPH + ADD works out to instead.
+export const RX_READING_FIELDS = [
+  "rightReadSph", "rightReadCyl", "rightReadAxis", "leftReadSph", "leftReadCyl", "leftReadAxis",
+] as const;
+export type RxReadingField = (typeof RX_READING_FIELDS)[number];
+
+// Everything kept as written rather than as a number: the words for a power,
+// and the reading typed in.
 export const RX_TEXT_FIELDS = [
   "rightSphText", "rightCylText", "rightAddText", "leftSphText", "leftCylText", "leftAddText",
+  ...RX_READING_FIELDS,
 ] as const;
 export type RxTextColumns = Record<(typeof RX_TEXT_FIELDS)[number], string>;
 
-/** The words for each power, cleaned up the one way before they're stored. */
+/** The words for each power and the typed-in reading, cleaned up the one way before they're stored. */
 export function rxTextColumns(p: Partial<RxTextColumns>): RxTextColumns {
   const out = {} as RxTextColumns;
   for (const k of RX_TEXT_FIELDS) out[k] = (p[k] ?? "").trim().slice(0, RX_TEXT_MAX);
@@ -117,13 +127,44 @@ export function rxLensLabel(p: { lensName: string; lensColor: string; lensDescri
   return [p.lensName, p.lensColor, p.lensDescription].map((s) => s.trim()).filter(Boolean).join(" · ");
 }
 
-/** The words typed into a prescription form's power boxes. */
+/** A reading box as stored: the power written out ("+1.50") or its words; an axis as a whole number. */
+function readingText(v: string, axis = false): string {
+  if (isRxTextValue(v)) return rxTextOf(v);
+  if (!/\d/.test(v)) return "";
+  const n = parseRxText(v);
+  return axis ? String(Math.round(n)) : formatRxPower(n);
+}
+
+/** What a reading box starts from when filled from a saved prescription. */
+export function readingFieldText(stored: string): string {
+  const v = stored.trim();
+  return !v || /^[+-]?(\d+\.?\d*|\.\d+)$/.test(v) ? v : `${RX_TEXT_MARK}${v}`;
+}
+
+/**
+ * One eye's reading powers as shown -- D. Sph, D. Cyl, Axis. A box that was
+ * typed in shows what was typed; one left empty shows the distance SPH with the
+ * ADD put on, and the CYL and axis as they are. "" where there's neither.
+ */
+export function readingPowers(eye: {
+  sph: number; cyl: number; axis: number; add: number; cylText?: string; addText?: string;
+  readSph?: string; readCyl?: string; readAxis?: string;
+}): [string, string, string] {
+  const sph = readingSph(eye.sph, eye.add, eye.addText);
+  const cyl = sph && (eye.cyl || eye.cylText?.trim()) ? formatRxPower(eye.cyl, eye.cylText) : "";
+  const axis = sph && eye.axis ? String(eye.axis) : "";
+  return [eye.readSph?.trim() || sph, eye.readCyl?.trim() || cyl, eye.readAxis?.trim() || axis];
+}
+
+/** The words typed into a prescription form's power boxes, and the reading typed into its own. */
 export function rxFormTexts(f: {
   rightSph: string; rightCyl: string; rightAdd: string; leftSph: string; leftCyl: string; leftAdd: string;
-}): RxTextColumns {
+} & Record<RxReadingField, string>): RxTextColumns {
   return {
     rightSphText: rxTextOf(f.rightSph), rightCylText: rxTextOf(f.rightCyl), rightAddText: rxTextOf(f.rightAdd),
     leftSphText: rxTextOf(f.leftSph), leftCylText: rxTextOf(f.leftCyl), leftAddText: rxTextOf(f.leftAdd),
+    rightReadSph: readingText(f.rightReadSph), rightReadCyl: readingText(f.rightReadCyl), rightReadAxis: readingText(f.rightReadAxis, true),
+    leftReadSph: readingText(f.leftReadSph), leftReadCyl: readingText(f.leftReadCyl), leftReadAxis: readingText(f.leftReadAxis, true),
   };
 }
 
@@ -146,17 +187,28 @@ export function rxHistoryOrder<T extends { id: string; customerId: string; saleI
   });
 }
 
-/** A prescription on one line, as on a lab slip: "R -2.00 / -0.50 × 180 ADD +2.50 · L -2.25 / -0.75 × 170". */
+/** A reading typed into its own boxes, on one line: "READING +1.50 / -0.50 × 90" ("" when none was typed). */
+export function readingLine(readSph = "", readCyl = "", readAxis = ""): string {
+  const [sph, cyl, axis] = [readSph.trim(), readCyl.trim(), readAxis.trim()];
+  if (!sph && !cyl && !axis) return "";
+  return `READING ${[sph || "0.00", cyl ? `/ ${cyl}` : "", axis ? `× ${axis}` : ""].filter(Boolean).join(" ")}`;
+}
+
+/**
+ * A prescription on one line, as on a lab slip: "R -2.00 / -0.50 × 180 ADD +2.50 · L -2.25 / -0.75 × 170".
+ * A reading typed into its own boxes follows its eye: "READING +1.50 / -0.50 × 90".
+ */
 export function rxSummary(p: {
   rightSph: number; rightCyl: number; rightAxis: number; rightAdd: number;
   leftSph: number; leftCyl: number; leftAxis: number; leftAdd: number;
 } & Partial<RxTextColumns>): string {
-  const eye = (sph: number, cyl: number, axis: number, add: number, sphText = "", cylText = "", addText = "") =>
+  const eye = (sph: number, cyl: number, axis: number, add: number, sphText = "", cylText = "", addText = "", readSph = "", readCyl = "", readAxis = "") =>
     [
       formatRxPower(sph, sphText),
       cyl || cylText.trim() ? `/ ${formatRxPower(cyl, cylText)}` : "",
       axis ? `× ${axis}` : "",
       add || addText.trim() ? `ADD ${formatRxPower(add, addText)}` : "",
+      readingLine(readSph, readCyl, readAxis),
     ].filter(Boolean).join(" ");
-  return `R ${eye(p.rightSph, p.rightCyl, p.rightAxis, p.rightAdd, p.rightSphText, p.rightCylText, p.rightAddText)} · L ${eye(p.leftSph, p.leftCyl, p.leftAxis, p.leftAdd, p.leftSphText, p.leftCylText, p.leftAddText)}`;
+  return `R ${eye(p.rightSph, p.rightCyl, p.rightAxis, p.rightAdd, p.rightSphText, p.rightCylText, p.rightAddText, p.rightReadSph, p.rightReadCyl, p.rightReadAxis)} · L ${eye(p.leftSph, p.leftCyl, p.leftAxis, p.leftAdd, p.leftSphText, p.leftCylText, p.leftAddText, p.leftReadSph, p.leftReadCyl, p.leftReadAxis)}`;
 }
