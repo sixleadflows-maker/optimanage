@@ -1,7 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, unstable_isUnrecognizedActionError } from "next/navigation";
+import { reportOutdatedPage } from "@/components/layout/UpdateNotice";
+import { closesCorrectedNote } from "@/lib/cash/note";
 import type { CashCollectionData } from "@/lib/data";
 import { formatCurrency, formatDate } from "@/lib/utils/format";
 import { useApp } from "@/lib/context";
@@ -9,6 +11,7 @@ import { saveCashCollection } from "@/lib/actions/cash";
 import { Banknote, CreditCard, Building2, Smartphone, Save, Loader2, CheckCircle } from "lucide-react";
 import { BankDeposits } from "./BankDeposits";
 import { CashEntries } from "./CashEntries";
+import { CashAdjustments } from "./CashAdjustments";
 
 export function CashClient({ data, date, canManage }: { data: CashCollectionData; date: string; canManage: boolean }) {
   const { showToast } = useApp();
@@ -36,11 +39,27 @@ export function CashClient({ data, date, canManage }: { data: CashCollectionData
   const save = async () => {
     setSaving(true);
     try {
-      await saveCashCollection({ date, openingCash, closingCash, notes });
-      showToast("Day closed & saved", "success");
+      const result = await saveCashCollection({
+        date, openingCash, closingCash, notes,
+        // What this page showed, so the close isn't saved against figures that
+        // changed on another screen in the meantime.
+        seen: { net: data.cashSales - data.expenses - data.bankDeposits, carried: data.opening?.amount ?? null },
+      });
+      if (!result.ok) {
+        showToast(result.error, "error");
+        if ("changed" in result && result.changed) router.refresh();
+        return;
+      }
+      const note = closesCorrectedNote(result.closesCorrected);
+      showToast(note ? `Day closed & saved. ${note}` : "Day closed & saved", "success");
       router.refresh();
-    } catch {
-      showToast("Could not save", "error");
+    } catch (e) {
+      if (unstable_isUnrecognizedActionError(e)) {
+        reportOutdatedPage();
+        showToast("The system was updated while this page was open, so the day wasn't closed. Refresh the page, then save again.", "error");
+      } else {
+        showToast("The day close wasn't saved — check the connection and try again.", "error");
+      }
     } finally {
       setSaving(false);
     }
@@ -73,6 +92,8 @@ export function CashClient({ data, date, canManage }: { data: CashCollectionData
       </div>
 
       <CashEntries entries={data.entries} date={date} />
+
+      <CashAdjustments adjustments={data.adjustments} closed={!!data.saved} />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 glass-card p-5 space-y-4">

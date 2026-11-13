@@ -5,6 +5,7 @@ import { formatRxPower } from "@/lib/utils/rx";
 import { settleInvoice } from "@/lib/sales/settle";
 import { creditHeld } from "@/lib/sales/credit";
 import { CREDIT_METHOD } from "@/lib/constants";
+import { cashDayLabel, syncCashCloses } from "@/lib/cash/closes";
 
 /**
  * Trash for records that are really removed when deleted.
@@ -93,7 +94,14 @@ export async function trashInvoice(saleId: string, deletedById: string | null) {
     await tx.sale.delete({ where: { id: saleId } });
   }, { timeout: 20_000 });
 
-  return { hadReturns: returns.length > 0 };
+  // Its cash comes off every day it was counted on: the sale, payments taken
+  // later and refunds on its returns.
+  const closesCorrected = await syncCashCloses({
+    dates: [sale.date, ...payments.map((p) => p.date), ...returns.map((r) => r.date)],
+    reason: `${sale.invoiceNo} (${cashDayLabel(sale.date)}) deleted`,
+    by: { id: deletedById },
+  });
+  return { hadReturns: returns.length > 0, closesCorrected };
 }
 
 async function restoreInvoice(tx: Tx, data: Row) {
@@ -195,6 +203,13 @@ export async function trashReturn(returnId: string, deletedById: string | null) 
     }
     await tx.return.delete({ where: { id: returnId } });
   }, { timeout: 20_000 });
+
+  const closesCorrected = await syncCashCloses({
+    dates: [ret.date],
+    reason: `${ret.returnNo} (${cashDayLabel(ret.date)}) undone: ${rs(ret.totalRefund)} ${ret.refundMethod} refund on ${ret.sale.invoiceNo}`,
+    by: { id: deletedById },
+  });
+  return { closesCorrected };
 }
 
 async function restoreReturn(tx: Tx, data: Row) {
@@ -232,6 +247,12 @@ export async function trashExpense(id: string, deletedById: string | null) {
       { expense: e }, deletedById);
     await tx.expense.delete({ where: { id } });
   });
+  const closesCorrected = await syncCashCloses({
+    dates: [e.date],
+    reason: `Expense deleted: ${[e.category, `${rs(e.amount)} ${e.paymentMethod || "Cash"}`, e.description].filter(Boolean).join(", ")}`,
+    by: { id: deletedById },
+  });
+  return { closesCorrected };
 }
 
 export async function trashBankDeposit(id: string, deletedById: string | null) {
@@ -243,6 +264,12 @@ export async function trashBankDeposit(id: string, deletedById: string | null) {
       { deposit: d }, deletedById);
     await tx.bankDeposit.delete({ where: { id } });
   });
+  const closesCorrected = await syncCashCloses({
+    dates: [d.date],
+    reason: `Bank deposit of ${rs(d.amount)} deleted`,
+    by: { id: deletedById },
+  });
+  return { closesCorrected };
 }
 
 /** An advance a customer paid in, or a refund of one, entered by mistake. */
@@ -266,6 +293,12 @@ export async function trashCustomerCredit(id: string, deletedById: string | null
       { credit: row }, deletedById);
     await tx.customerCredit.delete({ where: { id } });
   });
+  const closesCorrected = await syncCashCloses({
+    dates: [row.date],
+    reason: `${row.amount > 0 ? "Advance received" : "Advance refunded"} deleted: ${rs(Math.abs(row.amount))} ${row.method}, ${who}`,
+    by: { id: deletedById },
+  });
+  return { closesCorrected };
 }
 
 export async function trashPrescription(id: string, deletedById: string | null) {
@@ -318,6 +351,9 @@ export async function trashSalaryEntry(id: string, deletedById: string | null) {
       { salaryEntry: row }, deletedById);
     await tx.salaryEntry.delete({ where: { id } });
   });
+  // Who earns what is the owner's business, so the reason doesn't say.
+  const closesCorrected = await syncCashCloses({ dates: [e.date], reason: "A salary entry was deleted", by: { id: deletedById } });
+  return { closesCorrected };
 }
 
 export async function trashPurchaseOrder(id: string, deletedById: string | null) {
@@ -405,7 +441,26 @@ async function restorePayment(tx: Tx, data: Row) {
 
 // ─── Restore ────────────────────────────────────────────────
 
-export async function restoreSnapshot(entryId: string) {
+/** The days a trashed record's money was counted on, so the closes can follow it back. */
+function cashDates(kind: SnapshotTrashKind, data: Row): (Date | null)[] {
+  const at = (row: unknown) => {
+    const v = (row as Row | null | undefined)?.date;
+    return typeof v === "string" || v instanceof Date ? new Date(v) : null;
+  };
+  switch (kind) {
+    case "invoice":
+      return [at(data.sale), ...((data.payments as Row[] | undefined) ?? []).map(at), ...((data.returns as Row[] | undefined) ?? []).map(at)];
+    case "return": return [at(data.return)];
+    case "payment": return [at(data.payment)];
+    case "expense": return [at(data.expense)];
+    case "bankDeposit": return [at(data.deposit)];
+    case "customerCredit": return [at(data.credit)];
+    case "salaryEntry": return [at(data.salaryEntry)];
+    default: return [];
+  }
+}
+
+export async function restoreSnapshot(entryId: string, restoredBy?: { id?: string | null; name?: string | null }) {
   const entry = await db.trashEntry.findUnique({ where: { id: entryId } });
   if (!entry) throw new TrashError("That item is no longer in the trash");
   const data = entry.data as Row;
@@ -490,5 +545,14 @@ export async function restoreSnapshot(entryId: string) {
     await tx.trashEntry.delete({ where: { id: entry.id } });
   }, { timeout: 20_000 });
 
-  return { kind: entry.kind as SnapshotTrashKind, title: entry.title };
+  const kind = entry.kind as SnapshotTrashKind;
+  const dates = cashDates(kind, data);
+  const closesCorrected = dates.length
+    ? await syncCashCloses({
+      dates,
+      reason: kind === "salaryEntry" ? "A salary entry was restored from the Trash" : `${entry.title} restored from the Trash`,
+      by: restoredBy,
+    })
+    : 0;
+  return { kind, title: entry.title, closesCorrected };
 }

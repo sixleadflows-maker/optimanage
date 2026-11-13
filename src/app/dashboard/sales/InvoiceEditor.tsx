@@ -16,6 +16,13 @@ import { matchesSearch } from "@/lib/utils/search";
 import { allNumbers } from "@/lib/utils/phone";
 import { unstable_isUnrecognizedActionError } from "next/navigation";
 import { reportOutdatedPage } from "@/components/layout/UpdateNotice";
+import { closesCorrectedNote } from "@/lib/cash/note";
+
+/** A message, with a word added when the change reached days already closed on the Cash page. */
+function withClosesNote(message: string, closesCorrected: number | undefined) {
+  const note = closesCorrectedNote(closesCorrected ?? 0);
+  return note ? `${message}${message.endsWith(".") ? "" : "."} ${note}` : message;
+}
 
 /**
  * A save that got no answer at all: this page is from before an update (the
@@ -103,11 +110,12 @@ export function CollectPaymentModal({
         showToast(res.error, "error");
         return;
       }
-      onDone(
+      onDone(withClosesNote(
         res.balance > 0
           ? `${formatCurrency(amount)} received — ${formatCurrency(res.balance)} still owed`
-          : `${sale.invoiceNo} is now paid in full`
-      );
+          : `${sale.invoiceNo} is now paid in full`,
+        res.closesCorrected,
+      ));
     } catch (e) {
       saveFailed(e, showToast);
     } finally {
@@ -491,21 +499,22 @@ export function EditInvoiceModal({
         const cancelled = await cancelBalance(sale.id);
         if (!cancelled.ok) {
           showToast(`Invoice saved, but the balance wasn't cancelled: ${cancelled.error}`, "error");
-          onDone(`${sale.invoiceNo} updated — ${formatCurrency(res.balance)} now owed`);
+          onDone(withClosesNote(`${sale.invoiceNo} updated — ${formatCurrency(res.balance)} now owed`, res.closesCorrected));
           return;
         }
-        onDone(`${sale.invoiceNo} updated — ${formatCurrency(cancelled.amount)} balance cancelled, settled`);
+        onDone(withClosesNote(`${sale.invoiceNo} updated — ${formatCurrency(cancelled.amount)} balance cancelled, settled`, res.closesCorrected));
       } catch {
         showToast("Invoice saved, but the balance wasn't cancelled. Open the invoice's wallet to cancel it.", "error");
-        onDone(`${sale.invoiceNo} updated — ${formatCurrency(res.balance)} now owed`);
+        onDone(withClosesNote(`${sale.invoiceNo} updated — ${formatCurrency(res.balance)} now owed`, res.closesCorrected));
       }
       return;
     }
-    onDone(
+    onDone(withClosesNote(
       res.balance > 0
         ? `${sale.invoiceNo} updated — ${formatCurrency(res.balance)} now owed`
-        : `${sale.invoiceNo} updated — paid in full`
-    );
+        : `${sale.invoiceNo} updated — paid in full`,
+      res.closesCorrected,
+    ));
   };
 
   return (
@@ -973,11 +982,12 @@ export function EditPaymentModal({
         showToast(res.error, "error");
         return;
       }
-      onDone(
+      onDone(withClosesNote(
         remove
           ? `Payment moved to the Trash — ${res.balance > 0 ? `${formatCurrency(res.balance)} now owed` : "paid in full"}. Restore it from there if that was a mistake.`
-          : `Payment updated — ${res.balance > 0 ? `${formatCurrency(res.balance)} still owed` : "paid in full"}`
-      );
+          : `Payment updated — ${res.balance > 0 ? `${formatCurrency(res.balance)} still owed` : "paid in full"}`,
+        res.closesCorrected,
+      ));
     } catch (e) {
       saveFailed(e, showToast);
     } finally {

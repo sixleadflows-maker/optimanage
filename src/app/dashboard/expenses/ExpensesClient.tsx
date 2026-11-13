@@ -7,6 +7,7 @@ import type { Expense } from "@/lib/mock/types";
 import { formatCurrency, formatDate } from "@/lib/utils/format";
 import { useApp } from "@/lib/context";
 import { createExpense, deleteExpense, updateExpense } from "@/lib/actions/expenses";
+import { closesCorrectedNote } from "@/lib/cash/note";
 import { Plus, Search, X, Loader2, Wallet, Pencil, Trash2 } from "lucide-react";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { EXPENSE_PAYMENT_METHODS } from "@/lib/constants";
@@ -91,17 +92,13 @@ export function ExpensesClient({ expenses, canManage }: { expenses: Expense[]; c
     }
     setSaving(true);
     try {
-      if (editingId) {
-        const res = await updateExpense(editingId, form);
-        if (!res.ok) {
-          showToast(res.error, "error");
-          return;
-        }
-        showToast("Expense updated", "success");
-      } else {
-        await createExpense(form);
-        showToast("Expense recorded", "success");
+      const res = editingId ? await updateExpense(editingId, form) : await createExpense(form);
+      if (!res.ok) {
+        showToast(res.error, "error");
+        return;
       }
+      const note = closesCorrectedNote(res.closesCorrected);
+      showToast(`${editingId ? "Expense updated" : "Expense recorded"}${note ? `. ${note}` : ""}`, "success");
       setShowAdd(false);
       setEditingId(null);
       setForm(blankForm());
@@ -122,7 +119,8 @@ export function ExpensesClient({ expenses, canManage }: { expenses: Expense[]; c
         showToast(res.error, "error");
         return;
       }
-      showToast("Expense moved to Trash", "success");
+      const note = closesCorrectedNote(res.closesCorrected);
+      showToast(`Expense moved to Trash${note ? `. ${note}` : ""}`, "success");
       setDeleting(null);
       router.refresh();
     } catch {

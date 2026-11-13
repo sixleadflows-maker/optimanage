@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { auth } from "@/lib/auth";
 import { trashBankDeposit, TrashError } from "@/lib/trash/snapshots";
+import { cashDayLabel, cashRs, syncCashCloses } from "@/lib/cash/closes";
 
 export interface BankDepositInput {
   date: string; // YYYY-MM-DD
@@ -41,6 +42,8 @@ export async function createBankDeposit(input: BankDepositInput): Promise<{ ok: 
   if (!c.ok) return c;
 
   const created = await db.bankDeposit.create({ data: { ...c.data, depositedBy: session.user.name ?? "" } });
+  // A deposit entered for a day already closed comes off that day's drawer.
+  await syncCashCloses({ dates: [created.date], reason: `Bank deposit of ${cashRs(created.amount)} added`, by: { name: session.user.name } });
   revalidatePath("/dashboard/cash");
   return { ok: true as const, id: created.id };
 }
@@ -54,8 +57,17 @@ export async function updateBankDeposit(id: string, input: BankDepositInput): Pr
   const c = checked(input);
   if (!c.ok) return c;
 
+  // Read first: the day it was on may be closed too, if the date is changed.
+  const before = await db.bankDeposit.findUnique({ where: { id } });
+  if (!before) return { ok: false as const, error: "This bank deposit has been deleted" };
   const updated = await db.bankDeposit.updateMany({ where: { id }, data: c.data });
   if (updated.count === 0) return { ok: false as const, error: "This bank deposit has been deleted" };
+  const said = (d: { amount: number; date: Date }) => `${cashRs(d.amount)} (${cashDayLabel(d.date)})`;
+  await syncCashCloses({
+    dates: [before.date, c.data.date],
+    reason: `Bank deposit changed: ${said(before)} → ${said(c.data)}`,
+    by: { name: session.user.name },
+  });
   revalidatePath("/dashboard/cash");
   return { ok: true as const };
 }

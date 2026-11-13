@@ -9,6 +9,7 @@ import { paymentsOnDays, refundOnDay } from "@/lib/sales/received";
 import { CREDIT_METHOD, ORDER_STATUSES, OWNER_ONLY_TRASH } from "@/lib/constants";
 import { rxHistoryOrder } from "@/lib/utils/rx";
 import { readSalaryHistory, type SalaryKindValue, type SalaryStep } from "@/lib/salaries";
+import { carriedFrom, cashDay, drawerNetByDay, netBetween, nextCashDay } from "@/lib/cash/closes";
 
 // ─── Enum mappers (DB enum → UI title-case) ─────────────────
 const brandTagLabel = { ORIGINAL: "Original", COPY: "Copy", BRANDED: "Branded", UNBRANDED: "Unbranded" } as const;
@@ -1028,6 +1029,28 @@ export interface CashCollectionData {
   // What the drawer should open with: the last close, plus the cash taken (less
   // cash spent and banked) on any day since that hasn't been closed off.
   opening: { amount: number; closedOn: string; sinceLastClose: number } | null;
+  // Changes carried into a close after it was saved -- a bill corrected from
+  // cash to card, a sale rung up after closing -- oldest first. On a closed day
+  // they're that day's own; on a day not closed yet, the last close's, which
+  // is what the opening is carried from.
+  adjustments: CashAdjustmentView[];
+}
+
+/** A change carried into a day close after it was saved, and why. */
+export interface CashAdjustmentView {
+  id: string;
+  // The close it was made to.
+  day: string;
+  at: string;
+  reason: string;
+  by: string;
+  openingBefore: number;
+  openingAfter: number;
+  // The day's own cash in less cash out.
+  netBefore: number;
+  netAfter: number;
+  closingBefore: number;
+  closingAfter: number;
 }
 
 /** One payment towards the day's takings. */
@@ -1088,7 +1111,12 @@ export async function getCashCollection(dateStr: string, branchId?: string): Pro
     }),
     db.expense.findMany({ where: { date: { gte: start, lt: end } } }),
     db.bankDeposit.findMany({ where: { date: { gte: start, lt: end } }, orderBy: { createdAt: "asc" } }),
-    db.cashCollection.findFirst({ where: { date: { gte: start, lt: end }, ...(branchId ? { branchId } : {}) } }),
+    // The first saved, if a day was ever closed twice -- the one the closes are kept in line with.
+    db.cashCollection.findFirst({
+      where: { date: { gte: start, lt: end }, ...(branchId ? { branchId } : {}) },
+      orderBy: { createdAt: "asc" },
+      include: { adjustments: { orderBy: { createdAt: "asc" } } },
+    }),
     // Advances customers paid in (or were handed back) today.
     db.customerCredit.findMany({
       where: { date: { gte: start, lt: end } },
@@ -1150,6 +1178,8 @@ export async function getCashCollection(dateStr: string, branchId?: string): Pro
   const cashExpenses = expenses.filter((e) => (e.paymentMethod || "Cash") === "Cash");
   const cashSalaries = salaryPay.filter((p) => p.method === "Cash").reduce((sum, p) => sum + p.amount, 0);
   const otherSalaries = salaryPay.filter((p) => p.method !== "Cash").reduce((sum, p) => sum + p.amount, 0);
+  const opening = await openingCashFor(start, branchId);
+  const adjustedClose = saved ?? opening?.close;
 
   return {
     date: dateStr,
@@ -1179,55 +1209,41 @@ export async function getCashCollection(dateStr: string, branchId?: string): Pro
     refunds: refunds.reduce((sum, r) => sum + r.totalRefund, 0),
     cashRefunds: refunds.filter((r) => r.refundMethod === "Cash").reduce((sum, r) => sum + r.totalRefund, 0),
     saved: saved ? { openingCash: saved.openingCash, closingCash: saved.closingCash, notes: saved.notes, closedBy: saved.closedBy } : null,
-    opening: await openingCashFor(start, branchId),
+    opening: opening ? { amount: opening.amount, closedOn: opening.closedOn, sinceLastClose: opening.sinceLastClose } : null,
+    adjustments: (adjustedClose?.adjustments ?? []).map((a) => ({
+      id: a.id,
+      day: cashDay(adjustedClose!.date),
+      at: a.createdAt.toISOString(),
+      reason: a.reason,
+      by: a.by,
+      openingBefore: a.openingBefore,
+      openingAfter: a.openingAfter,
+      netBefore: a.netBefore,
+      netAfter: a.netAfter,
+      closingBefore: a.closingBefore,
+      closingAfter: a.closingAfter,
+    })),
   };
 }
 
 /**
  * What the drawer should start the day with, so nobody types it in: the cash
- * counted at the last close, plus the cash taken (less cash spent) on any day
- * in between that was never closed off.
+ * counted at the last close, plus the cash taken (less cash spent and banked)
+ * on any day in between that was never closed off. Worked out with the same
+ * day-by-day figures the saved closes are kept in line with, so the opening
+ * shown here and the one a close is saved with can't disagree.
  */
 async function openingCashFor(start: Date, branchId?: string) {
-  const lastClose = await db.cashCollection.findFirst({
+  const close = await db.cashCollection.findFirst({
     where: { date: { lt: start }, ...(branchId ? { branchId } : {}) },
-    orderBy: { date: "desc" },
+    orderBy: [{ date: "desc" }, { createdAt: "asc" }],
+    include: { adjustments: { orderBy: { createdAt: "asc" } } },
   });
-  if (!lastClose) return null;
+  if (!close) return null;
 
-  const gap = { gte: new Date(lastClose.date.getTime() + 24 * 60 * 60 * 1000), lt: start };
-  const [sales, laterPayments, expenses, deposits, credits, salaryPay, cashRefunds] = await Promise.all([
-    db.sale.findMany({
-      where: { date: gap, ...(branchId ? { branchId } : {}) },
-      select: { paid: true, paymentMethod: true, paymentSplit: true, payments: { select: { amount: true } } },
-    }),
-    db.salePayment.findMany({
-      where: { date: gap, ...(branchId ? { sale: { branchId } } : {}) },
-      select: { amount: true, method: true },
-    }),
-    db.expense.findMany({ where: { date: gap }, select: { amount: true, paymentMethod: true } }),
-    db.bankDeposit.findMany({ where: { date: gap }, select: { amount: true } }),
-    db.customerCredit.findMany({ where: { date: gap }, select: { amount: true, method: true } }),
-    db.salaryEntry.findMany({ where: { date: gap, kind: { not: "DEDUCTION" }, method: "Cash" }, select: { amount: true } }),
-    db.return.findMany({ where: { date: gap, refundMethod: "Cash", ...(branchId ? { sale: { branchId } } : {}) }, select: { totalRefund: true } }),
-  ]);
-
-  const takenAtTill = sales.flatMap((s) => tillParts(s, s.paid - s.payments.reduce((sum, p) => sum + p.amount, 0)));
-  // Advances paid in cash add to it; ones handed back in cash come off (they're negative).
-  const cashIn = [...takenAtTill, ...laterPayments, ...credits].filter((c) => c.method === "Cash").reduce((sum, c) => sum + c.amount, 0);
-  // Cash spent (salary paid in cash too), and cash taken to the bank -- all left the drawer.
-  const cashOut =
-    expenses.filter((e) => (e.paymentMethod || "Cash") === "Cash").reduce((sum, e) => sum + e.amount, 0) +
-    salaryPay.reduce((sum, p) => sum + p.amount, 0) +
-    cashRefunds.reduce((sum, r) => sum + r.totalRefund, 0) +
-    deposits.reduce((sum, d) => sum + d.amount, 0);
-  const sinceLastClose = Math.round((cashIn - cashOut) * 100) / 100;
-
-  return {
-    amount: Math.max(0, Math.round((lastClose.closingCash + sinceLastClose) * 100) / 100),
-    closedOn: lastClose.date.toISOString().slice(0, 10),
-    sinceLastClose,
-  };
+  const cash = await drawerNetByDay(nextCashDay(close.date), start, db, branchId);
+  const sinceLastClose = netBetween(cash, cashDay(close.date), cashDay(start));
+  return { amount: carriedFrom(close.closingCash, sinceLastClose), closedOn: cashDay(close.date), sinceLastClose, close };
 }
 
 // ─── Dashboard aggregates ───────────────────────────────────

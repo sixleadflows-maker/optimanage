@@ -8,6 +8,7 @@ import {
   type SalaryKindValue,
 } from "@/lib/salaries";
 import { trashSalaryEntry, TrashError } from "@/lib/trash/snapshots";
+import { syncCashCloses } from "@/lib/cash/closes";
 
 // Salaries are the owner's alone, like Analytics: what each person earns isn't
 // for everyone at the counter to see.
@@ -148,7 +149,10 @@ export async function addSalaryEntry(input: SalaryEntryInput) {
   if (problem) return { ok: false as const, error: problem };
   const employee = await db.employee.findUnique({ where: { id: input.employeeId }, select: { id: true } });
   if (!employee) return { ok: false as const, error: "They're no longer on the payroll" };
-  await db.salaryEntry.create({ data: { employeeId: input.employeeId, ...entryData(input), recordedBy: who.userName } });
+  const entry = await db.salaryEntry.create({ data: { employeeId: input.employeeId, ...entryData(input), recordedBy: who.userName } });
+  // Pay handed over in cash on a day already closed comes off that day's
+  // drawer. Who earns what is the owner's business, so the reason doesn't say.
+  await syncCashCloses({ dates: [entry.date], reason: "A salary entry was added", by: { name: who.userName } });
   refresh();
   return { ok: true as const };
 }
@@ -158,8 +162,13 @@ export async function updateSalaryEntry(id: string, input: Omit<SalaryEntryInput
   if (!who.ok) return { ok: false as const, error: who.error };
   const problem = checkEntry(input);
   if (problem) return { ok: false as const, error: problem };
-  const updated = await db.salaryEntry.updateMany({ where: { id }, data: entryData(input) });
+  // Read first: the day it was on may be closed too, if the date is changed.
+  const before = await db.salaryEntry.findUnique({ where: { id }, select: { date: true } });
+  if (!before) return { ok: false as const, error: "This has been deleted" };
+  const data = entryData(input);
+  const updated = await db.salaryEntry.updateMany({ where: { id }, data });
   if (updated.count === 0) return { ok: false as const, error: "This has been deleted" };
+  await syncCashCloses({ dates: [before.date, data.date], reason: "A salary entry was changed", by: { name: who.userName } });
   refresh();
   return { ok: true as const };
 }

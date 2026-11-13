@@ -12,5 +12,9 @@ export default async function CashPage({ searchParams }: { searchParams: Promise
   const canManage = !!session?.user && session.user.role !== "CASHIER";
   // How much went on salaries is the owner's to see; others just learn that some did.
   const isOwner = session?.user?.role === "OWNER";
-  return <CashClient key={day} data={isOwner ? data : { ...data, salaries: 0 }} date={day} canManage={canManage} />;
+  // Starts over when the saved figures (or, on a day not closed yet, the opening
+  // carried over) change underneath -- a bill corrected on another screen -- so
+  // the boxes never hold figures the books have moved on from.
+  const key = data.saved ? `${day}|${data.saved.openingCash}|${data.saved.closingCash}` : `${day}|${data.opening?.amount ?? ""}`;
+  return <CashClient key={key} data={isOwner ? data : { ...data, salaries: 0 }} date={day} canManage={canManage} />;
 }

@@ -618,8 +618,43 @@ model CashCollection {
   notes         String   @default("")
   closedBy      String   @default("")
   createdAt     DateTime @default(now())
+  // What the app itself worked out for this day, kept so that a correction
+  // made after the day was closed (a bill moved from cash to card, a late
+  // sale, an expense added) can be carried into the figures above.
+  // The opening it carried over (the close before, plus any days in between
+  // never closed) and the closing it expected (opening + the day's cash). While
+  // the saved figure equals the one here it follows corrections and the two
+  // move together. Someone who typed a different figure counted the drawer:
+  // that stays as typed, and so does the figure here it was typed against.
+  carriedOpening  Float?
+  expectedClosing Float?
+  // The day's own cash in less cash out, as last worked out.
+  drawerNet       Float?
+  // All three are null on a close saved before these were kept.
+  adjustments   CashAdjustment[]
 
   @@unique([date, branchId])
+}
+
+// Each time a closed day's figures were changed by something corrected
+// afterwards: what moved, why and who did it. The Cash page lists these, so a
+// closing that no longer reads what was typed can always be explained.
+model CashAdjustment {
+  id            String   @id @default(cuid())
+  collectionId  String
+  collection    CashCollection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  reason        String   @default("")
+  by            String   @default("")
+  openingBefore Float    @default(0)
+  openingAfter  Float    @default(0)
+  // The day's own cash: taken in, less what was spent, handed back and banked.
+  netBefore     Float    @default(0)
+  netAfter      Float    @default(0)
+  closingBefore Float    @default(0)
+  closingAfter  Float    @default(0)
+  createdAt     DateTime @default(now())
+
+  @@index([collectionId])
 }
 
 // Cash the owner takes out of the drawer and puts in the bank. It leaves the

@@ -10,6 +10,7 @@ import { useApp } from "@/lib/context";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { PrintPortal } from "@/components/ui/PrintPortal";
 import { createReturn, deleteReturn, updateReturn } from "@/lib/actions/returns";
+import { closesCorrectedNote } from "@/lib/cash/note";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { deleteSale } from "@/lib/actions/sales";
 import { PAYMENT_STATUS, paymentStatusChipClass } from "@/lib/constants";
@@ -106,8 +107,9 @@ export function SalesClient({
         showToast(res.error, "error");
         return;
       }
+      const note = closesCorrectedNote(res.closesCorrected);
       showToast(
-        `${deletingSale.invoiceNo}${res.hadReturns ? " and its return" : ""} moved to Trash${deletingSale.stockDeducted ? " — stock put back" : ""}`,
+        `${deletingSale.invoiceNo}${res.hadReturns ? " and its return" : ""} moved to Trash${deletingSale.stockDeducted ? " — stock put back" : ""}${note ? `. ${note}` : ""}`,
         "success"
       );
       setDeletingSale(null);
@@ -141,11 +143,13 @@ export function SalesClient({
     setSavingReturn(true);
     try {
       const res = await createReturn({ saleId: returningSale.id, items, reason: returnReason, refundMethod });
-      showToast(`${res.returnNo} — refund ${formatCurrency(res.totalRefund)}`, "success");
+      if (!res.ok) { showToast(res.error, "error"); return; }
+      const note = closesCorrectedNote(res.closesCorrected);
+      showToast(`${res.returnNo} — refund ${formatCurrency(res.totalRefund)}${note ? `. ${note}` : ""}`, "success");
       setReturningSale(null);
       router.refresh();
-    } catch (e) {
-      showToast(e instanceof Error ? e.message : "Could not process return", "error");
+    } catch {
+      showToast("Could not process the return — check the connection and try again", "error");
     } finally {
       setSavingReturn(false);
     }
@@ -658,7 +662,8 @@ export function SalesClient({
                   try {
                     const res = await updateReturn(editingReturn.id, returnForm);
                     if (!res.ok) { showToast(res.error, "error"); return; }
-                    showToast(`${editingReturn.returnNo} updated`, "success");
+                    const note = closesCorrectedNote(res.closesCorrected);
+                    showToast(`${editingReturn.returnNo} updated${note ? `. ${note}` : ""}`, "success");
                     setEditingReturn(null);
                     setViewingSale(null);
                     router.refresh();

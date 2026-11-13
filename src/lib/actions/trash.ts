@@ -22,7 +22,7 @@ const PAGES: Record<TrashKind, string[]> = {
   supplier: ["/dashboard/suppliers"],
   lab: ["/dashboard/lab-orders"],
   invoice: ["/dashboard", "/dashboard/sales", "/dashboard/inventory", "/dashboard/customers", "/dashboard/cash"],
-  return: ["/dashboard/sales", "/dashboard/inventory"],
+  return: ["/dashboard/sales", "/dashboard/inventory", "/dashboard/cash"],
   expense: ["/dashboard/expenses", "/dashboard/cash"],
   prescription: ["/dashboard/prescriptions", "/dashboard/customers"],
   labOrder: ["/dashboard/lab-orders"],
@@ -69,7 +69,7 @@ export async function restoreItem(kind: TrashKind, id: string) {
       return { ok: false as const, error: "Only the owner can restore this" };
     }
     try {
-      await restoreSnapshot(id);
+      await restoreSnapshot(id, { id: session.user.id, name: session.user.name });
     } catch (e) {
       if (e instanceof TrashError) return { ok: false as const, error: e.message };
       throw e;

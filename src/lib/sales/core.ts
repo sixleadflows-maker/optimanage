@@ -3,10 +3,11 @@ import { db } from "@/lib/db";
 import type { Prisma } from "@/generated/prisma/client";
 import { trashPrescriptionRows, trashSalePaymentRow } from "@/lib/trash/snapshots";
 import { rxLensColumns, rxTextColumns, type RxLensFields, type RxTextColumns } from "@/lib/utils/rx";
-import { paymentFromParts, readSplit, splitTotal, type PaymentPart } from "@/lib/sales/paymentSplit";
+import { SPLIT_METHOD, paymentFromParts, readSplit, splitTotal, tillParts, type PaymentPart } from "@/lib/sales/paymentSplit";
 import { settleInvoice, type InvoiceStatus } from "@/lib/sales/settle";
 import { creditHeld } from "@/lib/sales/credit";
 import { CREDIT_METHOD } from "@/lib/constants";
+import { cashDayLabel, syncCashCloses } from "@/lib/cash/closes";
 
 export interface SaleCoreItem {
   // Left out for an item typed in at the till that isn't in the inventory --
@@ -324,6 +325,12 @@ export async function persistSale(input: PersistSaleInput, meta: PersistSaleMeta
     creditUsed > 0 && atTill <= 0
       ? { paymentMethod: CREDIT_METHOD, paymentSplit: [] }
       : paymentFromParts(input.paymentSplit ?? [], input.paymentMethod);
+  // "Split" with no amounts would be counted under no method at all, so the
+  // money would vanish from the cash figures. A bill made offline has already
+  // been handed over and is recorded as it came.
+  if (!meta.allowOversell && needsParts(payment.paymentMethod, payment.paymentSplit, atTill)) {
+    throw new SaleError(`Say how the ${formatRs(atTill)} being paid now is split between the methods`);
+  }
   if (payment.paymentSplit.length && Math.abs(splitTotal(payment.paymentSplit) - atTill) > 0.01) {
     throw new SaleError(
       `The split payment comes to ${formatRs(splitTotal(payment.paymentSplit))} but ${formatRs(atTill)} is being paid now — make the amounts match`
@@ -486,6 +493,15 @@ export async function persistSale(input: PersistSaleInput, meta: PersistSaleMeta
     }
   }
 
+  // A bill on a day already closed -- rung up after closing, or an old paper
+  // invoice entered -- changes that day's cash, so the close follows. Online
+  // orders are paid through the gateway, never into the drawer.
+  const closesCorrected = meta.source === "ONLINE" ? 0 : await syncCashCloses({
+    dates: [saleDate],
+    reason: `${sale.invoiceNo} (${cashDayLabel(saleDate)}) added`,
+    by: { id: meta.receivedById ?? meta.createdById },
+  });
+
   if (!meta.skipRevalidate) {
     revalidatePath("/dashboard");
     revalidatePath("/dashboard/sales");
@@ -505,6 +521,7 @@ export async function persistSale(input: PersistSaleInput, meta: PersistSaleMeta
     oversold: [...oversold],
     prescriptionIds: [...prescriptionIds],
     duplicate: false,
+    closesCorrected,
   };
 }
 
@@ -543,6 +560,7 @@ async function alreadySynced(sale: { id: string; invoiceNo: string; total: numbe
     oversold: [] as string[],
     prescriptionIds: await billPrescriptionIds(sale.id),
     duplicate: true,
+    closesCorrected: 0,
   };
 }
 
@@ -662,12 +680,14 @@ export async function reviseSale(saleId: string, input: ReviseSaleInput) {
   }
 
   const priced = await priceSale({ ...input, deliveryFee: sale.deliveryFee });
+  // Money received on the invoice after the sale. It's corrected on its own
+  // (reviseSalePayment), never here.
+  const later = await db.salePayment.aggregate({ where: { saleId }, _sum: { amount: true } });
+  const laterPaid = later._sum.amount ?? 0;
   let paid = sale.paid;
   let paymentMethod = input.paymentMethod ?? sale.paymentMethod;
   let paymentSplit = readSplit(sale.paymentSplit);
   if (input.payment) {
-    const later = await db.salePayment.aggregate({ where: { saleId }, _sum: { amount: true } });
-    const laterPaid = later._sum.amount ?? 0;
     if (laterPaid > priced.total + 0.01) {
       throw new SaleError(
         `${formatRs(laterPaid)} has been received on this invoice since the sale — more than the new ${formatRs(priced.total)} total. Refund the difference through Return & Refund instead.`
@@ -696,6 +716,15 @@ export async function reviseSale(saleId: string, input: ReviseSaleInput) {
     throw new SaleError(
       `The new total (Rs.${priced.total.toLocaleString()}) is less than the Rs.${sale.paid.toLocaleString()} already paid. Refund the difference through Return & Refund instead.`
     );
+  }
+  // One method picked for a bill that was split: all of what was taken at the
+  // till is that method now. Keeping the old parts would leave the cash
+  // figures exactly as they were, whatever the invoice said.
+  if (!input.payment && paymentSplit.length && input.paymentMethod !== undefined && input.paymentMethod !== sale.paymentMethod) {
+    paymentSplit = [];
+  }
+  if (needsParts(paymentMethod, paymentSplit, paid - laterPaid)) {
+    throw new SaleError(`Say how the ${formatRs(paid - laterPaid)} taken at the till was paid — pick the method, or the amount for each`);
   }
   const { balance, status } = settleInvoice(priced.total, paid, input.payment?.label ?? sale.paymentStatus);
   const customerId = input.customerId === undefined ? sale.customerId : input.customerId || null;
@@ -808,6 +837,18 @@ export async function reviseSale(saleId: string, input: ReviseSaleInput) {
     }
   }, { timeout: 20_000 });
 
+  // The day the bill is counted on (both days, if it was moved) may already be
+  // closed: carry the corrected cash into those closes and the ones after.
+  const closesCorrected = await syncCashCloses({
+    dates: [sale.date, date],
+    reason: tillChangeReason(
+      sale.invoiceNo,
+      { date: sale.date, parts: tillParts(sale, sale.paid - laterPaid) },
+      { date, parts: tillParts({ paymentMethod, paymentSplit }, paid - laterPaid) },
+    ),
+    by: { id: input.revisedById },
+  });
+
   revalidatePath("/dashboard");
   revalidatePath("/dashboard/sales");
   revalidatePath("/dashboard/inventory");
@@ -816,7 +857,7 @@ export async function reviseSale(saleId: string, input: ReviseSaleInput) {
   revalidatePath("/dashboard/prescriptions");
   if (input.prescriptions) revalidatePath("/dashboard/trash");
 
-  return { ok: true as const, invoiceNo: sale.invoiceNo, total: priced.total, paid, balance, prescriptionIds };
+  return { ok: true as const, invoiceNo: sale.invoiceNo, total: priced.total, paid, balance, prescriptionIds, closesCorrected };
 }
 
 /**
@@ -941,12 +982,18 @@ export async function recordSalePayment(
     await tx.sale.update({ where: { id: saleId }, data: { paid, balance, paymentStatus: status } });
   });
 
+  const closesCorrected = await syncCashCloses({
+    dates: [date],
+    reason: `${sale.invoiceNo} (${cashDayLabel(date)}): payment of ${formatRs(amount)} (${payment.method}) added`,
+    by: { id: payment.receivedById },
+  });
+
   revalidatePath("/dashboard");
   revalidatePath("/dashboard/sales");
   revalidatePath("/dashboard/customers");
   revalidatePath("/dashboard/cash");
 
-  return { ok: true as const, invoiceNo: sale.invoiceNo, total: sale.total, paid, balance };
+  return { ok: true as const, invoiceNo: sale.invoiceNo, total: sale.total, paid, balance, closesCorrected };
 }
 
 /**
@@ -1006,11 +1053,18 @@ export async function reviseSalePayment(
     await tx.sale.update({ where: { id: sale.id }, data: { paid, balance, paymentStatus: status } });
   });
 
+  // Both days, if the payment was moved from one to another.
+  const closesCorrected = await syncCashCloses({
+    dates: [payment.date, date],
+    reason: paymentChangeReason(sale.invoiceNo, payment, change.remove ? null : { date, amount, method }),
+    by: { id: change.removedById },
+  });
+
   revalidatePath("/dashboard");
   revalidatePath("/dashboard/sales");
   revalidatePath("/dashboard/customers");
   revalidatePath("/dashboard/cash");
-  return { ok: true as const, invoiceNo: sale.invoiceNo, paid, balance };
+  return { ok: true as const, invoiceNo: sale.invoiceNo, paid, balance, closesCorrected };
 }
 
 /**
@@ -1089,4 +1143,48 @@ export async function restoreSaleBalance(saleId: string) {
 
 function formatRs(n: number) {
   return `Rs.${Math.round(n).toLocaleString("en-PK")}`;
+}
+
+/** The "Split" choice, or a label like "Cash + Card", with no amounts saying how much went each way. */
+function needsParts(method: string, split: PaymentPart[], atTill: number) {
+  return !split.length && atTill > 0.009 && (method === SPLIT_METHOD || method.includes(" + "));
+}
+
+/**
+ * What a correction did to the money taken at the till, as it reads beside a
+ * closed day's figures: "INV-2026-348 (27 Oct): payment changed from Cash to Card".
+ */
+function tillChangeReason(
+  invoiceNo: string,
+  before: { date: Date; parts: PaymentPart[] },
+  after: { date: Date; parts: PaymentPart[] },
+) {
+  const taken = (parts: PaymentPart[]) => parts.filter((p) => p.amount > 0.009);
+  const methods = (parts: PaymentPart[]) => taken(parts).map((p) => p.method).join(" + ") || "nothing";
+  const changes: string[] = [];
+  if (cashDayLabel(before.date) !== cashDayLabel(after.date)) changes.push(`moved to ${cashDayLabel(after.date)}`);
+  if (methods(before.parts) !== methods(after.parts)) changes.push(`payment changed from ${methods(before.parts)} to ${methods(after.parts)}`);
+  const amountBefore = splitTotal(taken(before.parts));
+  const amountAfter = splitTotal(taken(after.parts));
+  if (Math.abs(amountBefore - amountAfter) > 0.009) {
+    changes.push(`amount taken at the till changed from ${formatRs(amountBefore)} to ${formatRs(amountAfter)}`);
+  } else if (taken(after.parts).length > 1 && taken(before.parts).some((p, i) => Math.abs(p.amount - (taken(after.parts)[i]?.amount ?? 0)) > 0.009)) {
+    changes.push(`split changed to ${taken(after.parts).map((p) => `${formatRs(p.amount)} ${p.method}`).join(" + ")}`);
+  }
+  return `${invoiceNo} (${cashDayLabel(before.date)})${changes.length ? `: ${changes.join(", ")}` : " edited"}`;
+}
+
+/** The same for a payment taken after the sale: "INV-2026-455 (12 Nov): payment of Rs.9,000 changed from Cash to Card". */
+function paymentChangeReason(
+  invoiceNo: string,
+  before: { date: Date; amount: number; method: string },
+  after: { date: Date; amount: number; method: string } | null,
+) {
+  const head = `${invoiceNo} (${cashDayLabel(before.date)}): payment of ${formatRs(before.amount)}`;
+  if (!after) return `${head} (${before.method}) removed`;
+  const changes: string[] = [];
+  if (before.method !== after.method) changes.push(`changed from ${before.method} to ${after.method}`);
+  if (Math.abs(before.amount - after.amount) > 0.009) changes.push(`amount changed to ${formatRs(after.amount)}`);
+  if (cashDayLabel(before.date) !== cashDayLabel(after.date)) changes.push(`moved to ${cashDayLabel(after.date)}`);
+  return `${head} ${changes.length ? changes.join(", ") : "edited"}`;
 }

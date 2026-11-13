@@ -260,6 +260,7 @@ export async function updateSale(input: UpdateSaleInput) {
       ...input,
       date: input.date ? new Date(input.date) : undefined,
       payment: input.paidAtTill === undefined ? undefined : { atTill: input.paidAtTill },
+      revisedById: session.user.id,
     });
   } catch (e) {
     if (e instanceof SaleError) return { ok: false as const, error: e.message };
@@ -422,14 +423,14 @@ export async function deleteSale(saleId: string) {
     return { ok: false as const, error: "Only the owner can delete an invoice" };
   }
   try {
-    const { hadReturns } = await trashInvoice(saleId, session.user.id);
+    const { hadReturns, closesCorrected } = await trashInvoice(saleId, session.user.id);
     revalidatePath("/dashboard");
     revalidatePath("/dashboard/sales");
     revalidatePath("/dashboard/inventory");
     revalidatePath("/dashboard/customers");
     revalidatePath("/dashboard/cash");
     revalidatePath("/dashboard/trash");
-    return { ok: true as const, hadReturns };
+    return { ok: true as const, hadReturns, closesCorrected };
   } catch (e) {
     if (e instanceof TrashError) return { ok: false as const, error: e.message };
     throw e;

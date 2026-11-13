@@ -6,6 +6,7 @@ import { auth } from "@/lib/auth";
 import { creditHeld } from "@/lib/sales/credit";
 import { trashCustomerCredit, TrashError } from "@/lib/trash/snapshots";
 import { CREDIT_METHOD, PAYMENT_METHODS } from "@/lib/constants";
+import { cashDayLabel, syncCashCloses } from "@/lib/cash/closes";
 
 export interface CreditInput {
   customerId: string;
@@ -37,9 +38,9 @@ async function checked(input: CreditInput) {
   const date = input.date ? new Date(input.date) : new Date();
   if (Number.isNaN(date.getTime())) return { ok: false as const, error: "Check the date and time" };
   if (date.getTime() > Date.now() + 5 * 60_000) return { ok: false as const, error: "The date can't be in the future" };
-  const customer = await db.customer.findUnique({ where: { id: input.customerId }, select: { id: true, active: true } });
+  const customer = await db.customer.findUnique({ where: { id: input.customerId }, select: { id: true, active: true, name: true, phone: true } });
   if (!customer?.active) return { ok: false as const, error: "This customer is no longer on the system" };
-  return { ok: true as const, amount, date, note: (input.note ?? "").trim() };
+  return { ok: true as const, amount, date, note: (input.note ?? "").trim(), who: customer.name.trim() || customer.phone || "Customer" };
 }
 
 /**
@@ -56,6 +57,8 @@ export async function addCustomerCredit(input: CreditInput): Promise<Result> {
   await db.customerCredit.create({
     data: { customerId: input.customerId, amount: c.amount, method: input.method, date: c.date, note: c.note, recordedBy: session.user.name ?? "" },
   });
+  // Entered for a day already closed, it goes into that day's drawer.
+  await syncCashCloses({ dates: [c.date], reason: `Advance received: ${rs(c.amount)} ${input.method}, ${c.who}`, by: { name: session.user.name } });
   refresh(input.customerId);
   return { ok: true, held: await creditHeld(input.customerId) };
 }
@@ -74,6 +77,7 @@ export async function refundCustomerCredit(input: CreditInput): Promise<Result> 
   await db.customerCredit.create({
     data: { customerId: input.customerId, amount: -c.amount, method: input.method, date: c.date, note: c.note, recordedBy: session.user.name ?? "" },
   });
+  await syncCashCloses({ dates: [c.date], reason: `Advance handed back: ${rs(c.amount)} ${input.method}, ${c.who}`, by: { name: session.user.name } });
   refresh(input.customerId);
   return { ok: true, held: await creditHeld(input.customerId) };
 }
@@ -106,6 +110,12 @@ export async function updateCustomerCredit(id: string, input: Omit<CreditInput, 
     };
   }
   await db.customerCredit.update({ where: { id }, data: { amount, method: input.method, date: c.date, note: c.note } });
+  const said = (e: { amount: number; method: string; date: Date }) => `${rs(Math.abs(e.amount))} ${e.method} (${cashDayLabel(e.date)})`;
+  await syncCashCloses({
+    dates: [entry.date, c.date],
+    reason: `${paidIn ? "Advance received" : "Advance refund"} changed: ${said(entry)} → ${said({ amount, method: input.method, date: c.date })}, ${c.who}`,
+    by: { name: session.user.name },
+  });
   refresh(entry.customerId);
   return { ok: true, held: await creditHeld(entry.customerId) };
 }
